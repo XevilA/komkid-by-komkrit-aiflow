@@ -3103,6 +3103,90 @@ ${input.content}`.slice(0, 275);
   };
 }
 
+// server/auth.ts
+import crypto from "node:crypto";
+var TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+function getAuthSecret() {
+  const configured = getSettingValue("admin_auth_secret", "ADMIN_AUTH_SECRET");
+  if (configured) return configured;
+  return `komkrit-admin-hmac-${process.env.VERCEL_PROJECT_ID || "local-secret-key-2026"}`;
+}
+function getAdminCredentials() {
+  const username = getSettingValue("admin_username", "ADMIN_USERNAME") || "admin";
+  const password = getSettingValue("admin_password", "ADMIN_PASSWORD") || "komkrit2026";
+  return { username, password };
+}
+function safeEqual(a, b) {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+function verifyCredentials(usernameInput, passwordInput) {
+  const { username, password } = getAdminCredentials();
+  return safeEqual(usernameInput.trim(), username) && safeEqual(passwordInput, password);
+}
+function createAdminToken(username) {
+  const expiresAt = Date.now() + TOKEN_TTL_MS;
+  const payload = Buffer.from(
+    JSON.stringify({ u: username, exp: expiresAt }),
+    "utf8"
+  ).toString("base64url");
+  const sig = crypto.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  return {
+    token: `${payload}.${sig}`,
+    expiresAt
+  };
+}
+function verifyAdminToken(token) {
+  if (!token || !token.includes(".")) return { valid: false };
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return { valid: false };
+  const expectedSig = crypto.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  if (!safeEqual(sig, expectedSig)) return { valid: false };
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!parsed?.exp || Date.now() > Number(parsed.exp)) {
+      return { valid: false };
+    }
+    return { valid: true, username: String(parsed.u || "admin") };
+  } catch {
+    return { valid: false };
+  }
+}
+function extractBearerToken(req) {
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Bearer ")) {
+    return header.slice(7).trim();
+  }
+  return null;
+}
+function isRequestAdmin(req) {
+  const token = extractBearerToken(req);
+  return verifyAdminToken(token).valid;
+}
+function requireAdminAuth(req, res, next) {
+  const token = extractBearerToken(req);
+  const check = verifyAdminToken(token);
+  if (!check.valid) {
+    res.status(401).json({ error: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25 (Admin) \u0E01\u0E48\u0E2D\u0E19\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E2A\u0E48\u0E27\u0E19\u0E19\u0E35\u0E49" });
+    return;
+  }
+  next();
+}
+function updateAdminCredentials(newUsername, newPassword) {
+  const upsert = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+  if (newUsername.trim()) {
+    upsert.run("admin_username", newUsername.trim());
+  }
+  if (newPassword.trim()) {
+    upsert.run("admin_password", newPassword.trim());
+  }
+}
+
 // server/index.ts
 initDatabase();
 var app = express();
@@ -3120,6 +3204,53 @@ app.get("/api/health", (_req, res) => {
     node: process.version,
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
+});
+app.use("/api", (req, res, next) => {
+  const p = req.path;
+  const m = req.method.toUpperCase();
+  if (m === "GET" && p === "/health") return next();
+  if (p === "/auth/login" || p === "/auth/me") return next();
+  if (m === "GET" && (p === "/posts" || /^\/posts\/\d+$/.test(p))) return next();
+  if (m === "POST" && /^\/posts\/\d+\/comments$/.test(p)) return next();
+  if (m === "GET" && p === "/pillars") return next();
+  if (m === "POST" && (p === "/subscribers" || p === "/contacts" || p === "/surveys")) {
+    return next();
+  }
+  return requireAdminAuth(req, res, next);
+});
+app.post("/api/auth/login", (req, res) => {
+  const { username = "", password = "" } = req.body || {};
+  if (!verifyCredentials(String(username), String(password))) {
+    res.status(401).json({ error: "\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E2B\u0E23\u0E37\u0E2D\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" });
+    return;
+  }
+  const { token, expiresAt } = createAdminToken(String(username).trim());
+  res.json({ ok: true, token, username: String(username).trim(), expiresAt });
+});
+app.get("/api/auth/me", (req, res) => {
+  const check = verifyAdminToken(extractBearerToken(req));
+  if (!check.valid) {
+    res.status(401).json({ authenticated: false });
+    return;
+  }
+  res.json({ authenticated: true, username: check.username });
+});
+app.put("/api/auth/password", (req, res) => {
+  const { currentPassword = "", newUsername = "", newPassword = "" } = req.body || {};
+  const check = verifyAdminToken(extractBearerToken(req));
+  if (!check.valid || !verifyCredentials(check.username || "admin", String(currentPassword))) {
+    res.status(400).json({ error: "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19\u0E1B\u0E31\u0E08\u0E08\u0E38\u0E1A\u0E31\u0E19\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" });
+    return;
+  }
+  if (!String(newPassword).trim() || String(newPassword).trim().length < 6) {
+    res.status(400).json({ error: "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19\u0E43\u0E2B\u0E21\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 6 \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23" });
+    return;
+  }
+  updateAdminCredentials(String(newUsername || check.username || "admin"), String(newPassword));
+  const { token, expiresAt } = createAdminToken(
+    String(newUsername || check.username || "admin").trim()
+  );
+  res.json({ ok: true, token, expiresAt });
 });
 var storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -3261,6 +3392,7 @@ app.get("/api/posts", (req, res) => {
   const { category, type, status, q } = req.query;
   const conditions = [];
   const params = [];
+  const isAdmin = isRequestAdmin(req);
   if (category && category !== "all") {
     conditions.push("p.category = ?");
     params.push(String(category));
@@ -3269,7 +3401,9 @@ app.get("/api/posts", (req, res) => {
     conditions.push("p.content_type = ?");
     params.push(String(type));
   }
-  if (status && status !== "all") {
+  if (!isAdmin) {
+    conditions.push("p.status = 'published'");
+  } else if (status && status !== "all") {
     conditions.push("p.status = ?");
     params.push(String(status));
   }
@@ -3300,7 +3434,7 @@ app.get("/api/posts/:id", (req, res) => {
     `SELECT p.*, (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments_count
        FROM posts p WHERE p.id = ?`
   ).get(id);
-  if (!row) {
+  if (!row || !isRequestAdmin(req) && row.status !== "published") {
     res.status(404).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" });
     return;
   }

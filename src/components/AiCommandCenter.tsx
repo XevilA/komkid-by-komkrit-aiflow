@@ -102,6 +102,7 @@ export const AiCommandCenter: React.FC<Props> = ({
   );
   const [activeAgentTab, setActiveAgentTab] = useState<string>('overview');
   const [blueprintModalOpen, setBlueprintModalOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Dispatch Form
   const [topic, setTopic] = useState('');
@@ -375,253 +376,200 @@ export const AiCommandCenter: React.FC<Props> = ({
   };
 
   const agentTabs = [
-    { id: 'overview', label: 'ศูนย์อนุมัติ (CEO • Content • QA • Human)', icon: <UserCheck className="w-3.5 h-3.5" /> },
-    { id: 'research', label: '01 Research', icon: <Search className="w-3.5 h-3.5" /> },
-    { id: 'script', label: '02 Idea & Script', icon: <Lightbulb className="w-3.5 h-3.5" /> },
-    { id: 'design', label: '03 Content Design', icon: <Palette className="w-3.5 h-3.5" /> },
-    { id: 'visual', label: '04 Visual & Infographic', icon: <ImageIcon className="w-3.5 h-3.5" /> },
-    { id: 'video', label: '05 Video Storyboard', icon: <Film className="w-3.5 h-3.5" /> },
-    { id: 'audio', label: '06 Audio & TTS', icon: <Mic className="w-3.5 h-3.5" /> },
-    { id: 'qa_analytics', label: '07 QA & 08 Analytics', icon: <BarChart3 className="w-3.5 h-3.5" /> },
-    { id: 'omnichannel', label: 'เผยแพร่ 8 ช่องทาง', icon: <Share2 className="w-3.5 h-3.5" /> },
+    { id: 'overview', label: 'ตรวจ & โพสต์ขึ้นเว็บ', icon: <UserCheck className="w-3.5 h-3.5" /> },
+    { id: 'script', label: 'บทความ & สคริปต์', icon: <Lightbulb className="w-3.5 h-3.5" /> },
+    { id: 'visual', label: 'รูปภาพปก AI', icon: <ImageIcon className="w-3.5 h-3.5" /> },
+    { id: 'video', label: 'วิดีโอ AI', icon: <Film className="w-3.5 h-3.5" /> },
+    { id: 'audio', label: 'เสียงพากย์', icon: <Mic className="w-3.5 h-3.5" /> },
+    { id: 'omnichannel', label: 'แชร์ 8 ช่องทาง', icon: <Share2 className="w-3.5 h-3.5" /> },
+    { id: 'research', label: 'ข้อมูลอ้างอิง', icon: <Search className="w-3.5 h-3.5" /> },
+    { id: 'design', label: 'โครงสไลด์', icon: <Palette className="w-3.5 h-3.5" /> },
+    { id: 'qa_analytics', label: 'คะแนนคุณภาพ', icon: <BarChart3 className="w-3.5 h-3.5" /> },
   ];
 
   return (
-    <div className="space-y-6">
-      {/* TOP COMMAND BANNER (Matches Image 1 & Image 5 Agent CEO Header) */}
-      <div className="rounded-2xl bg-gradient-to-r from-[#0a1d37] via-[#12315b] to-[#0d2546] p-5 sm:p-6 text-white shadow-md border border-[#214a80]">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-4">
-            <img
-              src="/images/avatar-komkrit.png"
-              alt="Agent CEO"
-              className="h-14 w-14 rounded-full border-2 border-[#f59e0b] shrink-0"
-            />
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-[#f59e0b] px-3 py-0.5 text-[11px] font-extrabold text-[#0b1e38]">
-                AGENT CEO (COMMAND CENTER) • AI + HUMAN = GREATER IMPACT
-              </div>
-              <h2 className="mt-1.5 text-xl sm:text-2xl font-extrabold">
-                ระบบ AGENT อัจฉริยะ สร้างคอนเทนต์การศึกษา ครบวงจร ด้วย AI
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
-                สั่งงาน วางแผน ติดตาม ตรวจสอบ วิเคราะห์ และตัดสินใจ <strong className="text-amber-300">ผ่าน CEO คนเดียว</strong> เชื่อมฐานความรู้ ({kbCount} รายการ)
-              </p>
-            </div>
+    <div className="space-y-5">
+      {/* CLEAN, MINIMAL AI CREATION CARD */}
+      <div className="rounded-2xl bg-white p-5 sm:p-6 shadow-2xs border border-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 className="text-base sm:text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-[#f59e0b]" />
+              สร้างบทความและคอนเทนต์ใหม่ด้วย AI
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              พิมพ์หัวข้อที่ต้องการสร้าง แล้วกดปุ่มเดียว AI จะร่างบทความ สคริปต์ และแคปชันให้พร้อมตรวจก่อนโพสต์
+            </p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {onOpenFlowStudio && (
-              <button
-                type="button"
-                onClick={onOpenFlowStudio}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-sky-600 transition cursor-pointer"
-              >
-                <Clapperboard className="w-3.5 h-3.5" />
-                Google Flow • Veo & AI Chat
-              </button>
-            )}
-            {onOpenSettings && (
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 px-3.5 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/30 transition cursor-pointer"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                ตั้งค่า API Keys
-              </button>
-            )}
-            <button
-              onClick={onGoToKnowledgeBase}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 border border-white/20 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20 transition cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-amber-300" />
-              ฐานความรู้ ({kbCount})
-            </button>
-            <button
-              onClick={() => setBlueprintModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-3.5 py-2 text-xs font-extrabold text-[#0b1e38] hover:brightness-105 transition cursor-pointer"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              ดูผังต้นฉบับ (LINE Blueprints)
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+          >
+            {showAdvanced ? 'ซ่อนตัวเลือกเพิ่มเติม ▲' : '⚙️ ตัวเลือกเพิ่มเติม ▼'}
+          </button>
         </div>
 
-        {/* CEO DISPATCH FORM */}
-        <form
-          onSubmit={handleDispatchCeo}
-          className="mt-5 rounded-xl bg-white/10 backdrop-blur-xs border border-white/15 p-4 space-y-3"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <label className="text-xs font-extrabold text-amber-300 flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4" />
-              สั่งการ CEO AGENT: ระบุหัวข้อ ไอเดีย หรือโจทย์คอนเทนต์ที่ต้องการผลิต
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {QUICK_PROMPTS.map((qp, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setTopic(qp)}
-                  className="rounded-full bg-white/10 hover:bg-amber-400 hover:text-[#0b1e38] px-2.5 py-0.5 text-[10.5px] font-semibold text-slate-200 transition cursor-pointer"
-                >
-                  ตัวอย่าง #{idx + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-
+        <form onSubmit={handleDispatchCeo} className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-2.5">
             <input
               type="text"
               required
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="พิมพ์โจทย์หรือหัวข้อ เช่น แนวทางพัฒนาครูไทยใช้ AI ออกแบบการสอนรายบุคคล..."
-              className="flex-1 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0d2546] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#f59e0b]"
+              placeholder="พิมพ์หัวข้อที่ต้องการ เช่น แนวทางใช้ AI ช่วยครูไทยลดภาระงานเอกสาร..."
+              className="flex-1 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm font-medium text-[#0d2546] placeholder:text-slate-400 focus:border-[#0d2546] focus:bg-white focus:outline-none transition"
             />
             <button
               type="submit"
               disabled={running}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#f59e0b] to-[#ea8810] px-6 py-2.5 text-sm font-extrabold text-[#0b1e38] shadow-md hover:brightness-105 transition cursor-pointer disabled:opacity-60 shrink-0"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0d2546] px-6 py-3 text-sm font-bold text-white hover:bg-[#163a6b] transition cursor-pointer disabled:opacity-60 shrink-0"
             >
-              <Bot className="w-4 h-4" />
-              {running ? 'ทีม AI กำลังทำงาน...' : 'สั่งงานทีม AI Agents ทันที'}
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              {running ? 'กำลังสร้าง...' : 'สร้างคอนเทนต์'}
             </button>
           </div>
 
-          {/* 4 Selectors matching Input Source, Category, Learner Target, 5-Pillar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
-            <div>
-              <span className="block text-[10.5px] text-slate-300 mb-0.5">
-                INPUT / IDEA SOURCE (แหล่งข้อมูล)
-              </span>
-              <select
-                value={inputSource}
-                onChange={(e) => setInputSource(e.target.value)}
-                className="w-full rounded-lg bg-[#0b1e38]/90 border border-white/20 px-2.5 py-1.5 text-xs text-white focus:outline-none"
+          {/* Subtle Quick Topic Ideas */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 mr-1">ไอเดียตัวอย่าง:</span>
+            {QUICK_PROMPTS.map((qp, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setTopic(qp)}
+                className="rounded-full bg-slate-100 hover:bg-amber-100 hover:text-amber-950 px-3 py-1 text-[11px] font-medium text-slate-600 transition cursor-pointer truncate max-w-[240px]"
               >
-                {INPUT_SOURCES.map((s) => (
-                  <option key={s.id} value={s.label}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <span className="block text-[10.5px] text-slate-300 mb-0.5">
-                หมวดหมู่บทความหน้าเว็บ
-              </span>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as CategoryId)}
-                className="w-full rounded-lg bg-[#0b1e38]/90 border border-white/20 px-2.5 py-1.5 text-xs text-white focus:outline-none"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nameTh} ({c.nameEn})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <span className="block text-[10.5px] text-slate-300 mb-0.5">
-                USER / LEARNER (กลุ่มเป้าหมาย)
-              </span>
-              <select
-                value={targetAudience}
-                onChange={(e) => setTargetAudience(e.target.value)}
-                className="w-full rounded-lg bg-[#0b1e38]/90 border border-white/20 px-2.5 py-1.5 text-xs text-white focus:outline-none"
-              >
-                <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
-                <option value="นักเรียน / นักศึกษา">นักเรียน / นักศึกษา</option>
-                <option value="ผู้ปกครอง">ผู้ปกครอง</option>
-                <option value="ผู้บริหารสถานศึกษา & ผู้สนใจทั่วไป">
-                  ผู้บริหารสถานศึกษา & ผู้สนใจทั่วไป
-                </option>
-              </select>
-            </div>
-
-            <div>
-              <span className="block text-[10.5px] text-slate-300 mb-0.5">
-                เป้าหมาย 5-Pillar Business Model
-              </span>
-              <select
-                value={businessPillar}
-                onChange={(e) => setBusinessPillar(e.target.value)}
-                className="w-full rounded-lg bg-[#0b1e38]/90 border border-white/20 px-2.5 py-1.5 text-xs text-white focus:outline-none"
-              >
-                <option>1. VIEWS | ยอดวิว (YouTube • TikTok • Facebook)</option>
-                <option>2. PRODUCTS | สินค้า (e-Book • คอร์ส • Affiliate)</option>
-                <option>3. SPONSORS | สปอนเซอร์ (Brand Partnership)</option>
-                <option>4. BUSINESS | ธุรกิจ (Consulting • Workshop • AI)</option>
-                <option>5. COMMUNITY | ชุมชน (สมาชิก VIP • เครือข่ายคมคิด)</option>
-              </select>
-            </div>
+                {qp}
+              </button>
+            ))}
           </div>
 
-          {/* Real LLM Engine Selector & Real Cover Image Option */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1.5 border-t border-white/10">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-extrabold text-amber-300">
-                เลือก Real AI Engine:
-              </span>
-              <select
-                value={llmProvider}
-                onChange={(e) => setLlmProvider(e.target.value as LlmProviderId)}
-                className="rounded-lg bg-[#0b1e38] border border-amber-400/40 px-2.5 py-1 text-xs font-bold text-white focus:outline-none"
-              >
-                <option value="auto">Auto Router (ใช้คีย์จริงที่ตั้งค่าไว้)</option>
-                <option value="gemini">Google Gemini (3.8 Flash / 4 Argon)</option>
-                <option value="claude">Anthropic Claude (Sonnet 4 / Opus 4)</option>
-                <option value="deepseek">DeepSeek (V3 / R1 Reasoner)</option>
-                <option value="openai">OpenAI ChatGPT (GPT-4.1 / GPT-4o)</option>
-                <option value="openai_compatible">Custom / Local OpenAI Server</option>
-              </select>
-            </div>
+          {/* Collapsible Advanced Options (Hidden by default to eliminate clutter!) */}
+          {showAdvanced && (
+            <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-4 space-y-3 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    หมวดหมู่บทความ
+                  </span>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as CategoryId)}
+                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
+                  >
+                    {CATEGORIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nameTh}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <label className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoGenerateCoverImage}
-                onChange={(e) => setAutoGenerateCoverImage(e.target.checked)}
-                className="accent-amber-400"
-              />
-              สร้างภาพปกจริงอัตโนมัติ (Gemini Nano Banana 2.1 / DALL-E 3)
-            </label>
-          </div>
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    กลุ่มผู้อ่านเป้าหมาย
+                  </span>
+                  <select
+                    value={targetAudience}
+                    onChange={(e) => setTargetAudience(e.target.value)}
+                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
+                  >
+                    <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
+                    <option value="นักเรียน / นักศึกษา">นักเรียน / นักศึกษา</option>
+                    <option value="ผู้ปกครอง">ผู้ปกครอง</option>
+                    <option value="ผู้บริหารสถานศึกษา & ผู้สนใจทั่วไป">
+                      ผู้บริหารสถานศึกษา & ผู้สนใจทั่วไป
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    เลือกโมเดล AI (Real API)
+                  </span>
+                  <select
+                    value={llmProvider}
+                    onChange={(e) => setLlmProvider(e.target.value as LlmProviderId)}
+                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none"
+                  >
+                    <option value="auto">อัตโนมัติ (ตาม API Key ที่ตั้งไว้)</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="claude">Anthropic Claude</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openai">OpenAI ChatGPT</option>
+                    <option value="openai_compatible">Custom OpenAI Server</option>
+                  </select>
+                </div>
+
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    แหล่งที่มาของประเด็น
+                  </span>
+                  <select
+                    value={inputSource}
+                    onChange={(e) => setInputSource(e.target.value)}
+                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
+                  >
+                    {INPUT_SOURCES.map((s) => (
+                      <option key={s.id} value={s.label}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoGenerateCoverImage}
+                    onChange={(e) => setAutoGenerateCoverImage(e.target.checked)}
+                    className="accent-[#0d2546]"
+                  />
+                  สร้างรูปภาพปก AI จริงพร้อมกันอัตโนมัติ
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setBlueprintModalOpen(true)}
+                  className="text-xs font-semibold text-slate-500 hover:text-[#0d2546] underline cursor-pointer"
+                >
+                  ดูผังสถาปัตยกรรมระบบ AI
+                </button>
+              </div>
+            </div>
+          )}
 
           {errorMsg && (
-            <div className="mt-2 rounded-xl bg-rose-950/90 border border-rose-400/60 p-3 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
               {onOpenSettings && (
                 <button
                   type="button"
                   onClick={onOpenSettings}
-                  className="inline-flex items-center gap-1 rounded-lg bg-amber-400 px-3 py-1.5 text-[11px] font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer shrink-0"
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#0d2546] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#163a6b] cursor-pointer shrink-0"
                 >
-                  <KeyRound className="w-3.5 h-3.5" /> ไปตั้งค่า API Keys
+                  <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Keys
                 </button>
               )}
             </div>
           )}
 
           {running && (
-            <div className="mt-3 rounded-xl bg-[#08172c] border border-amber-400/50 p-3.5 flex items-center gap-3 animate-agent-glow">
-              <RefreshCw className="w-5 h-5 text-amber-400 animate-spin shrink-0" />
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3.5 flex items-center gap-3">
+              <RefreshCw className="w-5 h-5 text-amber-600 animate-spin shrink-0" />
               <div className="flex-1">
-                <div className="text-xs font-extrabold text-amber-300">
+                <div className="text-xs font-bold text-amber-950">
                   {AGENT_PIPELINE_STEPS[stepIdx]}
                 </div>
-                <div className="mt-1.5 h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+                <div className="mt-1.5 h-1.5 w-full rounded-full bg-amber-200/70 overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-amber-400 to-emerald-400 transition-all duration-300"
+                    className="h-full bg-[#0d2546] transition-all duration-300"
                     style={{
                       width: `${((stepIdx + 1) / AGENT_PIPELINE_STEPS.length) * 100}%`,
                     }}

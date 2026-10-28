@@ -45,10 +45,7 @@ export type PublicTab =
 interface Props {
   posts: Post[];
   pillars: BusinessPillarItem[];
-  pendingApprovalsCount: number;
   onOpenPost: (id: number) => void;
-  onGoToAdmin: (initialTab?: string) => void;
-  onQuickCreatePost: () => void;
 }
 
 const CATEGORY_ICONS: Record<CategoryId, React.ReactNode> = {
@@ -64,10 +61,7 @@ const CATEGORY_ICONS: Record<CategoryId, React.ReactNode> = {
 export const PublicWebsite: React.FC<Props> = ({
   posts,
   pillars,
-  pendingApprovalsCount,
   onOpenPost,
-  onGoToAdmin,
-  onQuickCreatePost,
 }) => {
   const [activeTab, setActiveTab] = useState<PublicTab>('home');
   const [selectedCategory, setSelectedCategory] = useState<CategoryId | 'all'>('all');
@@ -296,36 +290,15 @@ export const PublicWebsite: React.FC<Props> = ({
 
             <button
               onClick={() => setNewsletterOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[#0d2546] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#173966] transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#0d2546] px-4 py-2 text-xs font-semibold text-white hover:bg-[#173966] transition cursor-pointer"
             >
               <Mail className="w-3.5 h-3.5" />
               สมัครรับข่าวสาร
             </button>
-
-            <button
-              onClick={() => onGoToAdmin('ai-command')}
-              className="relative inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#f59e0b] to-[#d97706] px-3.5 py-2 text-xs font-bold text-[#0b1e38] shadow-xs hover:brightness-105 transition cursor-pointer"
-              title="เข้าสู่ระบบหลังบ้าน CRUD & AI Multi-Agent Command Center"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              หลังบ้าน & AI Studio
-              {pendingApprovalsCount > 0 && (
-                <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#0d2546] px-1 text-[10px] font-bold text-amber-300">
-                  {pendingApprovalsCount}
-                </span>
-              )}
-            </button>
           </div>
 
-          {/* Mobile Right Icons (Matches Image 3: Search + Admin shortcut + Hamburger) */}
+          {/* Mobile Right Icons (Search + Hamburger) */}
           <div className="flex lg:hidden items-center gap-1.5">
-            <button
-              onClick={() => onGoToAdmin('ai-command')}
-              className="inline-flex items-center gap-1 rounded-full bg-amber-400/95 px-2.5 py-1.5 text-[11px] font-bold text-[#0d2546] shadow-2xs cursor-pointer"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>หลังบ้าน/AI</span>
-            </button>
             <button
               onClick={() => setMobileSearchOpen((v) => !v)}
               className="p-2 rounded-full text-[#0d2546] hover:bg-slate-100 cursor-pointer"
@@ -380,24 +353,15 @@ export const PublicWebsite: React.FC<Props> = ({
                 <ChevronRight className="w-4 h-4 opacity-60" />
               </button>
             ))}
-            <div className="pt-2 grid grid-cols-2 gap-2 border-t border-slate-100">
+            <div className="pt-2 border-t border-slate-100">
               <button
                 onClick={() => {
                   setMobileMenuOpen(false);
                   setNewsletterOpen(true);
                 }}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-[#0d2546] cursor-pointer"
+                className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-[#0d2546] py-2.5 text-xs font-bold text-white cursor-pointer"
               >
-                <Mail className="w-3.5 h-3.5" /> สมัครรับข่าวสาร
-              </button>
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onGoToAdmin('posts');
-                }}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[#f59e0b] py-2.5 text-xs font-bold text-[#0d2546] cursor-pointer"
-              >
-                <PlusCircle className="w-3.5 h-3.5" /> จัดการโพสต์ CRUD
+                <Mail className="w-3.5 h-3.5" /> สมัครรับข่าวสารฟรี
               </button>
             </div>
           </div>
@@ -438,11 +402,10 @@ export const PublicWebsite: React.FC<Props> = ({
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={onQuickCreatePost}
+                    onClick={() => setActiveTab('about')}
                     className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/90 border border-[#0d2546]/20 px-4 py-2 text-xs font-bold text-[#0d2546] hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
                   >
-                    <PlusCircle className="w-3.5 h-3.5 text-[#e88d14]" />
-                    โพสต์ข่าวสาร/บทความใหม่
+                    เกี่ยวกับ คมคิด
                   </button>
                 </div>
               </div>
@@ -860,13 +823,6 @@ export const PublicWebsite: React.FC<Props> = ({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => onGoToAdmin('ai-command')}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3.5 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-200 transition cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      สร้างคอนเทนต์ใหม่ด้วยทีม AI Agent
-                    </button>
-                    <button
                       onClick={() => setActiveTab('articles')}
                       className="text-xs font-bold text-[#0d2546] hover:underline cursor-pointer"
                     >
@@ -976,13 +932,6 @@ export const PublicWebsite: React.FC<Props> = ({
                   รวมบทวิเคราะห์ ไอเดีย และนวัตกรรมเพื่อการพัฒนาคนและสังคม ({filteredPosts.length} รายการ)
                 </p>
               </div>
-              <button
-                onClick={onQuickCreatePost}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[#0d2546] px-4 py-2 text-xs font-bold text-white hover:bg-[#183b6b] transition cursor-pointer"
-              >
-                <PlusCircle className="w-4 h-4 text-[#fbbf24]" />
-                สร้างบทความ/ข่าวสารใหม่ (CRUD)
-              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -1042,15 +991,9 @@ export const PublicWebsite: React.FC<Props> = ({
                   รับชมคลิปวิเคราะห์การศึกษา นวัตกรรม AI และเบื้องหลังการพัฒนาคน
                 </p>
               </div>
-              <button
-                onClick={() => onGoToAdmin('ai-command')}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[#f59e0b] px-4 py-2 text-xs font-bold text-[#0d2546] cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" /> สร้างสคริปต์วิดีโอด้วย AI Video Agent
-              </button>
             </div>
 
-            {/* Featured YouTube Player from LINE Chat */}
+            {/* Featured YouTube Player */}
             <div className="rounded-2xl bg-[#0b1f3a] text-white overflow-hidden shadow-lg grid grid-cols-1 lg:grid-cols-12">
               <div className="lg:col-span-7 aspect-video bg-black">
                 <iframe
@@ -1066,18 +1009,20 @@ export const PublicWebsite: React.FC<Props> = ({
                   ▶ YouTube Official Highlight
                 </span>
                 <h3 className="mt-3 text-xl sm:text-2xl font-extrabold leading-snug">
-                  คิดต่างอย่างสร้างสรรค์: ระบบ AI Multi-Agent เพื่อการศึกษาและอนาคตที่ดีกว่า
+                  คิดต่างอย่างสร้างสรรค์: มุมมองใหม่ด้านการศึกษา เทคโนโลยี และการพัฒนาสังคมไทย
                 </h3>
                 <p className="mt-3 text-sm text-slate-300 leading-relaxed font-body">
-                  เจาะลึกแนวคิดการผสานพลังของทีม AI อัจฉริยะ (CEO Agent, Content Agent, QA Agent) ร่วมกับการตัดสินใจของมนุษย์ (Human Approval) เพื่อยกระดับสื่อความรู้ไทย
+                  เจาะลึกแนวคิดการนำเทคโนโลยีและ AI มาช่วยยกระดับการเรียนรู้ของครู นักเรียน และผู้เรียนทุกช่วงวัย เพื่อสร้างโอกาสทางการศึกษาที่เข้าถึงได้จริง
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2.5">
-                  <button
-                    onClick={() => onGoToAdmin('ai-command')}
-                    className="rounded-full bg-[#f59e0b] px-5 py-2 text-xs font-extrabold text-[#0b1f3a] hover:brightness-105 cursor-pointer"
+                  <a
+                    href="https://www.youtube.com/watch?v=VxQwQ9vQkkc"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full bg-[#f59e0b] px-5 py-2 text-xs font-extrabold text-[#0b1f3a] hover:brightness-105"
                   >
-                    ทดลองใช้ระบบ AI Content Studio →
-                  </button>
+                    รับชมบน YouTube ↗
+                  </a>
                 </div>
               </div>
             </div>
@@ -1392,12 +1337,6 @@ export const PublicWebsite: React.FC<Props> = ({
                 {item.label}
               </button>
             ))}
-            <button
-              onClick={() => onGoToAdmin('dashboard')}
-              className="text-[#fbbf24] font-bold hover:underline cursor-pointer"
-            >
-              ระบบหลังบ้าน (Admin & AI)
-            </button>
           </div>
 
           {/* Right Motto */}

@@ -5,16 +5,26 @@ import {
   BusinessPillarItem,
   AiWorkflow,
 } from './types';
-import { api, DashboardStats } from './api';
+import { api, DashboardStats, getStoredAdminToken } from './api';
 import { PublicWebsite } from './components/PublicWebsite';
 import { AdminLayout } from './components/AdminLayout';
+import { AdminLoginScreen } from './components/AdminLoginScreen';
 import { ArticleReaderModal } from './components/ArticleReaderModal';
+
+function isUrlAdminRoute(): boolean {
+  return (
+    window.location.pathname.startsWith('/admin') ||
+    window.location.hash.startsWith('#admin')
+  );
+}
 
 export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'public' | 'admin'>(() =>
-    window.location.hash.startsWith('#admin') ? 'admin' : 'public'
+    isUrlAdminRoute() ? 'admin' : 'public'
   );
   const [adminMenu, setAdminMenu] = useState<string>('dashboard');
+  const [adminUsername, setAdminUsername] = useState<string>('');
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [workflows, setWorkflows] = useState<AiWorkflow[]>([]);
@@ -32,7 +42,57 @@ export const App: React.FC = () => {
   const [initialEditPost, setInitialEditPost] = useState<Post | null>(null);
   const [openCreateImmediately, setOpenCreateImmediately] = useState(false);
 
-  const loadAll = useCallback(async () => {
+  // Sync browser back/forward navigation between `/` and `/admin`
+  useEffect(() => {
+    const syncRoute = () => {
+      setViewMode(isUrlAdminRoute() ? 'admin' : 'public');
+    };
+    window.addEventListener('popstate', syncRoute);
+    window.addEventListener('hashchange', syncRoute);
+    return () => {
+      window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener('hashchange', syncRoute);
+    };
+  }, []);
+
+  // Verify existing Admin session token if present
+  useEffect(() => {
+    const token = getStoredAdminToken();
+    if (!token) {
+      setAdminUsername('');
+      setAuthChecked(true);
+      return;
+    }
+    api
+      .verifyAdminSession()
+      .then((res) => {
+        if (res.authenticated) {
+          setAdminUsername(res.username || 'admin');
+        } else {
+          api.logoutAdmin();
+          setAdminUsername('');
+        }
+      })
+      .catch(() => {
+        api.logoutAdmin();
+        setAdminUsername('');
+      })
+      .finally(() => {
+        setAuthChecked(true);
+      });
+  }, []);
+
+  const loadPublicData = useCallback(async () => {
+    try {
+      const [p, pil] = await Promise.all([api.getPosts(), api.getPillars()]);
+      setPosts(p);
+      setPillars(pil);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadAdminData = useCallback(async () => {
     try {
       const [p, w, kb, pil, st] = await Promise.all([
         api.getPosts(),
@@ -52,43 +112,55 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    if (!authChecked) return;
+    if (adminUsername) {
+      loadAdminData();
+    } else {
+      loadPublicData();
+    }
+  }, [authChecked, adminUsername, loadAdminData, loadPublicData]);
+
+  const handleOpenPublic = () => {
+    setViewMode('public');
+    if (window.location.pathname.startsWith('/admin') || window.location.hash) {
+      window.history.pushState({}, '', '/');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleGoToAdmin = (menu = 'dashboard') => {
     setAdminMenu(menu);
     setViewMode('admin');
-    window.location.hash = 'admin';
+    if (!window.location.pathname.startsWith('/admin')) {
+      window.history.pushState({}, '', '/admin');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleOpenPublic = () => {
-    setViewMode('public');
-    window.location.hash = '';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleLogout = () => {
+    api.logoutAdmin();
+    setAdminUsername('');
+    setWorkflows([]);
+    setStats(null);
+    handleOpenPublic();
   };
 
   const handleEditPostInAdmin = (post: Post) => {
+    if (!adminUsername) return;
     setInitialEditPost(post);
     setOpenCreateImmediately(false);
     handleGoToAdmin('posts');
   };
 
-  const handleQuickCreatePost = () => {
-    setInitialEditPost(null);
-    setOpenCreateImmediately(true);
-    handleGoToAdmin('posts');
-  };
-
-  if (loading) {
+  if (loading || !authChecked) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#0d2546] text-white gap-3">
         <img
           src="/images/badge-komkid.png"
           alt="คมคิด by KOMKRIT"
-          className="h-24 w-24 animate-pulse object-contain"
+          className="h-20 w-20 animate-pulse object-contain"
         />
-        <div className="text-base font-extrabold tracking-wide">
+        <div className="text-sm font-bold tracking-wide">
           กำลังโหลด คมคิด by KOMKRIT...
         </div>
       </div>
@@ -101,15 +173,20 @@ export const App: React.FC = () => {
         <PublicWebsite
           posts={posts}
           pillars={pillars}
-          pendingApprovalsCount={stats?.pendingApprovals ?? 0}
           onOpenPost={(id) => setReadingPostId(id)}
-          onGoToAdmin={handleGoToAdmin}
-          onQuickCreatePost={handleQuickCreatePost}
+        />
+      ) : !adminUsername ? (
+        <AdminLoginScreen
+          onLoginSuccess={(u) => {
+            setAdminUsername(u);
+          }}
+          onBackToPublic={handleOpenPublic}
         />
       ) : (
         <AdminLayout
           activeMenu={adminMenu}
           setActiveMenu={setAdminMenu}
+          adminUsername={adminUsername}
           stats={stats}
           posts={posts}
           workflows={workflows}
@@ -121,8 +198,9 @@ export const App: React.FC = () => {
             setInitialEditPost(null);
             setOpenCreateImmediately(false);
           }}
-          onRefreshAll={loadAll}
+          onRefreshAll={loadAdminData}
           onOpenPublicWebsite={handleOpenPublic}
+          onLogout={handleLogout}
           onPreviewPost={(id) => setReadingPostId(id)}
         />
       )}
@@ -130,8 +208,9 @@ export const App: React.FC = () => {
       <ArticleReaderModal
         postId={readingPostId}
         onClose={() => setReadingPostId(null)}
+        canEdit={Boolean(adminUsername)}
         onEditInAdmin={handleEditPostInAdmin}
-        onCommentsUpdated={loadAll}
+        onCommentsUpdated={adminUsername ? loadAdminData : loadPublicData}
       />
     </>
   );

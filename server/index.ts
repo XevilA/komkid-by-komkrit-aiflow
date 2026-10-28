@@ -20,6 +20,15 @@ import {
   UPLOADS_ROOT,
 } from './mediaEngine.ts';
 import { dispatchSingleChannelReal } from './publishEngine.ts';
+import {
+  verifyCredentials,
+  createAdminToken,
+  verifyAdminToken,
+  extractBearerToken,
+  isRequestAdmin,
+  requireAdminAuth,
+  updateAdminCredentials,
+} from './auth.ts';
 
 initDatabase();
 
@@ -40,6 +49,63 @@ app.get('/api/health', (_req, res) => {
     node: process.version,
     timestamp: new Date().toISOString(),
   });
+});
+
+// --- Central Security Gatekeeper: Protect ALL Admin, Write & AI Endpoints ---
+app.use('/api', (req, res, next) => {
+  const p = req.path;
+  const m = req.method.toUpperCase();
+
+  // Publicly accessible endpoints for normal website visitors:
+  if (m === 'GET' && p === '/health') return next();
+  if (p === '/auth/login' || p === '/auth/me') return next();
+  if (m === 'GET' && (p === '/posts' || /^\/posts\/\d+$/.test(p))) return next();
+  if (m === 'POST' && /^\/posts\/\d+\/comments$/.test(p)) return next();
+  if (m === 'GET' && p === '/pillars') return next();
+  if (m === 'POST' && (p === '/subscribers' || p === '/contacts' || p === '/surveys')) {
+    return next();
+  }
+
+  // Every other /api/* route requires valid Admin Authentication
+  return requireAdminAuth(req, res, next);
+});
+
+// --- Admin Authentication Endpoints ---
+app.post('/api/auth/login', (req, res) => {
+  const { username = '', password = '' } = req.body || {};
+  if (!verifyCredentials(String(username), String(password))) {
+    res.status(401).json({ error: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
+    return;
+  }
+  const { token, expiresAt } = createAdminToken(String(username).trim());
+  res.json({ ok: true, token, username: String(username).trim(), expiresAt });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const check = verifyAdminToken(extractBearerToken(req));
+  if (!check.valid) {
+    res.status(401).json({ authenticated: false });
+    return;
+  }
+  res.json({ authenticated: true, username: check.username });
+});
+
+app.put('/api/auth/password', (req, res) => {
+  const { currentPassword = '', newUsername = '', newPassword = '' } = req.body || {};
+  const check = verifyAdminToken(extractBearerToken(req));
+  if (!check.valid || !verifyCredentials(check.username || 'admin', String(currentPassword))) {
+    res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
+    return;
+  }
+  if (!String(newPassword).trim() || String(newPassword).trim().length < 6) {
+    res.status(400).json({ error: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร' });
+    return;
+  }
+  updateAdminCredentials(String(newUsername || check.username || 'admin'), String(newPassword));
+  const { token, expiresAt } = createAdminToken(
+    String(newUsername || check.username || 'admin').trim()
+  );
+  res.json({ ok: true, token, expiresAt });
 });
 
 const storage = multer.diskStorage({
@@ -212,6 +278,7 @@ app.get('/api/posts', (req, res) => {
   const { category, type, status, q } = req.query;
   const conditions: string[] = [];
   const params: any[] = [];
+  const isAdmin = isRequestAdmin(req);
 
   if (category && category !== 'all') {
     conditions.push('p.category = ?');
@@ -221,7 +288,9 @@ app.get('/api/posts', (req, res) => {
     conditions.push('p.content_type = ?');
     params.push(String(type));
   }
-  if (status && status !== 'all') {
+  if (!isAdmin) {
+    conditions.push("p.status = 'published'");
+  } else if (status && status !== 'all') {
     conditions.push('p.status = ?');
     params.push(String(status));
   }
@@ -255,8 +324,8 @@ app.get('/api/posts/:id', (req, res) => {
       `SELECT p.*, (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments_count
        FROM posts p WHERE p.id = ?`
     )
-    .get(id);
-  if (!row) {
+    .get(id) as any;
+  if (!row || (!isRequestAdmin(req) && row.status !== 'published')) {
     res.status(404).json({ error: 'ไม่พบบทความ' });
     return;
   }

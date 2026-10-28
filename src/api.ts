@@ -17,10 +17,47 @@ import {
   LlmProviderId,
 } from './types';
 
+const ADMIN_TOKEN_KEY = 'komkrit_admin_token';
+
+export function getStoredAdminToken(): string {
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setStoredAdminToken(token: string): void {
+  try {
+    if (token) {
+      localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(ADMIN_TOKEN_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function buildAuthHeaders(extra?: HeadersInit): Record<string, string> {
+  const token = getStoredAdminToken();
+  const base: Record<string, string> = {};
+  if (token) {
+    base.Authorization = `Bearer ${token}`;
+  }
+  if (extra) {
+    Object.assign(base, extra);
+  }
+  return base;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildAuthHeaders(options?.headers),
+    },
   });
   const data = await res.json();
   if (!res.ok) {
@@ -43,6 +80,36 @@ export interface DashboardStats {
 }
 
 export const api = {
+  // Admin Auth
+  loginAdmin: async (username: string, password: string) => {
+    const res = await request<{ ok: boolean; token: string; username: string; expiresAt: number }>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      }
+    );
+    setStoredAdminToken(res.token);
+    return res;
+  },
+  verifyAdminSession: () =>
+    request<{ authenticated: boolean; username?: string }>('/api/auth/me'),
+  logoutAdmin: () => {
+    setStoredAdminToken('');
+  },
+  changeAdminPassword: async (payload: {
+    currentPassword: string;
+    newUsername?: string;
+    newPassword: string;
+  }) => {
+    const res = await request<{ ok: boolean; token: string }>('/api/auth/password', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    if (res.token) setStoredAdminToken(res.token);
+    return res;
+  },
+
   getStats: () => request<DashboardStats>('/api/stats'),
 
   // Posts CRUD
@@ -80,7 +147,11 @@ export const api = {
   uploadFile: async (file: File): Promise<string> => {
     const fd = new FormData();
     fd.append('file', file);
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: fd,
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'อัปโหลดไฟล์ไม่สำเร็จ');
     return data.url as string;
@@ -88,7 +159,11 @@ export const api = {
   uploadImage: async (file: File): Promise<string> => {
     const fd = new FormData();
     fd.append('file', file);
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: fd,
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'อัปโหลดรูปภาพไม่สำเร็จ');
     return data.url as string;

@@ -20,7 +20,8 @@ import { api, formatThaiDate, formatViews } from '../api';
 interface Props {
   postId: number | null;
   onClose: () => void;
-  onEditInAdmin: (post: Post) => void;
+  canEdit?: boolean;
+  onEditInAdmin?: (post: Post) => void;
   onCommentsUpdated: () => void;
 }
 
@@ -122,6 +123,7 @@ export function renderRichMarkdown(md: string) {
 export const ArticleReaderModal: React.FC<Props> = ({
   postId,
   onClose,
+  canEdit = false,
   onEditInAdmin,
   onCommentsUpdated,
 }) => {
@@ -255,7 +257,7 @@ export const ArticleReaderModal: React.FC<Props> = ({
                 </span>
               </button>
             )}
-            {post && (
+            {post && canEdit && onEditInAdmin && (
               <button
                 onClick={() => {
                   onClose();
@@ -264,7 +266,7 @@ export const ArticleReaderModal: React.FC<Props> = ({
                 className="inline-flex items-center gap-1.5 rounded-full bg-[#0f294a]/10 px-3 py-1.5 text-xs font-semibold text-[#0f294a] hover:bg-[#0f294a] hover:text-white transition cursor-pointer"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">แก้ไขในหลังบ้าน</span>
+                <span className="hidden sm:inline">แก้ไขบทความ</span>
               </button>
             )}
             <button
