@@ -149,6 +149,8 @@ async function recordMediaAsset(params: {
   resolution?: string;
   interactionId?: string;
   workflowId?: number | null;
+  reviewStatus?: 'pending_review' | 'approved';
+  thaiSummary?: string;
 }) {
   let finalFileUrl = params.fileUrl;
   if (IS_SERVERLESS && finalFileUrl.startsWith('/uploads/')) {
@@ -165,12 +167,15 @@ async function recordMediaAsset(params: {
   }
 
   const now = new Date().toISOString();
+  const reviewStatus = params.reviewStatus || 'pending_review';
+  const thaiSummary = params.thaiSummary || '';
   const res = db
     .prepare(
       `INSERT INTO ai_media_assets (
         media_type, provider, model, prompt, file_url, mime_type,
-        aspect_ratio, duration_sec, resolution, interaction_id, workflow_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        aspect_ratio, duration_sec, resolution, interaction_id, workflow_id,
+        review_status, thai_summary, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       params.mediaType,
@@ -184,6 +189,8 @@ async function recordMediaAsset(params: {
       params.resolution || '',
       params.interactionId || '',
       params.workflowId ?? null,
+      reviewStatus,
+      thaiSummary,
       now
     );
 
@@ -191,6 +198,8 @@ async function recordMediaAsset(params: {
     id: Number(res.lastInsertRowid),
     ...params,
     fileUrl: finalFileUrl,
+    reviewStatus,
+    thaiSummary,
     createdAt: now,
   };
 }
@@ -205,6 +214,8 @@ export async function generateRealImage(params: {
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
   imageSize?: '1K' | '2K';
   workflowId?: number | null;
+  thaiSummary?: string;
+  reviewStatus?: 'pending_review' | 'approved';
 }) {
   const prompt = params.prompt?.trim();
   if (!prompt) {
@@ -280,6 +291,8 @@ export async function generateRealImage(params: {
       aspectRatio,
       interactionId: interaction.id || '',
       workflowId: params.workflowId ?? null,
+      thaiSummary: params.thaiSummary,
+      reviewStatus: params.reviewStatus,
     });
   }
 
@@ -346,6 +359,8 @@ export async function generateRealImage(params: {
     mimeType: 'image/png',
     aspectRatio: params.aspectRatio || '16:9',
     workflowId: params.workflowId ?? null,
+    thaiSummary: params.thaiSummary,
+    reviewStatus: params.reviewStatus,
   });
 }
 
@@ -408,6 +423,8 @@ export async function generateRealVideo(params: {
   stripAudio?: boolean;
   previousInteractionId?: string;
   workflowId?: number | null;
+  thaiSummary?: string;
+  reviewStatus?: 'pending_review' | 'approved';
 }) {
   const prompt = params.prompt?.trim();
   if (!prompt) {
@@ -554,6 +571,8 @@ export async function generateRealVideo(params: {
       resolution,
       interactionId: operationName,
       workflowId: params.workflowId ?? null,
+      thaiSummary: params.thaiSummary,
+      reviewStatus: params.reviewStatus,
     });
   }
 
@@ -763,6 +782,8 @@ export async function generateRealVideo(params: {
     resolution,
     interactionId: interaction.id || '',
     workflowId: params.workflowId ?? null,
+    thaiSummary: params.thaiSummary,
+    reviewStatus: params.reviewStatus,
   });
 }
 

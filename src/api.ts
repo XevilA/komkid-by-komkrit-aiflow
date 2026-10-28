@@ -8,6 +8,9 @@ import {
   ContactMessage,
   AiEngineSettings,
   AiChatMessage,
+  AiChatSession,
+  AiEvaluatedPrompt,
+  AiDraftFromChat,
   AiMediaAsset,
   FlowProject,
   ChannelConfig,
@@ -206,11 +209,12 @@ export const api = {
     }),
 
   // Real Multi-LLM Interactive Chat (Claude, DeepSeek, ChatGPT, Gemini)
+  getChatSessions: () => request<AiChatSession[]>('/api/ai/chat-sessions'),
   getChatHistory: (sessionId: string) =>
     request<AiChatMessage[]>(`/api/ai/chat/${encodeURIComponent(sessionId)}`),
   sendChatMessage: (payload: {
     sessionId: string;
-    provider: Exclude<LlmProviderId, 'auto'>;
+    provider?: LlmProviderId;
     model?: string;
     message: string;
     useKnowledgeBase?: boolean;
@@ -233,10 +237,39 @@ export const api = {
     request<{ ok: boolean }>(`/api/ai/chat/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE',
     }),
+  evaluateMediaPrompt: (payload: {
+    target: 'image' | 'video';
+    sessionId?: string;
+    ideaText?: string;
+    aspectRatio?: '16:9' | '9:16' | '1:1';
+    provider?: LlmProviderId;
+    model?: string;
+  }) =>
+    request<AiEvaluatedPrompt>('/api/ai/evaluate-prompt', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  draftContentFromChat: (payload: {
+    sessionId?: string;
+    ideaText?: string;
+    contentFormat?: 'news' | 'article' | 'social_post';
+    category?: string;
+    provider?: LlmProviderId;
+    model?: string;
+  }) =>
+    request<AiDraftFromChat>('/api/ai/draft-from-chat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Real Media Generation (Nano Banana 2.1, Google Veo / Omni Video, Gemini 3.8 TTS)
   getMediaAssets: (type?: 'image' | 'video' | 'audio') =>
     request<AiMediaAsset[]>(`/api/ai/media${type ? `?type=${type}` : ''}`),
+  reviewMediaAsset: (id: number, reviewStatus: 'approved' | 'pending_review') =>
+    request<{ ok: boolean; id: number; reviewStatus: string }>(`/api/ai/media/${id}/review`, {
+      method: 'PUT',
+      body: JSON.stringify({ reviewStatus }),
+    }),
   deleteMediaAsset: (id: number) =>
     request<{ ok: boolean }>(`/api/ai/media/${id}`, { method: 'DELETE' }),
   generateRealImage: (payload: {
@@ -246,6 +279,7 @@ export const api = {
     aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3';
     imageSize?: '1K' | '2K';
     workflowId?: number | null;
+    thaiSummary?: string;
   }) =>
     request<AiMediaAsset>('/api/ai/image/generate', {
       method: 'POST',
@@ -268,6 +302,7 @@ export const api = {
     stripAudio?: boolean;
     previousInteractionId?: string;
     workflowId?: number | null;
+    thaiSummary?: string;
   }) =>
     request<AiMediaAsset>('/api/ai/video/generate', {
       method: 'POST',

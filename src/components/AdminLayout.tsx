@@ -17,6 +17,8 @@ import {
   MessageSquare,
   Lock,
   CheckCircle2,
+  Bot,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   Post,
@@ -27,7 +29,8 @@ import {
 import { api, DashboardStats, formatViews } from '../api';
 import { PostCrudManager } from './PostCrudManager';
 import { AiCommandCenter } from './AiCommandCenter';
-import { FlowAndChatStudio } from './FlowAndChatStudio';
+import { AiChatStudio, MediaAgentHandoff } from './AiChatStudio';
+import { MediaGenStudio } from './MediaGenStudio';
 import { OmnichannelPublishHub } from './OmnichannelPublishHub';
 import {
   KnowledgeBaseManager,
@@ -79,6 +82,8 @@ export const AdminLayout: React.FC<Props> = ({
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsSubTab>('inbox');
+  const [mediaHandoff, setMediaHandoff] = useState<MediaAgentHandoff | null>(null);
+  const [prefillNewPost, setPrefillNewPost] = useState<Partial<Post> | null>(null);
 
   // Password Change Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -114,7 +119,7 @@ export const AdminLayout: React.FC<Props> = ({
     }
   };
 
-  // ONLY 4 LARGE, PLAIN-THAI MENUS (Elder-friendly, zero English jargon!)
+  // 5 LARGE, PLAIN-THAI MENUS (Elder-friendly, dedicated AI Chat + Image/VDO Gen!)
   const menuItems = [
     {
       id: 'posts',
@@ -124,21 +129,27 @@ export const AdminLayout: React.FC<Props> = ({
       badge: stats?.postsTotal ?? posts.length,
     },
     {
-      id: 'ai-command',
-      label: 'ให้ AI ช่วยเขียนบทความ',
-      sub: 'พิมพ์หัวข้อ ให้ AI เขียนให้',
-      icon: <Sparkles className="w-5 h-5" />,
+      id: 'ai-chat',
+      label: 'แชทคุยกับ AI (สั่งงาน)',
+      sub: 'คุยปกติ • เขียนข่าว • คิด Prompt',
+      icon: <Bot className="w-5 h-5" />,
     },
     {
-      id: 'flow-chat',
-      label: 'สร้างวิดีโอ & คุยกับ AI',
-      sub: 'ทำคลิปสั้น • ถามตอบ AI',
-      icon: <Clapperboard className="w-5 h-5" />,
+      id: 'media-gen',
+      label: 'สร้างรูปภาพ & วิดีโอ AI',
+      sub: 'สร้างภาพ • คลิป VDO • ดูตัวอย่าง',
+      icon: <ImageIcon className="w-5 h-5" />,
+    },
+    {
+      id: 'ai-command',
+      label: 'ให้ทีม AI เขียนบทความชุดใหญ่',
+      sub: 'วิเคราะห์ลึก • แชร์หลายช่องทาง',
+      icon: <Sparkles className="w-5 h-5" />,
     },
     {
       id: 'settings',
       label: 'ข้อความติดต่อ & ตั้งค่า',
-      sub: 'ดูคนติดต่อ • ตั้งค่าระบบ',
+      sub: 'ดูคนติดต่อ • คีย์ AI • รหัสผ่าน',
       icon: <Settings className="w-5 h-5" />,
       badge: stats?.unreadContacts || undefined,
     },
@@ -352,11 +363,58 @@ export const AdminLayout: React.FC<Props> = ({
                 </div>
               </div>
 
+              {/* Quick 2-Button AI Shortcuts right on Home */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveMenu('ai-chat')}
+                  className="flex items-center justify-between rounded-2xl bg-[#0d2546] px-5 py-4 text-left text-white hover:bg-[#163a6b] transition cursor-pointer shadow-xs"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-400 text-[#0d2546] shrink-0">
+                      <Bot className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="text-base font-extrabold">
+                        แชทคุยกับ AI (ปรึกษา & สั่งเขียนข่าว)
+                      </div>
+                      <div className="text-xs sm:text-sm text-amber-200">
+                        คุยว่าจะทำอะไร → ให้ AI เขียนข่าว หรือเขียน Full Prompt ส่งให้ Agent
+                      </div>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveMenu('media-gen')}
+                  className="flex items-center justify-between rounded-2xl bg-white border-2 border-amber-400 px-5 py-4 text-left text-[#0d2546] hover:bg-amber-50 transition cursor-pointer shadow-xs"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0d2546] text-amber-300 shrink-0">
+                      <Clapperboard className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="text-base font-extrabold">
+                        สร้างรูปภาพ & วิดีโอ AI (ดูตัวอย่างก่อนใช้)
+                      </div>
+                      <div className="text-xs sm:text-sm text-slate-600">
+                        สั่ง Agent สร้างรูป/คลิป VDO จริง • ชอบเก็บไว้ หรือไม่ชอบกดลบทิ้งได้ทันที
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
               <PostCrudManager
                 posts={posts}
                 initialEditPost={initialEditPost}
+                prefillNewPost={prefillNewPost}
                 openCreateImmediately={openCreateImmediately}
-                onClearInitialEdit={onClearInitialEdit}
+                onClearInitialEdit={() => {
+                  setPrefillNewPost(null);
+                  onClearInitialEdit();
+                }}
                 onRefresh={onRefreshAll}
                 onPreviewPost={onPreviewPost}
                 onOpenSettings={() => openSettingsSection('api_keys')}
@@ -364,7 +422,40 @@ export const AdminLayout: React.FC<Props> = ({
             </>
           )}
 
-          {/* 2. SIMPLE AI ARTICLE WRITER */}
+          {/* 2. DEDICATED NORMAL AI CHAT + PROMPT EVALUATOR + NEWS WRITER */}
+          {activeMenu === 'ai-chat' && (
+            <AiChatStudio
+              onRefreshAll={onRefreshAll}
+              onOpenSettings={() => openSettingsSection('api_keys')}
+              onPreviewPost={onPreviewPost}
+              onSendToMediaStudio={(handoff) => {
+                setMediaHandoff(handoff);
+                setActiveMenu('media-gen');
+              }}
+              onOpenInPostEditor={(draft) => {
+                setPrefillNewPost(draft);
+                setActiveMenu('posts');
+              }}
+            />
+          )}
+
+          {/* 3. DEDICATED IMAGE & VIDEO GENERATOR WITH RECHECK PREVIEW */}
+          {(activeMenu === 'media-gen' || activeMenu === 'flow-chat') && (
+            <MediaGenStudio
+              incomingHandoff={mediaHandoff}
+              onClearHandoff={() => setMediaHandoff(null)}
+              onRefreshAll={onRefreshAll}
+              onOpenSettings={() => openSettingsSection('api_keys')}
+              onPreviewPost={onPreviewPost}
+              onOpenInPostEditor={(draft) => {
+                setPrefillNewPost(draft);
+                setActiveMenu('posts');
+              }}
+              onGoToChat={() => setActiveMenu('ai-chat')}
+            />
+          )}
+
+          {/* 4. MULTI-AGENT AI ARTICLE WORKFLOW */}
           {activeMenu === 'ai-command' && (
             <AiCommandCenter
               workflows={workflows}
@@ -373,16 +464,7 @@ export const AdminLayout: React.FC<Props> = ({
               onOpenPublishedPost={onPreviewPost}
               onGoToKnowledgeBase={() => openSettingsSection('knowledge')}
               onOpenSettings={() => openSettingsSection('api_keys')}
-              onOpenFlowStudio={() => setActiveMenu('flow-chat')}
-            />
-          )}
-
-          {/* 3. VIDEO & AI CHAT */}
-          {activeMenu === 'flow-chat' && (
-            <FlowAndChatStudio
-              onRefreshAll={onRefreshAll}
-              onOpenSettings={() => openSettingsSection('api_keys')}
-              onOpenPost={onPreviewPost}
+              onOpenFlowStudio={() => setActiveMenu('media-gen')}
             />
           )}
 

@@ -252,6 +252,16 @@ function initDatabase() {
     }
   } catch {
   }
+  try {
+    const mCols = db.prepare("PRAGMA table_info('ai_media_assets')").all();
+    if (!mCols.some((c) => c.name === "review_status")) {
+      db.exec("ALTER TABLE ai_media_assets ADD COLUMN review_status TEXT DEFAULT 'approved'");
+    }
+    if (!mCols.some((c) => c.name === "thai_summary")) {
+      db.exec("ALTER TABLE ai_media_assets ADD COLUMN thai_summary TEXT DEFAULT ''");
+    }
+  } catch {
+  }
   db.exec("DELETE FROM publish_logs WHERE mode = 'sandbox_ready' OR response_note LIKE '%\u0E08\u0E33\u0E25\u0E2D\u0E07%'");
   seedIfEmpty();
   seedOmnichannelIfEmpty();
@@ -1074,6 +1084,22 @@ async function uploadMediaToCloudBlob(buffer, filename, mimeType) {
   const data = await res.json();
   return data.url || null;
 }
+async function deleteMediaFromCloudBlob(blobUrl) {
+  const token = getBlobToken();
+  if (!token || !blobUrl || !blobUrl.includes("blob.vercel-storage.com")) return;
+  try {
+    await fetch(`${BLOB_API_BASE}/delete`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-api-version": "7",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ urls: [blobUrl] })
+    });
+  } catch {
+  }
+}
 
 // server/mediaEngine.ts
 var execFileAsync = promisify(execFile);
@@ -1198,11 +1224,14 @@ async function recordMediaAsset(params) {
     }
   }
   const now = (/* @__PURE__ */ new Date()).toISOString();
+  const reviewStatus = params.reviewStatus || "pending_review";
+  const thaiSummary = params.thaiSummary || "";
   const res = db.prepare(
     `INSERT INTO ai_media_assets (
         media_type, provider, model, prompt, file_url, mime_type,
-        aspect_ratio, duration_sec, resolution, interaction_id, workflow_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        aspect_ratio, duration_sec, resolution, interaction_id, workflow_id,
+        review_status, thai_summary, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     params.mediaType,
     params.provider,
@@ -1215,12 +1244,16 @@ async function recordMediaAsset(params) {
     params.resolution || "",
     params.interactionId || "",
     params.workflowId ?? null,
+    reviewStatus,
+    thaiSummary,
     now
   );
   return {
     id: Number(res.lastInsertRowid),
     ...params,
     fileUrl: finalFileUrl,
+    reviewStatus,
+    thaiSummary,
     createdAt: now
   };
 }
@@ -1287,7 +1320,9 @@ async function generateRealImage(params) {
       mimeType,
       aspectRatio,
       interactionId: interaction.id || "",
-      workflowId: params.workflowId ?? null
+      workflowId: params.workflowId ?? null,
+      thaiSummary: params.thaiSummary,
+      reviewStatus: params.reviewStatus
     });
   }
   if (!openaiKey) {
@@ -1339,7 +1374,9 @@ async function generateRealImage(params) {
     fileUrl,
     mimeType: "image/png",
     aspectRatio: params.aspectRatio || "16:9",
-    workflowId: params.workflowId ?? null
+    workflowId: params.workflowId ?? null,
+    thaiSummary: params.thaiSummary,
+    reviewStatus: params.reviewStatus
   });
 }
 async function getVertexAccessToken() {
@@ -1498,7 +1535,9 @@ async function generateRealVideo(params) {
       durationSec,
       resolution,
       interactionId: operationName,
-      workflowId: params.workflowId ?? null
+      workflowId: params.workflowId ?? null,
+      thaiSummary: params.thaiSummary,
+      reviewStatus: params.reviewStatus
     });
   }
   const geminiKey = getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY");
@@ -1672,7 +1711,9 @@ async function generateRealVideo(params) {
     durationSec,
     resolution,
     interactionId: interaction.id || "",
-    workflowId: params.workflowId ?? null
+    workflowId: params.workflowId ?? null,
+    thaiSummary: params.thaiSummary,
+    reviewStatus: params.reviewStatus
   });
 }
 async function stitchFlowScenesWithFfmpeg(params) {
@@ -2696,6 +2737,153 @@ ${params.currentContent}`
     content: wf.scriptOutput.fullArticleMarkdown || "",
     tags: [catLabel, "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT", "\u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C"],
     engineUsed: wf.engineUsed
+  };
+}
+async function evaluateAndBuildMediaPrompt(params) {
+  let conversationContext = "";
+  if (params.sessionId) {
+    const rows = db.prepare(
+      "SELECT role, content FROM ai_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 14"
+    ).all(params.sessionId);
+    if (rows.length > 0) {
+      conversationContext = rows.reverse().map((r) => `${r.role === "user" ? "\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25" : "AI"}: ${r.content}`).join("\n");
+    }
+  }
+  const idea = (params.ideaText || "").trim();
+  if (!conversationContext && !idea) {
+    throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E1A\u0E2D\u0E01\u0E2A\u0E34\u0E48\u0E07\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E2A\u0E23\u0E49\u0E32\u0E07 \u0E2B\u0E23\u0E37\u0E2D\u0E04\u0E38\u0E22\u0E01\u0E31\u0E1A AI \u0E01\u0E48\u0E2D\u0E19\u0E43\u0E2B\u0E49\u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19 Prompt \u0E04\u0E23\u0E31\u0E1A");
+  }
+  const isVideo = params.target === "video";
+  const defaultAspect = params.aspectRatio || "16:9";
+  const systemInstruction = isVideo ? `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D Creative Video Director & Prompt Engineer \u0E1B\u0E23\u0E30\u0E08\u0E33\u0E2A\u0E15\u0E39\u0E14\u0E34\u0E42\u0E2D "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT"
+\u0E2B\u0E19\u0E49\u0E32\u0E17\u0E35\u0E48\u0E02\u0E2D\u0E07\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D:
+1) \u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E04\u0E27\u0E32\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E02\u0E2D\u0E07\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E08\u0E32\u0E01\u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E2B\u0E23\u0E37\u0E2D\u0E44\u0E2D\u0E40\u0E14\u0E35\u0E22\u0E17\u0E35\u0E48\u0E43\u0E2B\u0E49\u0E21\u0E32 \u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E17\u0E35\u0E48\u0E2D\u0E48\u0E32\u0E19\u0E40\u0E02\u0E49\u0E32\u0E43\u0E08\u0E07\u0E48\u0E32\u0E22 \u0E2A\u0E38\u0E20\u0E32\u0E1E \u0E40\u0E2B\u0E21\u0E32\u0E30\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E1C\u0E39\u0E49\u0E1A\u0E23\u0E34\u0E2B\u0E32\u0E23/\u0E1C\u0E39\u0E49\u0E43\u0E2B\u0E0D\u0E48 (assessmentThai) \u0E27\u0E48\u0E32\u0E04\u0E25\u0E34\u0E1B\u0E19\u0E35\u0E49\u0E04\u0E27\u0E23\u0E40\u0E25\u0E48\u0E32\u0E20\u0E32\u0E1E\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E44\u0E23\u0E43\u0E2B\u0E49\u0E14\u0E36\u0E07\u0E14\u0E39\u0E14\u0E41\u0E25\u0E30\u0E14\u0E39\u0E40\u0E1B\u0E47\u0E19\u0E21\u0E37\u0E2D\u0E2D\u0E32\u0E0A\u0E35\u0E1E
+2) \u0E2A\u0E23\u0E38\u0E1B\u0E20\u0E32\u0E1E\u0E09\u0E32\u0E01\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E17\u0E35\u0E48\u0E08\u0E30\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E2A\u0E31\u0E49\u0E19\u0E46 \u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19 (visualSummaryThai)
+3) \u0E40\u0E02\u0E35\u0E22\u0E19 Full Video Prompt \u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E20\u0E32\u0E1E\u0E22\u0E19\u0E15\u0E23\u0E4C (fullPrompt) \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E48\u0E07\u0E43\u0E2B\u0E49 Google Veo / Gemini Video Agent \u0E42\u0E14\u0E22\u0E23\u0E30\u0E1A\u0E38\u0E04\u0E23\u0E1A\u0E16\u0E49\u0E27\u0E19: Subject, Action, Setting, Camera Movement (smooth dolly / tracking / cinematic pan), Lighting & Color Palette (warm inspiring light, deep navy & amber accents where appropriate), Ambient Sound & Pacing
+4) \u0E41\u0E19\u0E30\u0E19\u0E33\u0E2A\u0E31\u0E14\u0E2A\u0E48\u0E27\u0E19\u0E20\u0E32\u0E1E (recommendedAspectRatio: "16:9" \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E40\u0E27\u0E47\u0E1A/YouTube \u0E2B\u0E23\u0E37\u0E2D "9:16" \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E04\u0E25\u0E34\u0E1B\u0E2A\u0E31\u0E49\u0E19\u0E21\u0E37\u0E2D\u0E16\u0E37\u0E2D) \u0E41\u0E25\u0E30\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E02\u0E48\u0E32\u0E27\u0E17\u0E35\u0E48\u0E40\u0E02\u0E49\u0E32\u0E01\u0E31\u0E1A\u0E04\u0E25\u0E34\u0E1B\u0E19\u0E35\u0E49 (suggestedPostTitle)
+\u0E15\u0E2D\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19\u0E15\u0E32\u0E21\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E19\u0E35\u0E49:
+{
+  "assessmentThai": "...",
+  "visualSummaryThai": "...",
+  "fullPrompt": "...",
+  "recommendedAspectRatio": "${defaultAspect}",
+  "suggestedPostTitle": "..."
+}` : `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D Art Director & AI Image Prompt Engineer \u0E1B\u0E23\u0E30\u0E08\u0E33\u0E2A\u0E15\u0E39\u0E14\u0E34\u0E42\u0E2D "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT"
+\u0E2B\u0E19\u0E49\u0E32\u0E17\u0E35\u0E48\u0E02\u0E2D\u0E07\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D:
+1) \u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E04\u0E27\u0E32\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E02\u0E2D\u0E07\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E08\u0E32\u0E01\u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E2B\u0E23\u0E37\u0E2D\u0E44\u0E2D\u0E40\u0E14\u0E35\u0E22\u0E17\u0E35\u0E48\u0E43\u0E2B\u0E49\u0E21\u0E32 \u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E17\u0E35\u0E48\u0E2D\u0E48\u0E32\u0E19\u0E40\u0E02\u0E49\u0E32\u0E43\u0E08\u0E07\u0E48\u0E32\u0E22 \u0E2A\u0E38\u0E20\u0E32\u0E1E \u0E40\u0E2B\u0E21\u0E32\u0E30\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E1C\u0E39\u0E49\u0E1A\u0E23\u0E34\u0E2B\u0E32\u0E23/\u0E1C\u0E39\u0E49\u0E43\u0E2B\u0E0D\u0E48 (assessmentThai) \u0E27\u0E48\u0E32\u0E20\u0E32\u0E1E\u0E19\u0E35\u0E49\u0E04\u0E27\u0E23\u0E08\u0E31\u0E14\u0E2D\u0E07\u0E04\u0E4C\u0E1B\u0E23\u0E30\u0E01\u0E2D\u0E1A \u0E42\u0E17\u0E19\u0E41\u0E2A\u0E07 \u0E41\u0E25\u0E30\u0E2D\u0E32\u0E23\u0E21\u0E13\u0E4C\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E44\u0E23\u0E43\u0E2B\u0E49\u0E19\u0E48\u0E32\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E16\u0E37\u0E2D\u0E41\u0E25\u0E30\u0E14\u0E36\u0E07\u0E14\u0E39\u0E14\u0E2A\u0E32\u0E22\u0E15\u0E32
+2) \u0E2A\u0E23\u0E38\u0E1B\u0E20\u0E32\u0E1E\u0E17\u0E35\u0E48\u0E08\u0E30\u0E44\u0E14\u0E49\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E2A\u0E31\u0E49\u0E19\u0E46 \u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19 (visualSummaryThai)
+3) \u0E40\u0E02\u0E35\u0E22\u0E19 Full Image Prompt \u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E21\u0E37\u0E2D\u0E2D\u0E32\u0E0A\u0E35\u0E1E (fullPrompt) \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E48\u0E07\u0E43\u0E2B\u0E49 AI Image Agent (Gemini Nano Banana 2.1 / OpenAI GPT-Image-1) \u0E42\u0E14\u0E22\u0E23\u0E30\u0E1A\u0E38\u0E04\u0E23\u0E1A\u0E16\u0E49\u0E27\u0E19: Main Subject, Environment, Composition, Lighting, Color Harmony, Camera Lens / Editorial Photography Style, High Detail, No gibberish text
+4) \u0E41\u0E19\u0E30\u0E19\u0E33\u0E2A\u0E31\u0E14\u0E2A\u0E48\u0E27\u0E19\u0E20\u0E32\u0E1E (recommendedAspectRatio: "16:9", "1:1" \u0E2B\u0E23\u0E37\u0E2D "9:16") \u0E41\u0E25\u0E30\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E02\u0E48\u0E32\u0E27\u0E17\u0E35\u0E48\u0E40\u0E02\u0E49\u0E32\u0E01\u0E31\u0E1A\u0E20\u0E32\u0E1E\u0E19\u0E35\u0E49 (suggestedPostTitle)
+\u0E15\u0E2D\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19\u0E15\u0E32\u0E21\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E19\u0E35\u0E49:
+{
+  "assessmentThai": "...",
+  "visualSummaryThai": "...",
+  "fullPrompt": "...",
+  "recommendedAspectRatio": "${defaultAspect}",
+  "suggestedPostTitle": "..."
+}`;
+  const userPayload = [
+    conversationContext ? `\u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14\u0E43\u0E19\u0E2B\u0E49\u0E2D\u0E07\u0E41\u0E0A\u0E17:
+${conversationContext}` : "",
+    idea ? `\u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07/\u0E41\u0E19\u0E27\u0E04\u0E34\u0E14\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E40\u0E15\u0E34\u0E21\u0E08\u0E32\u0E01\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25:
+${idea}` : "",
+    `\u0E2A\u0E31\u0E14\u0E2A\u0E48\u0E27\u0E19\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E40\u0E1A\u0E37\u0E49\u0E2D\u0E07\u0E15\u0E49\u0E19: ${defaultAspect}`
+  ].filter(Boolean).join("\n\n");
+  const res = await callRealLlm({
+    provider: params.provider,
+    model: params.model,
+    systemInstruction,
+    messages: [{ role: "user", content: userPayload }],
+    temperature: 0.55,
+    jsonMode: true
+  });
+  const parsed = extractStrictJson(res.text);
+  const recAspect = ["16:9", "9:16", "1:1"].includes(parsed.recommendedAspectRatio) ? parsed.recommendedAspectRatio : defaultAspect;
+  return {
+    target: params.target,
+    assessmentThai: String(parsed.assessmentThai || "").trim() || "AI \u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E41\u0E19\u0E27\u0E04\u0E34\u0E14\u0E41\u0E25\u0E30\u0E2D\u0E2D\u0E01\u0E41\u0E1A\u0E1A\u0E2D\u0E07\u0E04\u0E4C\u0E1B\u0E23\u0E30\u0E01\u0E2D\u0E1A\u0E20\u0E32\u0E1E\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E21\u0E37\u0E2D\u0E2D\u0E32\u0E0A\u0E35\u0E1E\u0E43\u0E2B\u0E49\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E23\u0E49\u0E2D\u0E22\u0E41\u0E25\u0E49\u0E27",
+    visualSummaryThai: String(parsed.visualSummaryThai || "").trim() || (isVideo ? "\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E04\u0E38\u0E13\u0E20\u0E32\u0E1E\u0E2A\u0E39\u0E07\u0E16\u0E48\u0E32\u0E22\u0E17\u0E2D\u0E14\u0E41\u0E19\u0E27\u0E04\u0E34\u0E14\u0E15\u0E32\u0E21\u0E17\u0E35\u0E48\u0E2A\u0E19\u0E17\u0E19\u0E32" : "\u0E20\u0E32\u0E1E\u0E1B\u0E23\u0E30\u0E01\u0E2D\u0E1A\u0E02\u0E48\u0E32\u0E27\u0E04\u0E38\u0E13\u0E20\u0E32\u0E1E\u0E2A\u0E39\u0E07\u0E15\u0E32\u0E21\u0E41\u0E19\u0E27\u0E04\u0E34\u0E14\u0E17\u0E35\u0E48\u0E2A\u0E19\u0E17\u0E19\u0E32"),
+    fullPrompt: String(parsed.fullPrompt || "").trim(),
+    recommendedAspectRatio: recAspect,
+    suggestedPostTitle: String(parsed.suggestedPostTitle || "").trim(),
+    engineUsed: res.engineLabel
+  };
+}
+async function draftContentFromChat(params) {
+  let conversationContext = "";
+  if (params.sessionId) {
+    const rows = db.prepare(
+      "SELECT role, content FROM ai_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 18"
+    ).all(params.sessionId);
+    if (rows.length > 0) {
+      conversationContext = rows.reverse().map((r) => `${r.role === "user" ? "\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25" : "AI"}: ${r.content}`).join("\n");
+    }
+  }
+  const idea = (params.ideaText || "").trim();
+  if (!conversationContext && !idea) {
+    throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E02\u0E48\u0E32\u0E27/\u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23 \u0E2B\u0E23\u0E37\u0E2D\u0E04\u0E38\u0E22\u0E01\u0E31\u0E1A AI \u0E01\u0E48\u0E2D\u0E19\u0E2A\u0E31\u0E48\u0E07\u0E40\u0E02\u0E35\u0E22\u0E19\u0E02\u0E48\u0E32\u0E27\u0E04\u0E23\u0E31\u0E1A");
+  }
+  const kb = getActiveKnowledgeContext(idea || conversationContext.slice(-500));
+  const kbStr = kb.length > 0 ? kb.map((k, i) => `[KB-${i + 1}] ${k.title}: ${k.summary}`).join("\n") : "";
+  const formatDesc = params.contentFormat === "social_post" ? "\u0E04\u0E2D\u0E19\u0E40\u0E17\u0E19\u0E15\u0E4C\u0E2A\u0E31\u0E49\u0E19\u0E01\u0E23\u0E30\u0E0A\u0E31\u0E1A \u0E19\u0E48\u0E32\u0E41\u0E0A\u0E23\u0E4C \u0E2D\u0E48\u0E32\u0E19\u0E08\u0E1A\u0E44\u0E27 \u0E40\u0E2B\u0E21\u0E32\u0E30\u0E17\u0E31\u0E49\u0E07\u0E25\u0E07\u0E2B\u0E19\u0E49\u0E32\u0E40\u0E27\u0E47\u0E1A\u0E41\u0E25\u0E30\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E42\u0E0B\u0E40\u0E0A\u0E35\u0E22\u0E25" : params.contentFormat === "article" ? "\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C\u0E43\u0E2B\u0E49\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49\u0E25\u0E36\u0E01\u0E0B\u0E36\u0E49\u0E07 \u0E2D\u0E48\u0E32\u0E19\u0E40\u0E02\u0E49\u0E32\u0E43\u0E08\u0E07\u0E48\u0E32\u0E22 \u0E21\u0E35\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E22\u0E48\u0E2D\u0E22\u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19\u0E43\u0E19\u0E2A\u0E44\u0E15\u0E25\u0E4C \u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT" : "\u0E02\u0E48\u0E32\u0E27\u0E1B\u0E23\u0E30\u0E0A\u0E32\u0E2A\u0E31\u0E21\u0E1E\u0E31\u0E19\u0E18\u0E4C / \u0E02\u0E48\u0E32\u0E27\u0E2A\u0E32\u0E23\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49\u0E17\u0E35\u0E48\u0E19\u0E48\u0E32\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E16\u0E37\u0E2D \u0E2D\u0E48\u0E32\u0E19\u0E07\u0E48\u0E32\u0E22 \u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19 \u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E02\u0E36\u0E49\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E40\u0E27\u0E47\u0E1A\u0E44\u0E0B\u0E15\u0E4C";
+  const systemInstruction = `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D\u0E1A\u0E23\u0E23\u0E13\u0E32\u0E18\u0E34\u0E01\u0E32\u0E23\u0E02\u0E48\u0E32\u0E27\u0E41\u0E25\u0E30\u0E19\u0E31\u0E01\u0E40\u0E02\u0E35\u0E22\u0E19\u0E04\u0E2D\u0E19\u0E40\u0E17\u0E19\u0E15\u0E4C\u0E21\u0E37\u0E2D\u0E2D\u0E32\u0E0A\u0E35\u0E1E\u0E1B\u0E23\u0E30\u0E08\u0E33\u0E40\u0E27\u0E47\u0E1A\u0E44\u0E0B\u0E15\u0E4C "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT" (\u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C)
+\u0E08\u0E07\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E40\u0E23\u0E35\u0E22\u0E07\u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E04\u0E38\u0E13\u0E20\u0E32\u0E1E\u0E2A\u0E39\u0E07\u0E15\u0E32\u0E21\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A "${formatDesc}" \u0E08\u0E32\u0E01\u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E2B\u0E23\u0E37\u0E2D\u0E42\u0E08\u0E17\u0E22\u0E4C\u0E17\u0E35\u0E48\u0E44\u0E14\u0E49\u0E23\u0E31\u0E1A
+${kbStr ? `
+\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07\u0E02\u0E2D\u0E07\u0E2D\u0E07\u0E04\u0E4C\u0E01\u0E23:
+${kbStr}
+` : ""}
+\u0E01\u0E0E\u0E2A\u0E33\u0E04\u0E31\u0E0D:
+- \u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E2A\u0E25\u0E30\u0E2A\u0E25\u0E27\u0E22 \u0E2D\u0E48\u0E32\u0E19\u0E07\u0E48\u0E32\u0E22 \u0E15\u0E31\u0E27\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19 \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E49\u0E28\u0E31\u0E1E\u0E17\u0E4C\u0E40\u0E17\u0E04\u0E19\u0E34\u0E04\u0E40\u0E01\u0E34\u0E19\u0E08\u0E33\u0E40\u0E1B\u0E47\u0E19
+- category \u0E15\u0E49\u0E2D\u0E07\u0E40\u0E25\u0E37\u0E2D\u0E01 1 \u0E04\u0E48\u0E32\u0E17\u0E35\u0E48\u0E15\u0E23\u0E07\u0E17\u0E35\u0E48\u0E2A\u0E38\u0E14\u0E08\u0E32\u0E01: "education", "innovation", "society", "international", "career", "ai-tech", "special"
+- contentType \u0E40\u0E25\u0E37\u0E2D\u0E01 "news" (\u0E16\u0E49\u0E32\u0E40\u0E1B\u0E47\u0E19\u0E02\u0E48\u0E32\u0E27\u0E2A\u0E32\u0E23/\u0E1B\u0E23\u0E30\u0E0A\u0E32\u0E2A\u0E31\u0E21\u0E1E\u0E31\u0E19\u0E18\u0E4C) \u0E2B\u0E23\u0E37\u0E2D "article" (\u0E16\u0E49\u0E32\u0E40\u0E1B\u0E47\u0E19\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49/\u0E04\u0E2D\u0E19\u0E40\u0E17\u0E19\u0E15\u0E4C)
+- suggestedImagePrompt \u0E40\u0E02\u0E35\u0E22\u0E19\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E43\u0E0A\u0E49\u0E2A\u0E31\u0E48\u0E07 AI \u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E\u0E1B\u0E01\u0E02\u0E48\u0E32\u0E27\u0E40\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E19\u0E35\u0E49\u0E43\u0E19\u0E2A\u0E31\u0E14\u0E2A\u0E48\u0E27\u0E19 16:9
+\u0E15\u0E2D\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19:
+{
+  "title": "\u0E1E\u0E32\u0E14\u0E2B\u0E31\u0E27\u0E02\u0E48\u0E32\u0E27/\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E04\u0E21\u0E0A\u0E31\u0E14",
+  "subtitle": "\u0E04\u0E33\u0E42\u0E1B\u0E23\u0E22\u0E02\u0E22\u0E32\u0E22\u0E04\u0E27\u0E32\u0E21\u0E19\u0E48\u0E32\u0E2A\u0E19\u0E43\u0E08",
+  "excerpt": "\u0E2A\u0E23\u0E38\u0E1B\u0E43\u0E08\u0E04\u0E27\u0E32\u0E21\u0E2A\u0E33\u0E04\u0E31\u0E0D 2-3 \u0E1B\u0E23\u0E30\u0E42\u0E22\u0E04",
+  "category": "education",
+  "contentType": "news",
+  "content": "\u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E02\u0E48\u0E32\u0E27\u0E2B\u0E23\u0E37\u0E2D\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E09\u0E1A\u0E31\u0E1A\u0E40\u0E15\u0E47\u0E21 \u0E41\u0E1A\u0E48\u0E07\u0E22\u0E48\u0E2D\u0E2B\u0E19\u0E49\u0E32\u0E41\u0E25\u0E30\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E22\u0E48\u0E2D\u0E22\u0E43\u0E2B\u0E49\u0E2D\u0E48\u0E32\u0E19\u0E2A\u0E1A\u0E32\u0E22\u0E15\u0E32",
+  "tags": ["\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT", "..."],
+  "suggestedImagePrompt": "Editorial 16:9 cover photography..."
+}`;
+  const userPayload = [
+    conversationContext ? `\u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E43\u0E19\u0E2B\u0E49\u0E2D\u0E07\u0E41\u0E0A\u0E17:
+${conversationContext}` : "",
+    idea ? `\u0E42\u0E08\u0E17\u0E22\u0E4C/\u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E40\u0E15\u0E34\u0E21:
+${idea}` : "",
+    params.category ? `\u0E2B\u0E21\u0E27\u0E14\u0E2B\u0E21\u0E39\u0E48\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23: ${params.category}` : ""
+  ].filter(Boolean).join("\n\n");
+  const res = await callRealLlm({
+    provider: params.provider,
+    model: params.model,
+    systemInstruction,
+    messages: [{ role: "user", content: userPayload }],
+    temperature: 0.6,
+    jsonMode: true
+  });
+  const parsed = extractStrictJson(res.text);
+  const validCategories = [
+    "education",
+    "innovation",
+    "society",
+    "international",
+    "career",
+    "ai-tech",
+    "special"
+  ];
+  const category = validCategories.includes(parsed.category) ? parsed.category : params.category || "education";
+  return {
+    title: String(parsed.title || "\u0E02\u0E48\u0E32\u0E27\u0E43\u0E2B\u0E21\u0E48\u0E08\u0E32\u0E01 \u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT").trim(),
+    subtitle: String(parsed.subtitle || "").trim(),
+    excerpt: String(parsed.excerpt || "").trim(),
+    category,
+    contentType: parsed.contentType === "article" ? "article" : "news",
+    content: String(parsed.content || "").trim(),
+    tags: Array.isArray(parsed.tags) ? parsed.tags.map(String) : ["\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT"],
+    suggestedImagePrompt: String(parsed.suggestedImagePrompt || "").trim(),
+    engineUsed: res.engineLabel
   };
 }
 
@@ -3987,6 +4175,29 @@ app.put("/api/pillars/:id", (req, res) => {
   ).run(title, subtitle, description, metricLabel, metricValue, statusBadge, id);
   res.json({ ok: true });
 });
+app.get("/api/ai/chat-sessions", (_req, res) => {
+  const rows = db.prepare(
+    `SELECT
+        session_id,
+        COUNT(*) AS message_count,
+        MAX(created_at) AS updated_at,
+        MAX(provider) AS provider,
+        (SELECT content FROM ai_chat_messages m2 WHERE m2.session_id = m1.session_id AND m2.role = 'user' ORDER BY m2.id ASC LIMIT 1) AS first_user_msg,
+        (SELECT content FROM ai_chat_messages m3 WHERE m3.session_id = m1.session_id ORDER BY m3.id DESC LIMIT 1) AS last_msg
+      FROM ai_chat_messages m1
+      GROUP BY session_id
+      ORDER BY MAX(id) DESC
+      LIMIT 40`
+  ).all().map((r) => ({
+    sessionId: r.session_id,
+    title: String(r.first_user_msg || "\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E43\u0E2B\u0E21\u0E48").slice(0, 70),
+    lastMessage: String(r.last_msg || "").slice(0, 100),
+    messageCount: Number(r.message_count || 0),
+    provider: r.provider || "gemini",
+    updatedAt: r.updated_at
+  }));
+  res.json(rows);
+});
 app.get("/api/ai/chat/:sessionId", (req, res) => {
   const sessionId = String(req.params.sessionId || "default");
   const rows = db.prepare("SELECT * FROM ai_chat_messages WHERE session_id = ? ORDER BY id ASC").all(sessionId).map((m) => ({
@@ -4006,7 +4217,7 @@ app.post("/api/ai/chat", async (req, res) => {
   try {
     const {
       sessionId = "default",
-      provider = "gemini",
+      provider = "auto",
       model,
       message,
       useKnowledgeBase = true
@@ -4028,6 +4239,38 @@ app.delete("/api/ai/chat/:sessionId", (req, res) => {
   db.prepare("DELETE FROM ai_chat_messages WHERE session_id = ?").run(sessionId);
   res.json({ ok: true });
 });
+app.post("/api/ai/evaluate-prompt", async (req, res) => {
+  try {
+    const { target = "image", sessionId, ideaText, aspectRatio, provider, model } = req.body || {};
+    const evaluated = await evaluateAndBuildMediaPrompt({
+      target: target === "video" ? "video" : "image",
+      sessionId: sessionId ? String(sessionId) : void 0,
+      ideaText: ideaText ? String(ideaText) : void 0,
+      aspectRatio,
+      provider,
+      model
+    });
+    res.json(evaluated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post("/api/ai/draft-from-chat", async (req, res) => {
+  try {
+    const { sessionId, ideaText, contentFormat, category, provider, model } = req.body || {};
+    const draft = await draftContentFromChat({
+      sessionId: sessionId ? String(sessionId) : void 0,
+      ideaText: ideaText ? String(ideaText) : void 0,
+      contentFormat,
+      category,
+      provider,
+      model
+    });
+    res.json(draft);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get("/api/ai/media", (req, res) => {
   const { type } = req.query;
   const rows = type ? db.prepare("SELECT * FROM ai_media_assets WHERE media_type = ? ORDER BY id DESC LIMIT 60").all(String(type)) : db.prepare("SELECT * FROM ai_media_assets ORDER BY id DESC LIMIT 80").all();
@@ -4045,24 +4288,49 @@ app.get("/api/ai/media", (req, res) => {
       resolution: a.resolution,
       interactionId: a.interaction_id,
       workflowId: a.workflow_id,
+      reviewStatus: a.review_status || "approved",
+      thaiSummary: a.thai_summary || "",
       createdAt: a.created_at
     }))
   );
 });
-app.delete("/api/ai/media/:id", (req, res) => {
-  db.prepare("DELETE FROM ai_media_assets WHERE id = ?").run(Number(req.params.id));
+app.put("/api/ai/media/:id/review", (req, res) => {
+  const id = Number(req.params.id);
+  const reviewStatus = req.body?.reviewStatus === "pending_review" ? "pending_review" : "approved";
+  db.prepare("UPDATE ai_media_assets SET review_status = ? WHERE id = ?").run(reviewStatus, id);
+  res.json({ ok: true, id, reviewStatus });
+});
+app.delete("/api/ai/media/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare("SELECT file_url FROM ai_media_assets WHERE id = ?").get(id);
+  if (existing?.file_url) {
+    if (existing.file_url.includes("blob.vercel-storage.com")) {
+      await deleteMediaFromCloudBlob(existing.file_url);
+    } else if (existing.file_url.startsWith("/uploads/")) {
+      const abs = path4.join(UPLOADS_ROOT, existing.file_url.replace(/^\/uploads\//, ""));
+      if (fs4.existsSync(abs)) {
+        try {
+          fs4.unlinkSync(abs);
+        } catch {
+        }
+      }
+    }
+  }
+  db.prepare("DELETE FROM ai_media_assets WHERE id = ?").run(id);
   res.json({ ok: true });
 });
 app.post("/api/ai/image/generate", async (req, res) => {
   try {
-    const { prompt, provider, model, aspectRatio, imageSize, workflowId } = req.body;
+    const { prompt, provider, model, aspectRatio, imageSize, workflowId, thaiSummary } = req.body;
     const asset = await generateRealImage({
       prompt: String(prompt || ""),
       provider,
       model,
       aspectRatio,
       imageSize,
-      workflowId: workflowId ? Number(workflowId) : null
+      workflowId: workflowId ? Number(workflowId) : null,
+      thaiSummary: thaiSummary ? String(thaiSummary) : "",
+      reviewStatus: "pending_review"
     });
     if (workflowId) {
       const wfRow = db.prepare("SELECT visual_json FROM ai_workflows WHERE id = ?").get(Number(workflowId));
@@ -4096,7 +4364,8 @@ app.post("/api/ai/video/generate", async (req, res) => {
       extendVideoUrl,
       stripAudio,
       previousInteractionId,
-      workflowId
+      workflowId,
+      thaiSummary
     } = req.body;
     const asset = await generateRealVideo({
       prompt: String(prompt || ""),
@@ -4110,7 +4379,9 @@ app.post("/api/ai/video/generate", async (req, res) => {
       extendVideoUrl,
       stripAudio: Boolean(stripAudio),
       previousInteractionId,
-      workflowId: workflowId ? Number(workflowId) : null
+      workflowId: workflowId ? Number(workflowId) : null,
+      thaiSummary: thaiSummary ? String(thaiSummary) : "",
+      reviewStatus: "pending_review"
     });
     if (workflowId) {
       const wfRow = db.prepare("SELECT video_json FROM ai_workflows WHERE id = ?").get(Number(workflowId));

@@ -32,6 +32,7 @@ import { api, formatThaiDate, formatViews } from '../api';
 interface Props {
   posts: Post[];
   initialEditPost?: Post | null;
+  prefillNewPost?: Partial<Post> | null;
   openCreateImmediately?: boolean;
   onClearInitialEdit?: () => void;
   onRefresh: () => Promise<void>;
@@ -57,6 +58,7 @@ const CONTENT_TYPES: { id: ContentType; label: string; icon: React.ReactNode }[]
 export const PostCrudManager: React.FC<Props> = ({
   posts,
   initialEditPost,
+  prefillNewPost,
   openCreateImmediately,
   onClearInitialEdit,
   onRefresh,
@@ -100,11 +102,38 @@ export const PostCrudManager: React.FC<Props> = ({
     if (initialEditPost) {
       openEdit(initialEditPost);
       onClearInitialEdit?.();
+    } else if (prefillNewPost) {
+      setEditingId(null);
+      setErrorMsg(null);
+      setShowExtraFields(Boolean(prefillNewPost.videoUrl || prefillNewPost.subtitle));
+      setForm({
+        title: prefillNewPost.title || '',
+        subtitle: prefillNewPost.subtitle || '',
+        excerpt: prefillNewPost.excerpt || '',
+        content: prefillNewPost.content || '',
+        category: prefillNewPost.category || 'education',
+        contentType:
+          prefillNewPost.contentType ||
+          (prefillNewPost.videoUrl ? 'video' : 'news'),
+        coverImage: prefillNewPost.coverImage || '/images/thumb-ai-edu.jpg',
+        videoUrl: prefillNewPost.videoUrl || '',
+        audioUrl: prefillNewPost.audioUrl || '',
+        tagsText:
+          Array.isArray(prefillNewPost.tags) && prefillNewPost.tags.length > 0
+            ? prefillNewPost.tags.join(', ')
+            : 'คมคิด by KOMKRIT, ข่าวการศึกษา',
+        author: prefillNewPost.author || 'คมกฤช (Komkrit)',
+        status: prefillNewPost.status || 'published',
+        isFeatured: Boolean(prefillNewPost.isFeatured),
+      });
+      setEditorOpen(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      onClearInitialEdit?.();
     } else if (openCreateImmediately) {
       openCreate();
       onClearInitialEdit?.();
     }
-  }, [initialEditPost, openCreateImmediately]);
+  }, [initialEditPost, prefillNewPost, openCreateImmediately]);
 
   const showToast = (msg: string) => {
     setSuccessMsg(msg);

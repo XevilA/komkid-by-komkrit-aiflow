@@ -265,6 +265,19 @@ export function initDatabase() {
     // ignore
   }
 
+  // Safe schema migration: add review_status & thai_summary to ai_media_assets if missing
+  try {
+    const mCols = db.prepare("PRAGMA table_info('ai_media_assets')").all() as { name: string }[];
+    if (!mCols.some((c) => c.name === 'review_status')) {
+      db.exec("ALTER TABLE ai_media_assets ADD COLUMN review_status TEXT DEFAULT 'approved'");
+    }
+    if (!mCols.some((c) => c.name === 'thai_summary')) {
+      db.exec("ALTER TABLE ai_media_assets ADD COLUMN thai_summary TEXT DEFAULT ''");
+    }
+  } catch {
+    // ignore
+  }
+
   // Strictly purge any legacy simulated / sandbox_ready logs
   db.exec("DELETE FROM publish_logs WHERE mode = 'sandbox_ready' OR response_note LIKE '%จำลอง%'");
 

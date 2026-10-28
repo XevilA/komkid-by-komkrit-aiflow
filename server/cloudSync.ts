@@ -177,3 +177,21 @@ export async function uploadMediaToCloudBlob(
   const data = (await res.json()) as { url?: string };
   return data.url || null;
 }
+
+export async function deleteMediaFromCloudBlob(blobUrl: string): Promise<void> {
+  const token = getBlobToken();
+  if (!token || !blobUrl || !blobUrl.includes('blob.vercel-storage.com')) return;
+  try {
+    await fetch(`${BLOB_API_BASE}/delete`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-api-version': '7',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ urls: [blobUrl] }),
+    });
+  } catch {
+    // ignore cleanup errors
+  }
+}

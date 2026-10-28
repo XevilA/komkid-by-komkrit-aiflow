@@ -508,7 +508,7 @@ export async function testProviderConnection(params: {
 // ============================================================================
 export async function chatWithRealModel(params: {
   sessionId: string;
-  provider: Exclude<LlmProviderId, 'auto'>;
+  provider?: LlmProviderId;
   model?: string;
   message: string;
   useKnowledgeBase?: boolean;
@@ -937,5 +937,214 @@ export async function assistPostContent(params: {
     content: wf.scriptOutput.fullArticleMarkdown || '',
     tags: [catLabel, 'คมคิด by KOMKRIT', 'คิดต่างอย่างสร้างสรรค์'],
     engineUsed: wf.engineUsed,
+  };
+}
+
+// ============================================================================
+// AI PROMPT DIRECTOR & EVALUATOR (CHAT / IDEA -> ASSESSMENT + FULL IMAGE/VDO PROMPT)
+// ============================================================================
+export async function evaluateAndBuildMediaPrompt(params: {
+  target: 'image' | 'video';
+  sessionId?: string;
+  ideaText?: string;
+  aspectRatio?: '16:9' | '9:16' | '1:1';
+  provider?: LlmProviderId;
+  model?: string;
+}) {
+  let conversationContext = '';
+  if (params.sessionId) {
+    const rows = db
+      .prepare(
+        'SELECT role, content FROM ai_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 14'
+      )
+      .all(params.sessionId) as { role: string; content: string }[];
+    if (rows.length > 0) {
+      conversationContext = rows
+        .reverse()
+        .map((r) => `${r.role === 'user' ? 'ผู้ดูแล' : 'AI'}: ${r.content}`)
+        .join('\n');
+    }
+  }
+
+  const idea = (params.ideaText || '').trim();
+  if (!conversationContext && !idea) {
+    throw new Error('กรุณาพิมพ์บอกสิ่งที่ต้องการสร้าง หรือคุยกับ AI ก่อนให้ประเมิน Prompt ครับ');
+  }
+
+  const isVideo = params.target === 'video';
+  const defaultAspect = params.aspectRatio || '16:9';
+
+  const systemInstruction = isVideo
+    ? `คุณคือ Creative Video Director & Prompt Engineer ประจำสตูดิโอ "คมคิด by KOMKRIT"
+หน้าที่ของคุณคือ:
+1) ประเมินความต้องการของผู้ใช้จากบทสนทนาหรือไอเดียที่ให้มา อธิบายเป็นภาษาไทยที่อ่านเข้าใจง่าย สุภาพ เหมาะสำหรับผู้บริหาร/ผู้ใหญ่ (assessmentThai) ว่าคลิปนี้ควรเล่าภาพอย่างไรให้ดึงดูดและดูเป็นมืออาชีพ
+2) สรุปภาพฉากวิดีโอที่จะสร้างเป็นภาษาไทยสั้นๆ ชัดเจน (visualSummaryThai)
+3) เขียน Full Video Prompt ภาษาอังกฤษระดับภาพยนตร์ (fullPrompt) สำหรับส่งให้ Google Veo / Gemini Video Agent โดยระบุครบถ้วน: Subject, Action, Setting, Camera Movement (smooth dolly / tracking / cinematic pan), Lighting & Color Palette (warm inspiring light, deep navy & amber accents where appropriate), Ambient Sound & Pacing
+4) แนะนำสัดส่วนภาพ (recommendedAspectRatio: "16:9" สำหรับเว็บ/YouTube หรือ "9:16" สำหรับคลิปสั้นมือถือ) และหัวข้อข่าวที่เข้ากับคลิปนี้ (suggestedPostTitle)
+ตอบเป็น JSON เท่านั้นตามโครงสร้างนี้:
+{
+  "assessmentThai": "...",
+  "visualSummaryThai": "...",
+  "fullPrompt": "...",
+  "recommendedAspectRatio": "${defaultAspect}",
+  "suggestedPostTitle": "..."
+}`
+    : `คุณคือ Art Director & AI Image Prompt Engineer ประจำสตูดิโอ "คมคิด by KOMKRIT"
+หน้าที่ของคุณคือ:
+1) ประเมินความต้องการของผู้ใช้จากบทสนทนาหรือไอเดียที่ให้มา อธิบายเป็นภาษาไทยที่อ่านเข้าใจง่าย สุภาพ เหมาะสำหรับผู้บริหาร/ผู้ใหญ่ (assessmentThai) ว่าภาพนี้ควรจัดองค์ประกอบ โทนแสง และอารมณ์อย่างไรให้น่าเชื่อถือและดึงดูดสายตา
+2) สรุปภาพที่จะได้เป็นภาษาไทยสั้นๆ ชัดเจน (visualSummaryThai)
+3) เขียน Full Image Prompt ภาษาอังกฤษระดับมืออาชีพ (fullPrompt) สำหรับส่งให้ AI Image Agent (Gemini Nano Banana 2.1 / OpenAI GPT-Image-1) โดยระบุครบถ้วน: Main Subject, Environment, Composition, Lighting, Color Harmony, Camera Lens / Editorial Photography Style, High Detail, No gibberish text
+4) แนะนำสัดส่วนภาพ (recommendedAspectRatio: "16:9", "1:1" หรือ "9:16") และหัวข้อข่าวที่เข้ากับภาพนี้ (suggestedPostTitle)
+ตอบเป็น JSON เท่านั้นตามโครงสร้างนี้:
+{
+  "assessmentThai": "...",
+  "visualSummaryThai": "...",
+  "fullPrompt": "...",
+  "recommendedAspectRatio": "${defaultAspect}",
+  "suggestedPostTitle": "..."
+}`;
+
+  const userPayload = [
+    conversationContext ? `บทสนทนาล่าสุดในห้องแชท:\n${conversationContext}` : '',
+    idea ? `คำสั่ง/แนวคิดเพิ่มเติมจากผู้ดูแล:\n${idea}` : '',
+    `สัดส่วนที่ต้องการเบื้องต้น: ${defaultAspect}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const res = await callRealLlm({
+    provider: params.provider,
+    model: params.model,
+    systemInstruction,
+    messages: [{ role: 'user', content: userPayload }],
+    temperature: 0.55,
+    jsonMode: true,
+  });
+
+  const parsed = extractStrictJson(res.text);
+  const recAspect = ['16:9', '9:16', '1:1'].includes(parsed.recommendedAspectRatio)
+    ? parsed.recommendedAspectRatio
+    : defaultAspect;
+
+  return {
+    target: params.target,
+    assessmentThai:
+      String(parsed.assessmentThai || '').trim() ||
+      'AI ประเมินแนวคิดและออกแบบองค์ประกอบภาพระดับมืออาชีพให้เรียบร้อยแล้ว',
+    visualSummaryThai:
+      String(parsed.visualSummaryThai || '').trim() ||
+      (isVideo ? 'วิดีโอคุณภาพสูงถ่ายทอดแนวคิดตามที่สนทนา' : 'ภาพประกอบข่าวคุณภาพสูงตามแนวคิดที่สนทนา'),
+    fullPrompt: String(parsed.fullPrompt || '').trim(),
+    recommendedAspectRatio: recAspect as '16:9' | '9:16' | '1:1',
+    suggestedPostTitle: String(parsed.suggestedPostTitle || '').trim(),
+    engineUsed: res.engineLabel,
+  };
+}
+
+// ============================================================================
+// AI NEWS & CONTENT WRITER DIRECTLY FROM CHAT CONVERSATION OR BRIEF
+// ============================================================================
+export async function draftContentFromChat(params: {
+  sessionId?: string;
+  ideaText?: string;
+  contentFormat?: 'news' | 'article' | 'social_post';
+  category?: string;
+  provider?: LlmProviderId;
+  model?: string;
+}) {
+  let conversationContext = '';
+  if (params.sessionId) {
+    const rows = db
+      .prepare(
+        'SELECT role, content FROM ai_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 18'
+      )
+      .all(params.sessionId) as { role: string; content: string }[];
+    if (rows.length > 0) {
+      conversationContext = rows
+        .reverse()
+        .map((r) => `${r.role === 'user' ? 'ผู้ดูแล' : 'AI'}: ${r.content}`)
+        .join('\n');
+    }
+  }
+
+  const idea = (params.ideaText || '').trim();
+  if (!conversationContext && !idea) {
+    throw new Error('กรุณาพิมพ์หัวข้อข่าว/เนื้อหาที่ต้องการ หรือคุยกับ AI ก่อนสั่งเขียนข่าวครับ');
+  }
+
+  const kb = getActiveKnowledgeContext(idea || conversationContext.slice(-500));
+  const kbStr =
+    kb.length > 0
+      ? kb.map((k, i) => `[KB-${i + 1}] ${k.title}: ${k.summary}`).join('\n')
+      : '';
+
+  const formatDesc =
+    params.contentFormat === 'social_post'
+      ? 'คอนเทนต์สั้นกระชับ น่าแชร์ อ่านจบไว เหมาะทั้งลงหน้าเว็บและโพสต์โซเชียล'
+      : params.contentFormat === 'article'
+      ? 'บทความวิเคราะห์ให้ความรู้ลึกซึ้ง อ่านเข้าใจง่าย มีหัวข้อย่อยชัดเจนในสไตล์ คมคิด by KOMKRIT'
+      : 'ข่าวประชาสัมพันธ์ / ข่าวสารความรู้ที่น่าเชื่อถือ อ่านง่าย ชัดเจน พร้อมขึ้นหน้าเว็บไซต์';
+
+  const systemInstruction = `คุณคือบรรณาธิการข่าวและนักเขียนคอนเทนต์มืออาชีพประจำเว็บไซต์ "คมคิด by KOMKRIT" (คิดต่างอย่างสร้างสรรค์)
+จงเรียบเรียงเนื้อหาภาษาไทยคุณภาพสูงตามรูปแบบ "${formatDesc}" จากบทสนทนาหรือโจทย์ที่ได้รับ
+${kbStr ? `\nข้อมูลอ้างอิงขององค์กร:\n${kbStr}\n` : ''}
+กฎสำคัญ:
+- ภาษาไทยสละสลวย อ่านง่าย ตัวอย่างชัดเจน ไม่ใช้ศัพท์เทคนิคเกินจำเป็น
+- category ต้องเลือก 1 ค่าที่ตรงที่สุดจาก: "education", "innovation", "society", "international", "career", "ai-tech", "special"
+- contentType เลือก "news" (ถ้าเป็นข่าวสาร/ประชาสัมพันธ์) หรือ "article" (ถ้าเป็นบทความความรู้/คอนเทนต์)
+- suggestedImagePrompt เขียนเป็นภาษาอังกฤษละเอียดสำหรับใช้สั่ง AI สร้างภาพปกข่าวเรื่องนี้ในสัดส่วน 16:9
+ตอบเป็น JSON เท่านั้น:
+{
+  "title": "พาดหัวข่าว/บทความคมชัด",
+  "subtitle": "คำโปรยขยายความน่าสนใจ",
+  "excerpt": "สรุปใจความสำคัญ 2-3 ประโยค",
+  "category": "education",
+  "contentType": "news",
+  "content": "เนื้อหาข่าวหรือบทความฉบับเต็ม แบ่งย่อหน้าและหัวข้อย่อยให้อ่านสบายตา",
+  "tags": ["คมคิด by KOMKRIT", "..."],
+  "suggestedImagePrompt": "Editorial 16:9 cover photography..."
+}`;
+
+  const userPayload = [
+    conversationContext ? `บทสนทนาในห้องแชท:\n${conversationContext}` : '',
+    idea ? `โจทย์/คำสั่งเพิ่มเติม:\n${idea}` : '',
+    params.category ? `หมวดหมู่ที่ต้องการ: ${params.category}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const res = await callRealLlm({
+    provider: params.provider,
+    model: params.model,
+    systemInstruction,
+    messages: [{ role: 'user', content: userPayload }],
+    temperature: 0.6,
+    jsonMode: true,
+  });
+
+  const parsed = extractStrictJson(res.text);
+  const validCategories = [
+    'education',
+    'innovation',
+    'society',
+    'international',
+    'career',
+    'ai-tech',
+    'special',
+  ];
+  const category = validCategories.includes(parsed.category)
+    ? parsed.category
+    : params.category || 'education';
+
+  return {
+    title: String(parsed.title || 'ข่าวใหม่จาก คมคิด by KOMKRIT').trim(),
+    subtitle: String(parsed.subtitle || '').trim(),
+    excerpt: String(parsed.excerpt || '').trim(),
+    category,
+    contentType: parsed.contentType === 'article' ? 'article' : 'news',
+    content: String(parsed.content || '').trim(),
+    tags: Array.isArray(parsed.tags) ? parsed.tags.map(String) : ['คมคิด by KOMKRIT'],
+    suggestedImagePrompt: String(parsed.suggestedImagePrompt || '').trim(),
+    engineUsed: res.engineLabel,
   };
 }

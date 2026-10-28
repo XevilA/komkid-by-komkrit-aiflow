@@ -360,6 +360,37 @@ export interface AiEngineSettings {
   hasLocalKey: boolean;
 }
 
+export interface AiChatSession {
+  sessionId: string;
+  title: string;
+  lastMessage: string;
+  messageCount: number;
+  provider: string;
+  updatedAt: string;
+}
+
+export interface AiEvaluatedPrompt {
+  target: 'image' | 'video';
+  assessmentThai: string;
+  visualSummaryThai: string;
+  fullPrompt: string;
+  recommendedAspectRatio: '16:9' | '9:16' | '1:1';
+  suggestedPostTitle: string;
+  engineUsed: string;
+}
+
+export interface AiDraftFromChat {
+  title: string;
+  subtitle: string;
+  excerpt: string;
+  category: CategoryId;
+  contentType: ContentType;
+  content: string;
+  tags: string[];
+  suggestedImagePrompt: string;
+  engineUsed: string;
+}
+
 export interface AiChatMessage {
   id: number;
   sessionId: string;
@@ -385,6 +416,8 @@ export interface AiMediaAsset {
   resolution?: string;
   interactionId?: string;
   workflowId?: number | null;
+  reviewStatus?: 'pending_review' | 'approved';
+  thaiSummary?: string;
   createdAt: string;
 }
 

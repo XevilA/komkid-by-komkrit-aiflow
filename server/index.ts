@@ -10,6 +10,8 @@ import {
   testProviderConnection,
   chatWithRealModel,
   generateFlowStoryboardWithLlm,
+  evaluateAndBuildMediaPrompt,
+  draftContentFromChat,
   LlmProviderId,
 } from './aiEngine.ts';
 import {
@@ -34,6 +36,7 @@ import {
   syncDatabaseBeforeRequest,
   persistDatabaseToCloud,
   uploadMediaToCloudBlob,
+  deleteMediaFromCloudBlob,
 } from './cloudSync.ts';
 
 initDatabase();
@@ -743,6 +746,33 @@ app.put('/api/pillars/:id', (req, res) => {
 // ============================================================================
 // REAL MULTI-LLM INTERACTIVE CHAT (GEMINI / CLAUDE / DEEPSEEK / CHATGPT)
 // ============================================================================
+app.get('/api/ai/chat-sessions', (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT
+        session_id,
+        COUNT(*) AS message_count,
+        MAX(created_at) AS updated_at,
+        MAX(provider) AS provider,
+        (SELECT content FROM ai_chat_messages m2 WHERE m2.session_id = m1.session_id AND m2.role = 'user' ORDER BY m2.id ASC LIMIT 1) AS first_user_msg,
+        (SELECT content FROM ai_chat_messages m3 WHERE m3.session_id = m1.session_id ORDER BY m3.id DESC LIMIT 1) AS last_msg
+      FROM ai_chat_messages m1
+      GROUP BY session_id
+      ORDER BY MAX(id) DESC
+      LIMIT 40`
+    )
+    .all()
+    .map((r: any) => ({
+      sessionId: r.session_id,
+      title: String(r.first_user_msg || 'หัวข้อสนทนาใหม่').slice(0, 70),
+      lastMessage: String(r.last_msg || '').slice(0, 100),
+      messageCount: Number(r.message_count || 0),
+      provider: r.provider || 'gemini',
+      updatedAt: r.updated_at,
+    }));
+  res.json(rows);
+});
+
 app.get('/api/ai/chat/:sessionId', (req, res) => {
   const sessionId = String(req.params.sessionId || 'default');
   const rows = db
@@ -766,7 +796,7 @@ app.post('/api/ai/chat', async (req, res) => {
   try {
     const {
       sessionId = 'default',
-      provider = 'gemini',
+      provider = 'auto',
       model,
       message,
       useKnowledgeBase = true,
@@ -790,6 +820,40 @@ app.delete('/api/ai/chat/:sessionId', (req, res) => {
   const sessionId = String(req.params.sessionId || 'default');
   db.prepare('DELETE FROM ai_chat_messages WHERE session_id = ?').run(sessionId);
   res.json({ ok: true });
+});
+
+app.post('/api/ai/evaluate-prompt', async (req, res) => {
+  try {
+    const { target = 'image', sessionId, ideaText, aspectRatio, provider, model } = req.body || {};
+    const evaluated = await evaluateAndBuildMediaPrompt({
+      target: target === 'video' ? 'video' : 'image',
+      sessionId: sessionId ? String(sessionId) : undefined,
+      ideaText: ideaText ? String(ideaText) : undefined,
+      aspectRatio,
+      provider,
+      model,
+    });
+    res.json(evaluated);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/ai/draft-from-chat', async (req, res) => {
+  try {
+    const { sessionId, ideaText, contentFormat, category, provider, model } = req.body || {};
+    const draft = await draftContentFromChat({
+      sessionId: sessionId ? String(sessionId) : undefined,
+      ideaText: ideaText ? String(ideaText) : undefined,
+      contentFormat,
+      category,
+      provider,
+      model,
+    });
+    res.json(draft);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
 });
 
 // ============================================================================
@@ -817,19 +881,48 @@ app.get('/api/ai/media', (req, res) => {
       resolution: a.resolution,
       interactionId: a.interaction_id,
       workflowId: a.workflow_id,
+      reviewStatus: a.review_status || 'approved',
+      thaiSummary: a.thai_summary || '',
       createdAt: a.created_at,
     }))
   );
 });
 
-app.delete('/api/ai/media/:id', (req, res) => {
-  db.prepare('DELETE FROM ai_media_assets WHERE id = ?').run(Number(req.params.id));
+app.put('/api/ai/media/:id/review', (req, res) => {
+  const id = Number(req.params.id);
+  const reviewStatus = req.body?.reviewStatus === 'pending_review' ? 'pending_review' : 'approved';
+  db.prepare('UPDATE ai_media_assets SET review_status = ? WHERE id = ?').run(reviewStatus, id);
+  res.json({ ok: true, id, reviewStatus });
+});
+
+app.delete('/api/ai/media/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db
+    .prepare('SELECT file_url FROM ai_media_assets WHERE id = ?')
+    .get(id) as { file_url?: string } | undefined;
+
+  if (existing?.file_url) {
+    if (existing.file_url.includes('blob.vercel-storage.com')) {
+      await deleteMediaFromCloudBlob(existing.file_url);
+    } else if (existing.file_url.startsWith('/uploads/')) {
+      const abs = path.join(UPLOADS_ROOT, existing.file_url.replace(/^\/uploads\//, ''));
+      if (fs.existsSync(abs)) {
+        try {
+          fs.unlinkSync(abs);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  db.prepare('DELETE FROM ai_media_assets WHERE id = ?').run(id);
   res.json({ ok: true });
 });
 
 app.post('/api/ai/image/generate', async (req, res) => {
   try {
-    const { prompt, provider, model, aspectRatio, imageSize, workflowId } = req.body;
+    const { prompt, provider, model, aspectRatio, imageSize, workflowId, thaiSummary } = req.body;
     const asset = await generateRealImage({
       prompt: String(prompt || ''),
       provider,
@@ -837,6 +930,8 @@ app.post('/api/ai/image/generate', async (req, res) => {
       aspectRatio,
       imageSize,
       workflowId: workflowId ? Number(workflowId) : null,
+      thaiSummary: thaiSummary ? String(thaiSummary) : '',
+      reviewStatus: 'pending_review',
     });
 
     // If linked to an AI workflow, attach the real generated image URL directly to visualOutput
@@ -877,6 +972,7 @@ app.post('/api/ai/video/generate', async (req, res) => {
       stripAudio,
       previousInteractionId,
       workflowId,
+      thaiSummary,
     } = req.body;
 
     const asset = await generateRealVideo({
@@ -892,6 +988,8 @@ app.post('/api/ai/video/generate', async (req, res) => {
       stripAudio: Boolean(stripAudio),
       previousInteractionId,
       workflowId: workflowId ? Number(workflowId) : null,
+      thaiSummary: thaiSummary ? String(thaiSummary) : '',
+      reviewStatus: 'pending_review',
     });
 
     if (workflowId) {
