@@ -24,11 +24,38 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 var DB_PATH = path.join(DATA_DIR, "komkrit.db");
 var db = new DatabaseSync(DB_PATH);
-db.exec(`
-  PRAGMA journal_mode = MEMORY;
-  PRAGMA synchronous = NORMAL;
-  PRAGMA foreign_keys = ON;
-`);
+function applyPragmas(database) {
+  database.exec(`
+    PRAGMA journal_mode = ${IS_SERVERLESS ? "DELETE" : "MEMORY"};
+    PRAGMA synchronous = NORMAL;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+applyPragmas(db);
+function exportDatabaseSnapshotBuffer() {
+  const snapPath = path.join(DATA_DIR, `snap-${Date.now()}-${Math.round(Math.random() * 1e5)}.db`);
+  try {
+    if (fs.existsSync(snapPath)) fs.unlinkSync(snapPath);
+    const escaped = snapPath.replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${escaped}'`);
+    return fs.readFileSync(snapPath);
+  } finally {
+    try {
+      if (fs.existsSync(snapPath)) fs.unlinkSync(snapPath);
+    } catch {
+    }
+  }
+}
+function reloadDatabaseFromSnapshotBuffer(sqliteBytes) {
+  try {
+    db.close();
+  } catch {
+  }
+  fs.writeFileSync(DB_PATH, sqliteBytes);
+  db = new DatabaseSync(DB_PATH);
+  applyPragmas(db);
+  initDatabase();
+}
 function initDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS posts (
@@ -309,8 +336,18 @@ function seedOmnichannelIfEmpty() {
   }
 }
 function seedIfEmpty() {
+  const seededFlag = db.prepare("SELECT value FROM settings WHERE key = 'initial_seed_done'").get();
+  if (seededFlag?.value === "1") return;
   const countRow = db.prepare("SELECT COUNT(*) as cnt FROM posts").get();
-  if (countRow && countRow.cnt > 0) return;
+  if (countRow && countRow.cnt > 0) {
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('initial_seed_done', '1')"
+    ).run();
+    return;
+  }
+  db.prepare(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('initial_seed_done', '1')"
+  ).run();
   const insertPost = db.prepare(`
     INSERT INTO posts (
       title, subtitle, excerpt, content, category, content_type, cover_image,
@@ -897,6 +934,148 @@ import path2 from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { GoogleGenAI } from "@google/genai";
+
+// server/cloudSync.ts
+import crypto from "node:crypto";
+var BLOB_API_BASE = "https://blob.vercel-storage.com";
+var STATE_PREFIX = "state/komkrit-db-";
+var currentLoadedBlobPath = "";
+var lastCheckAt = 0;
+function getBlobToken() {
+  return (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
+}
+function isCloudSyncEnabled() {
+  return IS_SERVERLESS && Boolean(getBlobToken());
+}
+function deriveEncryptionKey(token) {
+  return crypto.createHash("sha256").update(`komkrit-sqlite-v1:${token}`).digest();
+}
+function encryptBuffer(plain, token) {
+  const key = deriveEncryptionKey(token);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]);
+}
+function decryptBuffer(packed, token) {
+  if (packed.length < 29) {
+    throw new Error("Invalid encrypted DB snapshot");
+  }
+  const key = deriveEncryptionKey(token);
+  const iv = packed.subarray(0, 12);
+  const tag = packed.subarray(12, 28);
+  const ciphertext = packed.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+async function listStateBlobs(token) {
+  const res = await fetch(
+    `${BLOB_API_BASE}?prefix=${encodeURIComponent(STATE_PREFIX)}&limit=20`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-api-version": "7"
+      },
+      cache: "no-store"
+    }
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  const blobs = Array.isArray(data.blobs) ? data.blobs : [];
+  blobs.sort((a, b) => b.pathname > a.pathname ? 1 : -1);
+  return blobs;
+}
+async function deleteOldStateBlobs(token, urlsToDelete) {
+  if (urlsToDelete.length === 0) return;
+  try {
+    await fetch(`${BLOB_API_BASE}/delete`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-api-version": "7",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ urls: urlsToDelete })
+    });
+  } catch {
+  }
+}
+async function syncDatabaseBeforeRequest(forceCheck = false) {
+  if (!isCloudSyncEnabled()) return;
+  const token = getBlobToken();
+  const now = Date.now();
+  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 1200) {
+    return;
+  }
+  lastCheckAt = now;
+  const blobs = await listStateBlobs(token);
+  if (blobs.length === 0) {
+    await persistDatabaseToCloud();
+    return;
+  }
+  const newest = blobs[0];
+  if (newest.pathname === currentLoadedBlobPath) {
+    return;
+  }
+  const dl = await fetch(newest.url, { cache: "no-store" });
+  if (!dl.ok) return;
+  const encryptedBytes = Buffer.from(await dl.arrayBuffer());
+  const sqliteBytes = decryptBuffer(encryptedBytes, token);
+  reloadDatabaseFromSnapshotBuffer(sqliteBytes);
+  currentLoadedBlobPath = newest.pathname;
+}
+async function persistDatabaseToCloud() {
+  if (!isCloudSyncEnabled()) return;
+  const token = getBlobToken();
+  const sqliteBytes = exportDatabaseSnapshotBuffer();
+  const encryptedBytes = encryptBuffer(sqliteBytes, token);
+  const ts = String(Date.now()).padStart(15, "0");
+  const rand = crypto.randomBytes(3).toString("hex");
+  const pathname = `${STATE_PREFIX}${ts}-${rand}.enc`;
+  const putRes = await fetch(`${BLOB_API_BASE}/${pathname}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-api-version": "7",
+      "x-content-type": "application/octet-stream",
+      "x-add-random-suffix": "0",
+      "x-cache-control-max-age": "0"
+    },
+    body: new Uint8Array(encryptedBytes)
+  });
+  if (putRes.ok) {
+    currentLoadedBlobPath = pathname;
+    lastCheckAt = Date.now();
+    const blobs = await listStateBlobs(token);
+    if (blobs.length > 2) {
+      const oldUrls = blobs.slice(2).map((b) => b.url);
+      await deleteOldStateBlobs(token, oldUrls);
+    }
+  }
+}
+async function uploadMediaToCloudBlob(buffer, filename, mimeType) {
+  const token = getBlobToken();
+  if (!IS_SERVERLESS || !token) return null;
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const pathname = `media/${Date.now()}-${safeName}`;
+  const res = await fetch(`${BLOB_API_BASE}/${pathname}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-api-version": "7",
+      "x-content-type": mimeType || "application/octet-stream",
+      "x-add-random-suffix": "0"
+    },
+    body: new Uint8Array(buffer)
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.url || null;
+}
+
+// server/mediaEngine.ts
 var execFileAsync = promisify(execFile);
 var UPLOADS_ROOT = IS_SERVERLESS ? "/tmp/komkrit-uploads" : path2.resolve(process.cwd(), "uploads");
 var IMAGES_DIR = path2.join(UPLOADS_ROOT, "images");
@@ -917,7 +1096,7 @@ function getSettingValue(key, envFallback) {
   }
   return "";
 }
-function resolveLocalAssetPath(urlOrPath) {
+async function resolveLocalAssetPath(urlOrPath) {
   if (!urlOrPath) return null;
   const clean = urlOrPath.trim();
   if (!clean) return null;
@@ -929,6 +1108,22 @@ function resolveLocalAssetPath(urlOrPath) {
       const tmpPath = path2.join(IMAGES_DIR, `inline-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`);
       fs2.writeFileSync(tmpPath, Buffer.from(match[2], "base64"));
       return tmpPath;
+    }
+  }
+  if (clean.startsWith("https://") || clean.startsWith("http://")) {
+    try {
+      const parsed = new URL(clean);
+      const base = path2.basename(parsed.pathname) || `remote-${Date.now()}.bin`;
+      const targetDir = base.endsWith(".mp4") || base.endsWith(".mov") ? VIDEOS_DIR : base.endsWith(".mp3") || base.endsWith(".wav") ? AUDIO_DIR : IMAGES_DIR;
+      const cachedPath = path2.join(targetDir, base);
+      if (fs2.existsSync(cachedPath)) return cachedPath;
+      const dl = await fetch(clean);
+      if (dl.ok) {
+        fs2.writeFileSync(cachedPath, Buffer.from(await dl.arrayBuffer()));
+        return cachedPath;
+      }
+    } catch {
+      return null;
     }
   }
   if (clean.startsWith("/uploads/")) {
@@ -988,7 +1183,20 @@ async function uploadLocalFileToGemini(ai, localPath, defaultMime) {
   }
   return { uri, mimeType: uploaded.mimeType || mimeType };
 }
-function recordMediaAsset(params) {
+async function recordMediaAsset(params) {
+  let finalFileUrl = params.fileUrl;
+  if (IS_SERVERLESS && finalFileUrl.startsWith("/uploads/")) {
+    const abs = path2.join(UPLOADS_ROOT, finalFileUrl.replace(/^\/uploads\//, ""));
+    if (fs2.existsSync(abs)) {
+      const buf = fs2.readFileSync(abs);
+      const cloudUrl = await uploadMediaToCloudBlob(buf, path2.basename(abs), params.mimeType);
+      if (cloudUrl) {
+        finalFileUrl = cloudUrl;
+      } else if (params.mediaType === "image" && buf.length <= 4 * 1024 * 1024) {
+        finalFileUrl = `data:${params.mimeType};base64,${buf.toString("base64")}`;
+      }
+    }
+  }
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const res = db.prepare(
     `INSERT INTO ai_media_assets (
@@ -1000,7 +1208,7 @@ function recordMediaAsset(params) {
     params.provider,
     params.model,
     params.prompt,
-    params.fileUrl,
+    finalFileUrl,
     params.mimeType,
     params.aspectRatio || "",
     params.durationSec || 0,
@@ -1012,6 +1220,7 @@ function recordMediaAsset(params) {
   return {
     id: Number(res.lastInsertRowid),
     ...params,
+    fileUrl: finalFileUrl,
     createdAt: now
   };
 }
@@ -1068,8 +1277,8 @@ async function generateRealImage(params) {
     const filename2 = `gemini-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`;
     const absPath = path2.join(IMAGES_DIR, filename2);
     fs2.writeFileSync(absPath, imgBuffer2);
-    const fileUrl2 = IS_SERVERLESS && imgBuffer2.length <= 4 * 1024 * 1024 ? `data:${mimeType};base64,${imgBuffer2.toString("base64")}` : `/uploads/images/${filename2}`;
-    return recordMediaAsset({
+    const fileUrl2 = `/uploads/images/${filename2}`;
+    return await recordMediaAsset({
       mediaType: "image",
       provider: "gemini",
       model: model2,
@@ -1121,8 +1330,8 @@ async function generateRealImage(params) {
   }
   const filename = `openai-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.png`;
   fs2.writeFileSync(path2.join(IMAGES_DIR, filename), imgBuffer);
-  const fileUrl = IS_SERVERLESS && imgBuffer.length <= 4 * 1024 * 1024 ? `data:image/png;base64,${imgBuffer.toString("base64")}` : `/uploads/images/${filename}`;
-  return recordMediaAsset({
+  const fileUrl = `/uploads/images/${filename}`;
+  return await recordMediaAsset({
     mediaType: "image",
     provider: "openai",
     model,
@@ -1185,14 +1394,14 @@ async function generateRealVideo(params) {
       );
     }
     const instance = { prompt };
-    const firstAbs2 = resolveLocalAssetPath(params.firstFrameUrl);
+    const firstAbs2 = await resolveLocalAssetPath(params.firstFrameUrl);
     if (firstAbs2) {
       instance.image = {
         bytesBase64Encoded: fs2.readFileSync(firstAbs2).toString("base64"),
         mimeType: guessMimeType(firstAbs2, "image/png")
       };
     }
-    const lastAbs2 = resolveLocalAssetPath(params.lastFrameUrl);
+    const lastAbs2 = await resolveLocalAssetPath(params.lastFrameUrl);
     if (lastAbs2) {
       instance.lastFrame = {
         bytesBase64Encoded: fs2.readFileSync(lastAbs2).toString("base64"),
@@ -1306,7 +1515,7 @@ async function generateRealVideo(params) {
     httpOptions: { timeout: 6e5 }
   });
   const inputParts = [];
-  const firstAbs = resolveLocalAssetPath(params.firstFrameUrl);
+  const firstAbs = await resolveLocalAssetPath(params.firstFrameUrl);
   let firstUploaded = null;
   if (firstAbs) {
     firstUploaded = await uploadLocalFileToGemini(ai, firstAbs, "image/png");
@@ -1316,7 +1525,7 @@ async function generateRealVideo(params) {
       mime_type: firstUploaded.mimeType
     });
   }
-  const lastAbs = resolveLocalAssetPath(params.lastFrameUrl);
+  const lastAbs = await resolveLocalAssetPath(params.lastFrameUrl);
   if (lastAbs && firstUploaded) {
     if (lastAbs === firstAbs) {
       inputParts.push({
@@ -1336,7 +1545,7 @@ async function generateRealVideo(params) {
   const refUrls = Array.isArray(params.referenceImageUrls) ? params.referenceImageUrls.filter(Boolean) : [];
   const uploadedRefCount = [];
   for (const rUrl of refUrls) {
-    const refAbs = resolveLocalAssetPath(rUrl);
+    const refAbs = await resolveLocalAssetPath(rUrl);
     if (refAbs) {
       const up = await uploadLocalFileToGemini(ai, refAbs, "image/png");
       inputParts.push({
@@ -1347,7 +1556,7 @@ async function generateRealVideo(params) {
       uploadedRefCount.push(1);
     }
   }
-  const extendAbs = resolveLocalAssetPath(params.extendVideoUrl);
+  const extendAbs = await resolveLocalAssetPath(params.extendVideoUrl);
   let tempStrippedVideo = null;
   try {
     if (extendAbs) {
@@ -1467,7 +1676,10 @@ async function generateRealVideo(params) {
   });
 }
 async function stitchFlowScenesWithFfmpeg(params) {
-  const localPaths = params.sceneVideoUrls.map((u) => resolveLocalAssetPath(u)).filter((p) => Boolean(p && fs2.existsSync(p)));
+  const resolvedList = await Promise.all(
+    params.sceneVideoUrls.map((u) => resolveLocalAssetPath(u))
+  );
+  const localPaths = resolvedList.filter((p) => Boolean(p && fs2.existsSync(p)));
   if (localPaths.length === 0) {
     throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E25\u0E34\u0E1B\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E09\u0E32\u0E01\u0E17\u0E35\u0E48\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E19\u0E33\u0E21\u0E32\u0E15\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E23\u0E27\u0E21 (Assemble Film)");
   }
@@ -1553,7 +1765,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
     }
     const listBody = normalizedFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n");
     fs2.writeFileSync(concatListPath, listBody, "utf-8");
-    const voiceoverAbs = resolveLocalAssetPath(params.voiceoverAudioUrl);
+    const voiceoverAbs = await resolveLocalAssetPath(params.voiceoverAudioUrl);
     if (voiceoverAbs && fs2.existsSync(voiceoverAbs)) {
       await execFileAsync("ffmpeg", [
         "-y",
@@ -1600,18 +1812,17 @@ async function stitchFlowScenesWithFfmpeg(params) {
         finalOutPath
       ]);
     }
-    const masterVideoUrl = `/uploads/videos/${finalFilename}`;
-    recordMediaAsset({
+    const masterAsset = await recordMediaAsset({
       mediaType: "video",
       provider: "google-flow-ffmpeg",
       model: "flow-master-timeline",
       prompt: params.projectTitle || `Google Flow Master Film (${localPaths.length} scenes)`,
-      fileUrl: masterVideoUrl,
+      fileUrl: `/uploads/videos/${finalFilename}`,
       mimeType: "video/mp4",
       aspectRatio: params.aspectRatio || "16:9"
     });
     return {
-      masterVideoUrl,
+      masterVideoUrl: masterAsset.fileUrl,
       clipCount: localPaths.length
     };
   } finally {
@@ -3104,7 +3315,7 @@ ${input.content}`.slice(0, 275);
 }
 
 // server/auth.ts
-import crypto from "node:crypto";
+import crypto2 from "node:crypto";
 var TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
 function getAuthSecret() {
   const configured = getSettingValue("admin_auth_secret", "ADMIN_AUTH_SECRET");
@@ -3120,7 +3331,7 @@ function safeEqual(a, b) {
   const bufA = Buffer.from(a, "utf8");
   const bufB = Buffer.from(b, "utf8");
   if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+  return crypto2.timingSafeEqual(bufA, bufB);
 }
 function verifyCredentials(usernameInput, passwordInput) {
   const { username, password } = getAdminCredentials();
@@ -3132,7 +3343,7 @@ function createAdminToken(username) {
     JSON.stringify({ u: username, exp: expiresAt }),
     "utf8"
   ).toString("base64url");
-  const sig = crypto.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  const sig = crypto2.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
   return {
     token: `${payload}.${sig}`,
     expiresAt
@@ -3142,7 +3353,7 @@ function verifyAdminToken(token) {
   if (!token || !token.includes(".")) return { valid: false };
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return { valid: false };
-  const expectedSig = crypto.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  const expectedSig = crypto2.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
   if (!safeEqual(sig, expectedSig)) return { valid: false };
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
@@ -3201,9 +3412,31 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     service: "komkid-by-komkrit-aiflow",
     runtime: IS_SERVERLESS ? "vercel-serverless" : "node-server",
+    cloudStorage: isCloudSyncEnabled() ? "vercel-blob-encrypted-sqlite" : "local-sqlite-disk",
     node: process.version,
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
+});
+app.use("/api", async (req, res, next) => {
+  if (req.path === "/health") return next();
+  try {
+    const isMutation = req.method === "POST" || req.method === "PUT" || req.method === "DELETE" || req.method === "GET" && req.query.incrementView === "1";
+    await syncDatabaseBeforeRequest(isMutation);
+    if (isMutation && req.path !== "/auth/login") {
+      const origJson = res.json.bind(res);
+      res.json = ((body) => {
+        if (res.statusCode < 400) {
+          persistDatabaseToCloud().catch((err) => console.error("Cloud DB persist error:", err)).finally(() => origJson(body));
+          return res;
+        }
+        return origJson(body);
+      });
+    }
+    next();
+  } catch (err) {
+    console.error("Cloud DB sync error:", err);
+    next();
+  }
 });
 app.use("/api", (req, res, next) => {
   const p = req.path;
@@ -3350,14 +3583,23 @@ function mapFlowProjectRow(r) {
     updatedAt: r.updated_at
   };
 }
-app.post("/api/upload", upload.single("file"), (req, res) => {
+app.post("/api/upload", upload.single("file"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E17\u0E35\u0E48\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14" });
     return;
   }
+  const fileBuffer = fs4.readFileSync(req.file.path);
+  const cloudUrl = await uploadMediaToCloudBlob(
+    fileBuffer,
+    req.file.filename,
+    req.file.mimetype
+  );
+  if (cloudUrl) {
+    res.json({ url: cloudUrl });
+    return;
+  }
   if (IS_SERVERLESS && req.file.mimetype.startsWith("image/") && req.file.size <= 4 * 1024 * 1024) {
-    const b64 = fs4.readFileSync(req.file.path).toString("base64");
-    res.json({ url: `data:${req.file.mimetype};base64,${b64}` });
+    res.json({ url: `data:${req.file.mimetype};base64,${fileBuffer.toString("base64")}` });
     return;
   }
   res.json({ url: `/uploads/${req.file.filename}` });
@@ -3478,7 +3720,7 @@ app.post("/api/posts", (req, res) => {
     `INSERT INTO posts (
         title, subtitle, excerpt, content, category, content_type, cover_image,
         video_url, audio_url, tags_json, author, status, is_featured, views, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
   ).run(
     String(title).trim(),
     String(subtitle),

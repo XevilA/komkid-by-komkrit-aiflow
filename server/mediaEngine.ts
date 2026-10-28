@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GoogleGenAI } from '@google/genai';
 import { db, IS_SERVERLESS } from './db.ts';
+import { uploadMediaToCloudBlob } from './cloudSync.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +34,7 @@ export function getSettingValue(key: string, envFallback?: string): string {
   return '';
 }
 
-function resolveLocalAssetPath(urlOrPath?: string): string | null {
+async function resolveLocalAssetPath(urlOrPath?: string): Promise<string | null> {
   if (!urlOrPath) return null;
   const clean = urlOrPath.trim();
   if (!clean) return null;
@@ -45,6 +46,26 @@ function resolveLocalAssetPath(urlOrPath?: string): string | null {
       const tmpPath = path.join(IMAGES_DIR, `inline-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`);
       fs.writeFileSync(tmpPath, Buffer.from(match[2], 'base64'));
       return tmpPath;
+    }
+  }
+  if (clean.startsWith('https://') || clean.startsWith('http://')) {
+    try {
+      const parsed = new URL(clean);
+      const base = path.basename(parsed.pathname) || `remote-${Date.now()}.bin`;
+      const targetDir = base.endsWith('.mp4') || base.endsWith('.mov')
+        ? VIDEOS_DIR
+        : base.endsWith('.mp3') || base.endsWith('.wav')
+        ? AUDIO_DIR
+        : IMAGES_DIR;
+      const cachedPath = path.join(targetDir, base);
+      if (fs.existsSync(cachedPath)) return cachedPath;
+      const dl = await fetch(clean);
+      if (dl.ok) {
+        fs.writeFileSync(cachedPath, Buffer.from(await dl.arrayBuffer()));
+        return cachedPath;
+      }
+    } catch {
+      return null;
     }
   }
   if (clean.startsWith('/uploads/')) {
@@ -116,7 +137,7 @@ async function uploadLocalFileToGemini(
   return { uri, mimeType: uploaded.mimeType || mimeType };
 }
 
-function recordMediaAsset(params: {
+async function recordMediaAsset(params: {
   mediaType: 'image' | 'video' | 'audio';
   provider: string;
   model: string;
@@ -129,6 +150,20 @@ function recordMediaAsset(params: {
   interactionId?: string;
   workflowId?: number | null;
 }) {
+  let finalFileUrl = params.fileUrl;
+  if (IS_SERVERLESS && finalFileUrl.startsWith('/uploads/')) {
+    const abs = path.join(UPLOADS_ROOT, finalFileUrl.replace(/^\/uploads\//, ''));
+    if (fs.existsSync(abs)) {
+      const buf = fs.readFileSync(abs);
+      const cloudUrl = await uploadMediaToCloudBlob(buf, path.basename(abs), params.mimeType);
+      if (cloudUrl) {
+        finalFileUrl = cloudUrl;
+      } else if (params.mediaType === 'image' && buf.length <= 4 * 1024 * 1024) {
+        finalFileUrl = `data:${params.mimeType};base64,${buf.toString('base64')}`;
+      }
+    }
+  }
+
   const now = new Date().toISOString();
   const res = db
     .prepare(
@@ -142,7 +177,7 @@ function recordMediaAsset(params: {
       params.provider,
       params.model,
       params.prompt,
-      params.fileUrl,
+      finalFileUrl,
       params.mimeType,
       params.aspectRatio || '',
       params.durationSec || 0,
@@ -155,6 +190,7 @@ function recordMediaAsset(params: {
   return {
     id: Number(res.lastInsertRowid),
     ...params,
+    fileUrl: finalFileUrl,
     createdAt: now,
   };
 }
@@ -232,12 +268,9 @@ export async function generateRealImage(params: {
     const filename = `gemini-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`;
     const absPath = path.join(IMAGES_DIR, filename);
     fs.writeFileSync(absPath, imgBuffer);
-    const fileUrl =
-      IS_SERVERLESS && imgBuffer.length <= 4 * 1024 * 1024
-        ? `data:${mimeType};base64,${imgBuffer.toString('base64')}`
-        : `/uploads/images/${filename}`;
+    const fileUrl = `/uploads/images/${filename}`;
 
-    return recordMediaAsset({
+    return await recordMediaAsset({
       mediaType: 'image',
       provider: 'gemini',
       model,
@@ -302,12 +335,9 @@ export async function generateRealImage(params: {
 
   const filename = `openai-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.png`;
   fs.writeFileSync(path.join(IMAGES_DIR, filename), imgBuffer);
-  const fileUrl =
-    IS_SERVERLESS && imgBuffer.length <= 4 * 1024 * 1024
-      ? `data:image/png;base64,${imgBuffer.toString('base64')}`
-      : `/uploads/images/${filename}`;
+  const fileUrl = `/uploads/images/${filename}`;
 
-  return recordMediaAsset({
+  return await recordMediaAsset({
     mediaType: 'image',
     provider: 'openai',
     model,
@@ -405,7 +435,7 @@ export async function generateRealVideo(params: {
 
     const instance: Record<string, any> = { prompt };
 
-    const firstAbs = resolveLocalAssetPath(params.firstFrameUrl);
+    const firstAbs = await resolveLocalAssetPath(params.firstFrameUrl);
     if (firstAbs) {
       instance.image = {
         bytesBase64Encoded: fs.readFileSync(firstAbs).toString('base64'),
@@ -413,7 +443,7 @@ export async function generateRealVideo(params: {
       };
     }
 
-    const lastAbs = resolveLocalAssetPath(params.lastFrameUrl);
+    const lastAbs = await resolveLocalAssetPath(params.lastFrameUrl);
     if (lastAbs) {
       instance.lastFrame = {
         bytesBase64Encoded: fs.readFileSync(lastAbs).toString('base64'),
@@ -554,7 +584,7 @@ export async function generateRealVideo(params: {
   const inputParts: any[] = [];
 
   // 1. Optional First Frame (<FIRST_FRAME>)
-  const firstAbs = resolveLocalAssetPath(params.firstFrameUrl);
+  const firstAbs = await resolveLocalAssetPath(params.firstFrameUrl);
   let firstUploaded: { uri: string; mimeType: string } | null = null;
   if (firstAbs) {
     firstUploaded = await uploadLocalFileToGemini(ai, firstAbs, 'image/png');
@@ -566,7 +596,7 @@ export async function generateRealVideo(params: {
   }
 
   // 2. Optional Last Frame (<LAST_FRAME>) for Google Flow Frame-to-Frame Transition
-  const lastAbs = resolveLocalAssetPath(params.lastFrameUrl);
+  const lastAbs = await resolveLocalAssetPath(params.lastFrameUrl);
   if (lastAbs && firstUploaded) {
     if (lastAbs === firstAbs) {
       inputParts.push({
@@ -590,7 +620,7 @@ export async function generateRealVideo(params: {
     : [];
   const uploadedRefCount: number[] = [];
   for (const rUrl of refUrls) {
-    const refAbs = resolveLocalAssetPath(rUrl);
+    const refAbs = await resolveLocalAssetPath(rUrl);
     if (refAbs) {
       const up = await uploadLocalFileToGemini(ai, refAbs, 'image/png');
       inputParts.push({
@@ -603,7 +633,7 @@ export async function generateRealVideo(params: {
   }
 
   // 4. Optional Video Extension Source (<VIDEO_0>)
-  const extendAbs = resolveLocalAssetPath(params.extendVideoUrl);
+  const extendAbs = await resolveLocalAssetPath(params.extendVideoUrl);
   let tempStrippedVideo: string | null = null;
   try {
     if (extendAbs) {
@@ -745,9 +775,10 @@ export async function stitchFlowScenesWithFfmpeg(params: {
   voiceoverAudioUrl?: string;
   projectTitle?: string;
 }): Promise<{ masterVideoUrl: string; clipCount: number }> {
-  const localPaths = params.sceneVideoUrls
-    .map((u) => resolveLocalAssetPath(u))
-    .filter((p): p is string => Boolean(p && fs.existsSync(p)));
+  const resolvedList = await Promise.all(
+    params.sceneVideoUrls.map((u) => resolveLocalAssetPath(u))
+  );
+  const localPaths = resolvedList.filter((p): p is string => Boolean(p && fs.existsSync(p)));
 
   if (localPaths.length === 0) {
     throw new Error('ยังไม่มีคลิปวิดีโอฉากที่สร้างเสร็จสำหรับนำมาตัดต่อรวม (Assemble Film)');
@@ -845,7 +876,7 @@ export async function stitchFlowScenesWithFfmpeg(params: {
       .join('\n');
     fs.writeFileSync(concatListPath, listBody, 'utf-8');
 
-    const voiceoverAbs = resolveLocalAssetPath(params.voiceoverAudioUrl);
+    const voiceoverAbs = await resolveLocalAssetPath(params.voiceoverAudioUrl);
     if (voiceoverAbs && fs.existsSync(voiceoverAbs)) {
       await execFileAsync('ffmpeg', [
         '-y',
@@ -894,19 +925,18 @@ export async function stitchFlowScenesWithFfmpeg(params: {
       ]);
     }
 
-    const masterVideoUrl = `/uploads/videos/${finalFilename}`;
-    recordMediaAsset({
+    const masterAsset = await recordMediaAsset({
       mediaType: 'video',
       provider: 'google-flow-ffmpeg',
       model: 'flow-master-timeline',
       prompt: params.projectTitle || `Google Flow Master Film (${localPaths.length} scenes)`,
-      fileUrl: masterVideoUrl,
+      fileUrl: `/uploads/videos/${finalFilename}`,
       mimeType: 'video/mp4',
       aspectRatio: params.aspectRatio || '16:9',
     });
 
     return {
-      masterVideoUrl,
+      masterVideoUrl: masterAsset.fileUrl,
       clipCount: localPaths.length,
     };
   } finally {

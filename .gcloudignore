@@ -3,6 +3,8 @@ dist/
 data/
 uploads/
 .env
+.env.*
+!.env.example
 .git/
 .vercel/
 *.log

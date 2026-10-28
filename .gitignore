@@ -3,8 +3,10 @@ dist/
 data/
 uploads/
 .env
+.env.*
+!.env.example
 .vercel/
+.vercel
 *.log
 .DS_Store
 ._*
-.vercel

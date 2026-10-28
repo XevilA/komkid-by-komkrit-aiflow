@@ -103,6 +103,7 @@ export const AiCommandCenter: React.FC<Props> = ({
   const [activeAgentTab, setActiveAgentTab] = useState<string>('overview');
   const [blueprintModalOpen, setBlueprintModalOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAgentDetails, setShowAgentDetails] = useState(false);
 
   // Dispatch Form
   const [topic, setTopic] = useState('');
@@ -650,124 +651,171 @@ export const AiCommandCenter: React.FC<Props> = ({
             </div>
           ) : (
             <>
-              {/* Pipeline Navigation Tabs (01 -> 08 + Omnichannel) */}
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar bg-white rounded-2xl p-2 border border-slate-200/80 shadow-2xs">
-                {agentTabs.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setActiveAgentTab(t.id)}
-                    className={`inline-flex items-center gap-1.5 shrink-0 rounded-xl px-3 py-2 text-xs font-bold transition cursor-pointer ${
-                      activeAgentTab === t.id
-                        ? 'bg-[#0d2546] text-[#fbbf24] shadow-2xs'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    {t.icon}
-                    {t.label}
-                  </button>
-                ))}
+              {/* Clean Plain-Thai Action & Tool Tabs */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-2xl p-2.5 border border-slate-200/80 shadow-2xs">
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {agentTabs.slice(0, 6).map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setActiveAgentTab(t.id)}
+                      className={`inline-flex items-center gap-1.5 shrink-0 rounded-xl px-3.5 py-2.5 text-sm font-bold transition cursor-pointer ${
+                        activeAgentTab === t.id
+                          ? 'bg-[#0d2546] text-white shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {t.icon}
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAgentDetails((v) => !v)}
+                  className="text-xs font-bold text-slate-500 hover:text-[#0d2546] px-2.5 py-1.5 cursor-pointer"
+                >
+                  {showAgentDetails ? 'ซ่อนข้อมูลเชิงลึก ▲' : 'ดูรายละเอียดทีม AI ▼'}
+                </button>
               </div>
 
-              {/* TAB: OVERVIEW — EXACT LINE IMAGE 5 ARCHITECTURE (CONTENT AGENT <-> HUMAN APPROVAL <-> QA AGENT) */}
+              {/* TAB: OVERVIEW — ELDER-FRIENDLY 1-CLICK REVIEW & PUBLISH FIRST */}
               {activeAgentTab === 'overview' && (
                 <div className="space-y-4">
-                  {/* CEO Summary Strip */}
-                  <div className="rounded-2xl bg-white border border-slate-200/80 p-4 sm:p-5 shadow-2xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-extrabold text-[#0d2546] flex items-center gap-1.5">
-                        <Bot className="w-4 h-4 text-[#f59e0b]" />
-                        แผนกลยุทธ์จาก CEO AGENT • ({activeWf.engineUsed})
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-500">
-                        แหล่งไอเดีย: {activeWf.inputSource}
-                      </span>
+                  {/* SIMPLE 1-CLICK PUBLISH ACTION BAR RIGHT AT TOP */}
+                  <div className="rounded-2xl bg-white border-2 border-emerald-500/40 p-5 shadow-xs space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <span className="inline-block rounded-lg bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-900 mb-1.5">
+                          AI เขียนเนื้อหาเสร็จเรียบร้อยแล้ว (คะแนนตรวจคุณภาพ {activeWf.qaOutput?.overallScore || 97}/100)
+                        </span>
+                        <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
+                          {editTitle}
+                        </h3>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingScript((v) => !v)}
+                          className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-sm font-bold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+                        >
+                          {isEditingScript ? 'ปิดช่องแก้ไข' : '✏️ แก้ไขข้อความ'}
+                        </button>
+
+                        {activeWf.status === 'published' &&
+                        activeWf.humanApproval?.publishedPostId ? (
+                          <button
+                            onClick={() =>
+                              onOpenPublishedPost(
+                                activeWf.humanApproval.publishedPostId!
+                              )
+                            }
+                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer shadow-sm"
+                          >
+                            <ExternalLink className="w-5 h-5" />
+                            ลงหน้าเว็บแล้ว! กดเปิดอ่าน
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleApproveAndPublish}
+                            disabled={publishing}
+                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-5 h-5" />
+                            {publishing
+                              ? 'กำลังลงหน้าเว็บ...'
+                              : '✅ นำบทความนี้ลงหน้าเว็บทันที'}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm font-bold text-[#0d2546]">
-                      เป้าหมาย: {activeWf.ceoOutput?.goal}
-                    </p>
-                    <p className="text-xs text-slate-600 mt-1">
-                      กลยุทธ์: {activeWf.ceoOutput?.strategy}
-                    </p>
+
+                    {/* Simple Ask-AI-to-Revise bar */}
+                    <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-100">
+                      <input
+                        type="text"
+                        value={revisionNote}
+                        onChange={(e) => setRevisionNote(e.target.value)}
+                        placeholder="อยากให้ AI แก้ตรงไหนเพิ่มเติม พิมพ์บอกที่นี่ได้ครับ เช่น ขอภาษาที่อ่านง่ายขึ้น..."
+                        className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
+                      />
+                      <button
+                        onClick={handleRequestRevision}
+                        disabled={revising}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-100 px-4 py-2.5 text-sm font-extrabold text-amber-950 hover:bg-amber-200 cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        <RefreshCw
+                          className={`w-4 h-4 ${revising ? 'animate-spin' : ''}`}
+                        />
+                        {revising ? 'AI กำลังแก้ให้...' : 'สั่ง AI แก้ตามนี้'}
+                      </button>
+                    </div>
                   </div>
 
-                  {/* 3-COLUMN MULTI-AGENT ECOSYSTEM (CONTENT AGENT | HUMAN APPROVAL | QA AGENT) */}
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                    {/* Col 1: CONTENT AGENT (Research + Analysis + Ideation + Script) */}
-                    <div className="lg:col-span-4 rounded-2xl bg-gradient-to-b from-sky-50/90 to-white border border-sky-200 p-4 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center gap-2.5 mb-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white shadow-xs">
-                            <Lightbulb className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h4 className="font-extrabold text-sm text-[#0d2546]">
-                              CONTENT AGENT
-                            </h4>
-                            <p className="text-[11px] text-slate-500">
-                              นักวิจัย นักวางแผน และนักเขียน
-                            </p>
-                          </div>
+                  {/* Optional Collapsible 3-Column Agent Details */}
+                  {showAgentDetails && (
+                    <div className="space-y-4">
+                      {/* CEO Summary Strip */}
+                      <div className="rounded-2xl bg-white border border-slate-200/80 p-4 sm:p-5 shadow-2xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-extrabold text-[#0d2546] flex items-center gap-1.5">
+                            <Bot className="w-4 h-4 text-[#f59e0b]" />
+                            แผนกลยุทธ์จาก CEO AGENT • ({activeWf.engineUsed})
+                          </span>
+                          <span className="text-[11px] font-semibold text-slate-500">
+                            แหล่งไอเดีย: {activeWf.inputSource}
+                          </span>
                         </div>
+                        <p className="text-sm font-bold text-[#0d2546]">
+                          เป้าหมาย: {activeWf.ceoOutput?.goal}
+                        </p>
+                        <p className="text-xs text-slate-600 mt-1">
+                          กลยุทธ์: {activeWf.ceoOutput?.strategy}
+                        </p>
+                      </div>
 
-                        <div className="space-y-2 text-xs">
-                          <div className="rounded-xl bg-white p-2.5 border border-sky-100">
-                            <div className="font-bold text-sky-900">1. Research (ค้นหาข้อมูล/อ้างอิง)</div>
-                            <p className="text-slate-600 mt-0.5 line-clamp-2">
-                              เชื่อมฐานความรู้ {activeWf.researchOutput?.kbSourcesUsed?.length || 3} รายการ
-                            </p>
-                          </div>
-                          <div className="rounded-xl bg-white p-2.5 border border-sky-100">
-                            <div className="font-bold text-sky-900">2. Analysis (วิเคราะห์ประเด็น)</div>
-                            <p className="text-slate-600 mt-0.5 line-clamp-2">
+                      {/* 3-COLUMN MULTI-AGENT ECOSYSTEM */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                        <div className="lg:col-span-4 rounded-2xl bg-gradient-to-b from-sky-50/90 to-white border border-sky-200 p-4 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center gap-2.5 mb-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white shadow-xs">
+                                <Lightbulb className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h4 className="font-extrabold text-sm text-[#0d2546]">
+                                  ฝ่ายค้นคว้าและเขียนเนื้อหา
+                                </h4>
+                                <p className="text-[11px] text-slate-500">
+                                  เชื่อมฐานความรู้ {activeWf.researchOutput?.kbSourcesUsed?.length || 3} รายการ
+                                </p>
+                              </div>
+                            </div>
+                            <p className="text-xs text-slate-600">
                               {activeWf.researchOutput?.trendAnalysis}
                             </p>
                           </div>
-                          <div className="rounded-xl bg-white p-2.5 border border-sky-100">
-                            <div className="font-bold text-sky-900">3. Ideation (มุมมอง & จุดประสงค์)</div>
-                            <p className="text-slate-600 mt-0.5 line-clamp-2">
-                              กลุ่มเป้าหมาย: {activeWf.targetAudience}
-                            </p>
-                          </div>
-                          <div className="rounded-xl bg-white p-2.5 border border-sky-100">
-                            <div className="font-bold text-sky-900">4. Script (บทความ + สคริปต์ + แคปชัน)</div>
-                            <p className="text-slate-600 mt-0.5 line-clamp-2">
-                              พร้อมเผยแพร่ทั้งบทความยาวและคลิปสั้น 60 วินาที
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => setActiveAgentTab('script')}
-                        className="mt-3 w-full rounded-xl bg-sky-700 py-2 text-xs font-extrabold text-white hover:bg-sky-800 transition cursor-pointer"
-                      >
-                        ผลลัพธ์ : Content Brief + Script →
-                      </button>
-                    </div>
-
-                    {/* Col 2: HUMAN APPROVAL (คนตรวจสอบและอนุมัติเนื้อหา - Center of LINE Image 5!) */}
-                    <div className="lg:col-span-4 rounded-2xl bg-white border-2 border-[#0d2546] p-4 shadow-md flex flex-col justify-between">
-                      <div>
-                        <div className="rounded-xl bg-[#0d2546] text-white p-3 text-center mb-3">
-                          <div className="text-xs font-extrabold tracking-wide text-amber-300">
-                            HUMAN APPROVAL
-                          </div>
-                          <div className="text-xs text-slate-200 mt-0.5">
-                            คนตรวจสอบและอนุมัติเนื้อหา
-                          </div>
+                          <button
+                            onClick={() => setActiveAgentTab('research')}
+                            className="mt-3 w-full rounded-xl bg-sky-700 py-2 text-xs font-extrabold text-white hover:bg-sky-800 transition cursor-pointer"
+                          >
+                            ดูข้อมูลอ้างอิง →
+                          </button>
                         </div>
 
-                        {/* 4 Checkboxes from Image 5 */}
-                        <div className="space-y-2 px-1">
+                        <div className="lg:col-span-4 rounded-2xl bg-white border border-slate-200 p-4 space-y-2">
+                          <div className="text-sm font-extrabold text-[#0d2546]">
+                            รายการตรวจสอบก่อนลงเว็บ
+                          </div>
                           {[
-                            { key: 'isAccurate', label: 'ถูกต้อง (Factually Accurate)' },
-                            { key: 'isAppropriate', label: 'เหมาะสม (Appropriate & Ethical)' },
-                            { key: 'isOnBrand', label: 'ตรงกับแบรนด์ (คมคิด by KOMKRIT)' },
-                            { key: 'isReady', label: 'พร้อมเผยแพร่ (Ready to Publish)' },
+                            { key: 'isAccurate', label: 'ข้อมูลถูกต้อง' },
+                            { key: 'isAppropriate', label: 'ถ้อยคำสุภาพเหมาะสม' },
+                            { key: 'isOnBrand', label: 'ตรงกับแนวทาง คมคิด by KOMKRIT' },
+                            { key: 'isReady', label: 'พร้อมเผยแพร่' },
                           ].map((item) => (
                             <label
                               key={item.key}
-                              className="flex items-center gap-2.5 rounded-lg bg-slate-50 px-3 py-2 text-xs font-bold text-[#0d2546] cursor-pointer hover:bg-amber-50/60"
+                              className="flex items-center gap-2.5 rounded-lg bg-slate-50 px-3 py-2 text-xs font-bold text-[#0d2546] cursor-pointer"
                             >
                               <input
                                 type="checkbox"
@@ -783,136 +831,36 @@ export const AiCommandCenter: React.FC<Props> = ({
                               <span>{item.label}</span>
                             </label>
                           ))}
+                          <label className="flex items-center gap-2 pt-1 text-xs font-bold text-amber-900 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={publishAsFeatured}
+                              onChange={(e) => setPublishAsFeatured(e.target.checked)}
+                              className="accent-[#f59e0b]"
+                            />
+                            ตั้งเป็นข่าวเด่นหน้าแรกด้วย
+                          </label>
                         </div>
 
-                        <label className="mt-2.5 flex items-center gap-2 px-2 text-xs font-semibold text-amber-900 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={publishAsFeatured}
-                            onChange={(e) => setPublishAsFeatured(e.target.checked)}
-                            className="accent-[#f59e0b]"
-                          />
-                          ตั้งเป็นบทความพิเศษเด่นหน้าแรกด้วย
-                        </label>
-
-                        {/* Revision Note */}
-                        <div className="mt-3">
-                          <textarea
-                            rows={2}
-                            value={revisionNote}
-                            onChange={(e) => setRevisionNote(e.target.value)}
-                            placeholder="บันทึกความเห็นผู้บริหาร หรือพิมพ์คำสั่งให้ AI แก้ไขเพิ่มเติม..."
-                            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-[#f59e0b] focus:outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {activeWf.status === 'published' &&
-                        activeWf.humanApproval?.publishedPostId ? (
-                          <button
-                            onClick={() =>
-                              onOpenPublishedPost(
-                                activeWf.humanApproval.publishedPostId!
-                              )
-                            }
-                            className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                            เผยแพร่แล้ว! เปิดอ่านโพสต์บนหน้าเว็บ
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleApproveAndPublish}
-                            disabled={publishing}
-                            className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-2.5 text-xs font-extrabold text-white shadow-sm hover:brightness-105 cursor-pointer disabled:opacity-50"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            {publishing
-                              ? 'กำลังเผยแพร่...'
-                              : 'อนุมัติ & เผยแพร่ขึ้นเว็บไซต์ทันที'}
-                          </button>
-                        )}
-
-                        <button
-                          onClick={handleRequestRevision}
-                          disabled={revising}
-                          className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-100 py-2 text-xs font-extrabold text-amber-950 hover:bg-amber-200 cursor-pointer disabled:opacity-50"
-                        >
-                          <RefreshCw
-                            className={`w-3.5 h-3.5 ${revising ? 'animate-spin' : ''}`}
-                          />
-                          {revising ? 'AI กำลังปรับปรุงเนื้อหา...' : 'สั่ง AI ปรับปรุง/แก้ไขตามคำแนะนำ'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Col 3: QA AGENT (Fact Check, Language, Brand, Risk - Right of LINE Image 5!) */}
-                    <div className="lg:col-span-4 rounded-2xl bg-gradient-to-b from-emerald-50/90 to-white border border-emerald-200 p-4 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs">
-                              <ShieldCheck className="w-5 h-5" />
-                            </div>
-                            <div>
-                              <h4 className="font-extrabold text-sm text-[#0d2546]">
-                                QA AGENT
-                              </h4>
-                              <p className="text-[11px] text-slate-500">
-                                ผู้ตรวจสอบคุณภาพ 4 มิติ
-                              </p>
-                            </div>
+                        <div className="lg:col-span-4 rounded-2xl bg-gradient-to-b from-emerald-50/90 to-white border border-emerald-200 p-4 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-extrabold text-[#0d2546]">
+                              ผลตรวจคุณภาพเนื้อหา
+                            </span>
+                            <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-extrabold text-white">
+                              {activeWf.qaOutput?.overallScore || 97}/100
+                            </span>
                           </div>
-                          <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-extrabold text-white">
-                            {activeWf.qaOutput?.overallScore || 97}/100
-                          </span>
+                          <p className="text-xs text-slate-600">
+                            {activeWf.qaOutput?.factCheckNote}
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            {activeWf.qaOutput?.languageNote}
+                          </p>
                         </div>
-
-                        <div className="space-y-2 text-xs">
-                          {[
-                            {
-                              title: '1. Fact Check (ข้อเท็จจริง/อ้างอิง)',
-                              score: activeWf.qaOutput?.factCheckScore || 95,
-                              note: activeWf.qaOutput?.factCheckNote,
-                            },
-                            {
-                              title: '2. Language (ภาษา/ความเข้าใจง่าย)',
-                              score: activeWf.qaOutput?.languageScore || 96,
-                              note: activeWf.qaOutput?.languageNote,
-                            },
-                            {
-                              title: '3. Brand (ภาพลักษณ์/น้ำเสียงคมคิด)',
-                              score: activeWf.qaOutput?.brandScore || 98,
-                              note: activeWf.qaOutput?.brandNote,
-                            },
-                            {
-                              title: '4. Risk (กฎหมาย PDPA/จริยธรรม)',
-                              score: activeWf.qaOutput?.riskScore || 97,
-                              note: activeWf.qaOutput?.riskNote,
-                            },
-                          ].map((q, idx) => (
-                            <div
-                              key={idx}
-                              className="rounded-xl bg-white p-2.5 border border-emerald-100"
-                            >
-                              <div className="flex items-center justify-between font-bold text-emerald-950">
-                                <span>{q.title}</span>
-                                <span className="text-emerald-700">{q.score}%</span>
-                              </div>
-                              <p className="text-slate-600 mt-0.5 line-clamp-1">
-                                {q.note}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 rounded-xl bg-emerald-600 py-2 px-3 text-center text-xs font-extrabold text-white">
-                        ผลลัพธ์ QA : {activeWf.qaOutput?.verdict || 'ผ่าน'} (พร้อมส่งอนุมัติ)
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Quick Article Preview & Inline Editor right below */}
                   <div className="rounded-2xl bg-white border border-slate-200/80 p-5 shadow-2xs">

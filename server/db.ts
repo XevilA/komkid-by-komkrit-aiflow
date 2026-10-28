@@ -23,15 +23,47 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const DB_PATH = path.join(DATA_DIR, 'komkrit.db');
-export const db = new DatabaseSync(DB_PATH);
+export const DB_PATH = path.join(DATA_DIR, 'komkrit.db');
+export let db = new DatabaseSync(DB_PATH);
 
-// Safe journal mode for external/exFAT volumes as well as APFS
-db.exec(`
-  PRAGMA journal_mode = MEMORY;
-  PRAGMA synchronous = NORMAL;
-  PRAGMA foreign_keys = ON;
-`);
+function applyPragmas(database: DatabaseSync) {
+  // Safe journal mode for external/exFAT volumes as well as Serverless /tmp
+  database.exec(`
+    PRAGMA journal_mode = ${IS_SERVERLESS ? 'DELETE' : 'MEMORY'};
+    PRAGMA synchronous = NORMAL;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+
+applyPragmas(db);
+
+export function exportDatabaseSnapshotBuffer(): Buffer {
+  const snapPath = path.join(DATA_DIR, `snap-${Date.now()}-${Math.round(Math.random() * 1e5)}.db`);
+  try {
+    if (fs.existsSync(snapPath)) fs.unlinkSync(snapPath);
+    const escaped = snapPath.replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${escaped}'`);
+    return fs.readFileSync(snapPath);
+  } finally {
+    try {
+      if (fs.existsSync(snapPath)) fs.unlinkSync(snapPath);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function reloadDatabaseFromSnapshotBuffer(sqliteBytes: Buffer): void {
+  try {
+    db.close();
+  } catch {
+    // ignore
+  }
+  fs.writeFileSync(DB_PATH, sqliteBytes);
+  db = new DatabaseSync(DB_PATH);
+  applyPragmas(db);
+  initDatabase();
+}
 
 export function initDatabase() {
   db.exec(`
@@ -323,8 +355,22 @@ function seedOmnichannelIfEmpty() {
 }
 
 function seedIfEmpty() {
+  const seededFlag = db
+    .prepare("SELECT value FROM settings WHERE key = 'initial_seed_done'")
+    .get() as { value: string } | undefined;
+  if (seededFlag?.value === '1') return;
+
   const countRow = db.prepare('SELECT COUNT(*) as cnt FROM posts').get() as { cnt: number };
-  if (countRow && countRow.cnt > 0) return;
+  if (countRow && countRow.cnt > 0) {
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('initial_seed_done', '1')"
+    ).run();
+    return;
+  }
+
+  db.prepare(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('initial_seed_done', '1')"
+  ).run();
 
   const insertPost = db.prepare(`
     INSERT INTO posts (

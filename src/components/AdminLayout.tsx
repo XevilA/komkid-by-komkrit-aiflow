@@ -1,17 +1,13 @@
 import React, { useState } from 'react';
 import {
-  LayoutDashboard,
   FileText,
   Sparkles,
   Settings,
   Globe,
   Menu,
   X,
-  PlusCircle,
   Eye,
   Users,
-  Bot,
-  ArrowRight,
   Clapperboard,
   LogOut,
   KeyRound,
@@ -58,11 +54,11 @@ interface Props {
 }
 
 type SettingsSubTab =
+  | 'inbox'
   | 'api_keys'
   | 'channels'
   | 'knowledge'
-  | 'pillars'
-  | 'inbox';
+  | 'pillars';
 
 export const AdminLayout: React.FC<Props> = ({
   activeMenu,
@@ -82,7 +78,7 @@ export const AdminLayout: React.FC<Props> = ({
   onPreviewPost,
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsSubTab>('api_keys');
+  const [settingsTab, setSettingsTab] = useState<SettingsSubTab>('inbox');
 
   // Password Change Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -110,7 +106,7 @@ export const AdminLayout: React.FC<Props> = ({
       });
       setCurrentPassword('');
       setNewPassword('');
-      setPwdMsg({ type: 'ok', text: 'บันทึกรหัสผ่านผู้ดูแลใหม่เรียบร้อยแล้ว' });
+      setPwdMsg({ type: 'ok', text: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้วครับ' });
     } catch (err) {
       setPwdMsg({ type: 'err', text: (err as Error).message });
     } finally {
@@ -118,62 +114,61 @@ export const AdminLayout: React.FC<Props> = ({
     }
   };
 
-  // Clean 5-item Navigation Menu
+  // ONLY 4 LARGE, PLAIN-THAI MENUS (Elder-friendly, zero English jargon!)
   const menuItems = [
     {
-      id: 'dashboard',
-      label: 'ภาพรวม',
-      icon: <LayoutDashboard className="w-4 h-4" />,
-    },
-    {
       id: 'posts',
-      label: 'บทความ & ข่าวสาร',
-      icon: <FileText className="w-4 h-4" />,
-      badge: stats?.postsTotal,
+      label: 'จัดการข่าวและบทความ',
+      sub: 'ลงข่าวใหม่ • แก้ไข • ลบข่าว',
+      icon: <FileText className="w-5 h-5" />,
+      badge: stats?.postsTotal ?? posts.length,
     },
     {
       id: 'ai-command',
-      label: 'สร้างคอนเทนต์ AI',
-      icon: <Sparkles className="w-4 h-4" />,
-      badge: stats?.pendingApprovals || undefined,
+      label: 'ให้ AI ช่วยเขียนบทความ',
+      sub: 'พิมพ์หัวข้อ ให้ AI เขียนให้',
+      icon: <Sparkles className="w-5 h-5" />,
     },
     {
       id: 'flow-chat',
-      label: 'วิดีโอ AI & แชท',
-      icon: <Clapperboard className="w-4 h-4" />,
+      label: 'สร้างวิดีโอ & คุยกับ AI',
+      sub: 'ทำคลิปสั้น • ถามตอบ AI',
+      icon: <Clapperboard className="w-5 h-5" />,
     },
     {
       id: 'settings',
-      label: 'ตั้งค่าระบบ',
-      icon: <Settings className="w-4 h-4" />,
+      label: 'ข้อความติดต่อ & ตั้งค่า',
+      sub: 'ดูคนติดต่อ • ตั้งค่าระบบ',
+      icon: <Settings className="w-5 h-5" />,
+      badge: stats?.unreadContacts || undefined,
     },
   ];
 
   const settingsTabs: { id: SettingsSubTab; label: string; icon: React.ReactNode }[] = [
     {
+      id: 'inbox',
+      label: 'ข้อความจากผู้ชม & สมาชิก',
+      icon: <MessageSquare className="w-4 h-4" />,
+    },
+    {
       id: 'api_keys',
-      label: 'API Keys & รหัสผ่าน',
-      icon: <KeyRound className="w-3.5 h-3.5" />,
+      label: 'รหัสผ่าน & เชื่อมต่อคีย์ AI',
+      icon: <KeyRound className="w-4 h-4" />,
     },
     {
       id: 'channels',
-      label: 'ช่องทางโซเชียล (Publish)',
-      icon: <Share2 className="w-3.5 h-3.5" />,
+      label: 'ตั้งค่าแชร์โซเชียล',
+      icon: <Share2 className="w-4 h-4" />,
     },
     {
       id: 'knowledge',
-      label: `ฐานความรู้ AI (${stats?.kbCount ?? knowledgeItems.length})`,
-      icon: <Database className="w-3.5 h-3.5" />,
+      label: 'คลังข้อมูลสอน AI',
+      icon: <Database className="w-4 h-4" />,
     },
     {
       id: 'pillars',
-      label: 'โมเดล 5-Pillar',
-      icon: <Layers className="w-3.5 h-3.5" />,
-    },
-    {
-      id: 'inbox',
-      label: 'ข้อความติดต่อ & สมาชิก',
-      icon: <MessageSquare className="w-3.5 h-3.5" />,
+      label: 'แผนเป้าหมาย 5 ด้าน',
+      icon: <Layers className="w-4 h-4" />,
     },
   ];
 
@@ -187,36 +182,38 @@ export const AdminLayout: React.FC<Props> = ({
         />
       )}
 
-      {/* Clean Minimal Left Sidebar */}
+      {/* Large, Clear Left Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-60 bg-[#0b1f3a] text-white flex flex-col justify-between transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-[#0b1f3a] text-white flex flex-col justify-between transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         <div>
-          <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
+          <div className="p-5 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-3">
               <img
                 src="/images/avatar-komkrit.png"
                 alt="Komkrit"
-                className="h-9 w-9 rounded-full border border-amber-400"
+                className="h-11 w-11 rounded-full border-2 border-amber-400"
               />
               <div>
-                <div className="font-extrabold text-sm leading-tight">
-                  คมคิด <span className="text-amber-400">Admin</span>
+                <div className="font-extrabold text-base leading-tight">
+                  ระบบจัดการเว็บไซต์
                 </div>
-                <div className="text-[11px] text-slate-400">ผู้ดูแล: {adminUsername}</div>
+                <div className="text-xs text-amber-300 font-bold mt-0.5">
+                  คมคิด by KOMKRIT
+                </div>
               </div>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-1 text-slate-300"
+              className="lg:hidden p-1.5 text-slate-300"
             >
-              <X className="w-5 h-5" />
+              <X className="w-6 h-6" />
             </button>
           </div>
 
-          <nav className="p-3 space-y-1">
+          <nav className="p-3.5 space-y-2">
             {menuItems.map((m) => {
               const active = activeMenu === m.id;
               return (
@@ -226,19 +223,30 @@ export const AdminLayout: React.FC<Props> = ({
                     setActiveMenu(m.id);
                     setSidebarOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-bold transition cursor-pointer ${
+                  className={`w-full flex items-center justify-between rounded-2xl px-4 py-3.5 text-left transition cursor-pointer ${
                     active
-                      ? 'bg-[#f59e0b] text-[#0b1f3a] shadow-xs'
-                      : 'text-slate-200 hover:bg-white/10'
+                      ? 'bg-[#f59e0b] text-[#0b1f3a] shadow-sm'
+                      : 'text-slate-100 hover:bg-white/10'
                   }`}
                 >
-                  <span className="flex items-center gap-2.5">
-                    {m.icon}
-                    {m.label}
+                  <span className="flex items-center gap-3">
+                    <span className="shrink-0">{m.icon}</span>
+                    <span>
+                      <span className="block text-sm sm:text-base font-extrabold leading-snug">
+                        {m.label}
+                      </span>
+                      <span
+                        className={`block text-xs mt-0.5 ${
+                          active ? 'text-[#0b1f3a]/80 font-semibold' : 'text-slate-400'
+                        }`}
+                      >
+                        {m.sub}
+                      </span>
+                    </span>
                   </span>
                   {typeof m.badge === 'number' && m.badge > 0 && (
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-extrabold ${
                         active
                           ? 'bg-[#0b1f3a] text-amber-300'
                           : 'bg-white/15 text-white'
@@ -253,19 +261,19 @@ export const AdminLayout: React.FC<Props> = ({
           </nav>
         </div>
 
-        <div className="p-3 border-t border-white/10 space-y-1.5">
+        <div className="p-4 border-t border-white/10 space-y-2">
           <button
             onClick={onOpenPublicWebsite}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 transition cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-extrabold text-[#0b1f3a] hover:bg-amber-300 transition cursor-pointer"
           >
-            <Globe className="w-3.5 h-3.5" />
-            เปิดดูหน้าเว็บไซต์
+            <Globe className="w-4 h-4" />
+            เปิดดูหน้าเว็บจริง
           </button>
           <button
             onClick={onLogout}
-            className="w-full flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/15 transition cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-rose-300 hover:bg-rose-500/15 transition cursor-pointer"
           >
-            <LogOut className="w-3.5 h-3.5" />
+            <LogOut className="w-4 h-4" />
             ออกจากระบบ
           </button>
         </div>
@@ -273,233 +281,90 @@ export const AdminLayout: React.FC<Props> = ({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Clean Minimal Top Bar (No duplicate buttons!) */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200/80 px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+        {/* Clean Large-Font Top Bar */}
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-xl bg-slate-100 text-[#0d2546]"
+              className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d2546] text-white text-sm font-bold"
             >
               <Menu className="w-5 h-5" />
+              เมนู
             </button>
-            <h1 className="text-sm sm:text-base font-extrabold text-[#0d2546]">
-              {menuItems.find((m) => m.id === activeMenu)?.label || 'ระบบจัดการ'}
+            <h1 className="text-base sm:text-lg font-extrabold text-[#0d2546]">
+              {menuItems.find((m) => m.id === activeMenu)?.label || 'จัดการข่าวและบทความ'}
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={onOpenPublicWebsite}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+              className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
             >
-              <Globe className="w-3.5 h-3.5" /> ดูหน้าเว็บ
+              <Globe className="w-4 h-4" /> ดูหน้าเว็บจริง
             </button>
             <button
               onClick={onLogout}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3.5 py-2 text-sm font-bold text-slate-700 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
             >
-              <LogOut className="w-3.5 h-3.5" /> ออกจากระบบ
+              <LogOut className="w-4 h-4" /> ออกจากระบบ
             </button>
           </div>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6 max-w-[1280px] w-full mx-auto">
-          {/* 1. DASHBOARD */}
-          {activeMenu === 'dashboard' && (
-            <div className="space-y-5">
-              {/* Simple Quick Action Strip */}
-              <div className="rounded-2xl bg-white border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-extrabold text-[#0d2546]">
-                    สวัสดีครับ, ยินดีต้อนรับสู่ระบบจัดการ คมคิด by KOMKRIT
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    เขียนบทความใหม่ จัดการข่าวสาร หรือให้ AI ช่วยร่างเนื้อหาได้ในคลิกเดียว
-                  </p>
+        <main className="flex-1 p-4 sm:p-6 max-w-[1240px] w-full mx-auto space-y-5">
+          {/* 1. NEWS & ARTICLES CRUD (DEFAULT HOME SCREEN!) */}
+          {(activeMenu === 'posts' || activeMenu === 'dashboard') && (
+            <>
+              {/* Clean 3-Box Summary Strip at Top */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div className="rounded-2xl bg-white border border-slate-200 px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold text-slate-500">ข่าวและบทความทั้งหมด</div>
+                    <div className="text-2xl font-extrabold text-[#0d2546] mt-0.5">
+                      {stats?.postsTotal ?? posts.length} เรื่อง
+                    </div>
+                  </div>
+                  <FileText className="w-8 h-8 text-[#0d2546]/20" />
                 </div>
-                <div className="flex flex-wrap gap-2 shrink-0">
-                  <button
-                    onClick={() => setActiveMenu('posts')}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#163a6b] cursor-pointer"
-                  >
-                    <PlusCircle className="w-4 h-4 text-amber-400" />
-                    เขียนโพสต์ใหม่
-                  </button>
-                  <button
-                    onClick={() => setActiveMenu('ai-command')}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#f59e0b] px-4 py-2.5 text-xs font-extrabold text-[#0b1f3a] hover:brightness-105 cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    ให้ AI ช่วยสร้างบทความ
-                  </button>
+
+                <div className="rounded-2xl bg-white border border-slate-200 px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold text-slate-500">ยอดคนเข้ามาอ่านรวม</div>
+                    <div className="text-2xl font-extrabold text-[#0d2546] mt-0.5">
+                      {formatViews(stats?.totalViews ?? 0)} ครั้ง
+                    </div>
+                  </div>
+                  <Eye className="w-8 h-8 text-sky-600/25" />
+                </div>
+
+                <div
+                  onClick={() => openSettingsSection('inbox')}
+                  className="rounded-2xl bg-white border border-slate-200 px-5 py-4 flex items-center justify-between cursor-pointer hover:border-amber-400 transition"
+                >
+                  <div>
+                    <div className="text-sm font-bold text-slate-500">ผู้ติดตาม & คนติดต่อ</div>
+                    <div className="text-2xl font-extrabold text-[#0d2546] mt-0.5">
+                      {(stats?.totalSubscribers ?? 0) + (stats?.unreadContacts ?? 0)} คน
+                    </div>
+                  </div>
+                  <Users className="w-8 h-8 text-emerald-600/25" />
                 </div>
               </div>
 
-              {/* 4 Clean KPI Cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="rounded-2xl bg-white border border-slate-200 p-4">
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>โพสต์ทั้งหมด</span>
-                    <FileText className="w-4 h-4 text-[#0d2546]" />
-                  </div>
-                  <div className="mt-2 text-2xl font-extrabold text-[#0d2546]">
-                    {stats?.postsTotal ?? posts.length}
-                  </div>
-                  <div className="mt-1 text-[11px] text-emerald-700 font-semibold">
-                    ออนไลน์ {stats?.postsPublished ?? posts.length} รายการ
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-white border border-slate-200 p-4">
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>ยอดอ่านรวม</span>
-                    <Eye className="w-4 h-4 text-sky-600" />
-                  </div>
-                  <div className="mt-2 text-2xl font-extrabold text-[#0d2546]">
-                    {formatViews(stats?.totalViews ?? 0)}
-                  </div>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    ความคิดเห็น {stats?.totalComments ?? 0} ข้อความ
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-white border border-slate-200 p-4">
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>ร่างคอนเทนต์ AI</span>
-                    <Bot className="w-4 h-4 text-[#f59e0b]" />
-                  </div>
-                  <div className="mt-2 text-2xl font-extrabold text-[#0d2546]">
-                    {stats?.totalWorkflows ?? workflows.length}
-                  </div>
-                  <div className="mt-1 text-[11px] text-amber-700 font-semibold">
-                    รออนุมัติ {stats?.pendingApprovals ?? 0} รายการ
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-white border border-slate-200 p-4">
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>ผู้ติดตามข่าวสาร</span>
-                    <Users className="w-4 h-4 text-emerald-600" />
-                  </div>
-                  <div className="mt-2 text-2xl font-extrabold text-[#0d2546]">
-                    {stats?.totalSubscribers ?? 0}
-                  </div>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    ข้อความติดต่อใหม่ {stats?.unreadContacts ?? 0} รายการ
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Posts & AI Drafts */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                <div className="lg:col-span-7 rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-extrabold text-sm text-[#0d2546]">
-                      บทความและข่าวสารล่าสุด
-                    </h3>
-                    <button
-                      onClick={() => setActiveMenu('posts')}
-                      className="text-xs font-bold text-[#d97706] hover:underline cursor-pointer"
-                    >
-                      ดูทั้งหมด →
-                    </button>
-                  </div>
-                  <div className="divide-y divide-slate-100">
-                    {posts.slice(0, 5).map((p) => (
-                      <div
-                        key={p.id}
-                        className="py-2.5 flex items-center justify-between gap-3"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <img
-                            src={p.coverImage}
-                            alt={p.title}
-                            className="h-10 w-14 rounded-lg object-cover shrink-0 bg-[#0d2546]"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-[#0d2546] truncate">
-                              {p.title}
-                            </div>
-                            <div className="text-[11px] text-slate-400">
-                              อ่าน {formatViews(p.views)} ครั้ง • คอมเมนต์ {p.commentsCount}
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => onPreviewPost(p.id)}
-                          className="shrink-0 rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-[#0d2546] hover:bg-slate-200 cursor-pointer"
-                        >
-                          ดูตัวอย่าง
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="lg:col-span-5 rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-extrabold text-sm text-[#0d2546]">
-                      คอนเทนต์จาก AI ล่าสุด
-                    </h3>
-                    <button
-                      onClick={() => setActiveMenu('ai-command')}
-                      className="text-xs font-bold text-[#d97706] hover:underline cursor-pointer"
-                    >
-                      เปิดสตูดิโอ AI →
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {workflows.slice(0, 4).map((w) => (
-                      <div
-                        key={w.id}
-                        onClick={() => setActiveMenu('ai-command')}
-                        className="rounded-xl border border-slate-200/80 p-3 hover:border-[#f59e0b] transition cursor-pointer"
-                      >
-                        <div className="flex items-center justify-between text-[10.5px] mb-1">
-                          <span className="text-slate-500">
-                            คะแนนตรวจสอบ {w.qaOutput?.overallScore || 97}/100
-                          </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 font-bold ${
-                              w.status === 'published'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-amber-100 text-amber-900'
-                            }`}
-                          >
-                            {w.status === 'published' ? 'โพสต์แล้ว' : 'รออนุมัติ'}
-                          </span>
-                        </div>
-                        <div className="text-xs font-bold text-[#0d2546] line-clamp-1">
-                          {w.scriptOutput?.selectedTitle || w.topic}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setActiveMenu('ai-command')}
-                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-[#0d2546] hover:bg-slate-200 cursor-pointer"
-                  >
-                    สร้างคอนเทนต์ใหม่ด้วย AI <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
+              <PostCrudManager
+                posts={posts}
+                initialEditPost={initialEditPost}
+                openCreateImmediately={openCreateImmediately}
+                onClearInitialEdit={onClearInitialEdit}
+                onRefresh={onRefreshAll}
+                onPreviewPost={onPreviewPost}
+                onOpenSettings={() => openSettingsSection('api_keys')}
+              />
+            </>
           )}
 
-          {/* 2. POSTS CRUD */}
-          {activeMenu === 'posts' && (
-            <PostCrudManager
-              posts={posts}
-              initialEditPost={initialEditPost}
-              openCreateImmediately={openCreateImmediately}
-              onClearInitialEdit={onClearInitialEdit}
-              onRefresh={onRefreshAll}
-              onPreviewPost={onPreviewPost}
-              onOpenSettings={() => openSettingsSection('api_keys')}
-            />
-          )}
-
-          {/* 3. SIMPLIFIED AI CONTENT STUDIO */}
+          {/* 2. SIMPLE AI ARTICLE WRITER */}
           {activeMenu === 'ai-command' && (
             <AiCommandCenter
               workflows={workflows}
@@ -512,7 +377,7 @@ export const AdminLayout: React.FC<Props> = ({
             />
           )}
 
-          {/* 4. VIDEO (GOOGLE FLOW / VEO) & AI CHAT */}
+          {/* 3. VIDEO & AI CHAT */}
           {activeMenu === 'flow-chat' && (
             <FlowAndChatStudio
               onRefreshAll={onRefreshAll}
@@ -521,16 +386,15 @@ export const AdminLayout: React.FC<Props> = ({
             />
           )}
 
-          {/* 5. UNIFIED SETTINGS HUB */}
+          {/* 4. MESSAGES & SETTINGS */}
           {activeMenu === 'settings' && (
             <div className="space-y-5">
-              {/* Clean Sub-tab Bar */}
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar bg-white rounded-2xl p-1.5 border border-slate-200">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar bg-white rounded-2xl p-2 border border-slate-200">
                 {settingsTabs.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => setSettingsTab(t.id)}
-                    className={`inline-flex items-center gap-1.5 shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+                    className={`inline-flex items-center gap-2 shrink-0 rounded-xl px-4 py-2.5 text-sm font-extrabold transition cursor-pointer ${
                       settingsTab === t.id
                         ? 'bg-[#0d2546] text-white'
                         : 'text-slate-600 hover:bg-slate-100'
@@ -542,56 +406,62 @@ export const AdminLayout: React.FC<Props> = ({
                 ))}
               </div>
 
+              {settingsTab === 'inbox' && (
+                <AudienceAndSettingsHub
+                  mode="feedback"
+                  onRefreshStats={onRefreshAll}
+                />
+              )}
+
               {settingsTab === 'api_keys' && (
                 <div className="space-y-5">
-                  {/* Admin Password & Account Security Card */}
                   <form
                     onSubmit={handleChangePassword}
-                    className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4"
+                    className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6 space-y-4"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0d2546] text-amber-400">
-                        <Lock className="w-4 h-4" />
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0d2546] text-amber-400">
+                        <Lock className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-extrabold text-[#0d2546]">
-                          บัญชีผู้ดูแลระบบ & เปลี่ยนรหัสผ่าน (Admin Login)
+                        <h3 className="text-base font-extrabold text-[#0d2546]">
+                          เปลี่ยนรหัสผ่านเข้าหน้าผู้ดูแลระบบ
                         </h3>
-                        <p className="text-xs text-slate-500">
-                          ใช้สำหรับเข้าสู่ระบบจัดการที่หน้า <code className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">/admin</code> เท่านั้น (ผู้ชมทั่วไปจะไม่เห็นเมนูหรือหน้านี้)
+                        <p className="text-sm text-slate-500">
+                          ใช้สำหรับล็อกอินเข้าหน้า <code className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">/admin</code>
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                       <div>
-                        <label className="block text-xs font-semibold text-slate-600 mb-1">
-                          ชื่อผู้ใช้ Admin
+                        <label className="block text-sm font-bold text-slate-700 mb-1">
+                          ชื่อผู้ใช้
                         </label>
                         <input
                           type="text"
                           required
                           value={newUsername}
                           onChange={(e) => setNewUsername(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-[#0d2546] focus:outline-none"
+                          className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-600 mb-1">
-                          รหัสผ่านปัจจุบัน
+                        <label className="block text-sm font-bold text-slate-700 mb-1">
+                          รหัสผ่านเดิม
                         </label>
                         <input
                           type="password"
                           required
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          placeholder="กรอกรหัสผ่านเดิม"
-                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-[#0d2546] focus:outline-none"
+                          placeholder="กรอกรหัสผ่านปัจจุบัน"
+                          className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-600 mb-1">
-                          รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)
+                        <label className="block text-sm font-bold text-slate-700 mb-1">
+                          รหัสผ่านใหม่ (6 ตัวขึ้นไป)
                         </label>
                         <input
                           type="password"
@@ -600,7 +470,7 @@ export const AdminLayout: React.FC<Props> = ({
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder="ตั้งรหัสผ่านใหม่"
-                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-[#0d2546] focus:outline-none"
+                          className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
                         />
                       </div>
                     </div>
@@ -609,14 +479,14 @@ export const AdminLayout: React.FC<Props> = ({
                       <div>
                         {pwdMsg && (
                           <span
-                            className={`inline-flex items-center gap-1 text-xs font-bold ${
+                            className={`inline-flex items-center gap-1.5 text-sm font-bold ${
                               pwdMsg.type === 'ok'
                                 ? 'text-emerald-700'
                                 : 'text-rose-600'
                             }`}
                           >
                             {pwdMsg.type === 'ok' && (
-                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <CheckCircle2 className="w-4 h-4" />
                             )}
                             {pwdMsg.text}
                           </span>
@@ -625,14 +495,13 @@ export const AdminLayout: React.FC<Props> = ({
                       <button
                         type="submit"
                         disabled={pwdSaving}
-                        className="rounded-xl bg-[#0d2546] px-4 py-2 text-xs font-bold text-white hover:bg-[#163a6b] cursor-pointer disabled:opacity-50"
+                        className="rounded-xl bg-[#0d2546] px-5 py-2.5 text-sm font-extrabold text-white hover:bg-[#163a6b] cursor-pointer disabled:opacity-50"
                       >
-                        {pwdSaving ? 'กำลังบันทึก...' : 'อัปเดตรหัสผ่าน Admin'}
+                        {pwdSaving ? 'กำลังบันทึก...' : 'บันทึกรหัสผ่านใหม่'}
                       </button>
                     </div>
                   </form>
 
-                  {/* Real Multi-LLM / Veo / Flow API Keys */}
                   <AudienceAndSettingsHub
                     mode="settings"
                     onRefreshStats={onRefreshAll}
@@ -671,13 +540,6 @@ export const AdminLayout: React.FC<Props> = ({
 
               {settingsTab === 'pillars' && (
                 <FivePillarManager pillars={pillars} onRefresh={onRefreshAll} />
-              )}
-
-              {settingsTab === 'inbox' && (
-                <AudienceAndSettingsHub
-                  mode="feedback"
-                  onRefreshStats={onRefreshAll}
-                />
               )}
             </div>
           )}

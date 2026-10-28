@@ -29,6 +29,12 @@ import {
   requireAdminAuth,
   updateAdminCredentials,
 } from './auth.ts';
+import {
+  isCloudSyncEnabled,
+  syncDatabaseBeforeRequest,
+  persistDatabaseToCloud,
+  uploadMediaToCloudBlob,
+} from './cloudSync.ts';
 
 initDatabase();
 
@@ -46,9 +52,41 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     service: 'komkid-by-komkrit-aiflow',
     runtime: IS_SERVERLESS ? 'vercel-serverless' : 'node-server',
+    cloudStorage: isCloudSyncEnabled() ? 'vercel-blob-encrypted-sqlite' : 'local-sqlite-disk',
     node: process.version,
     timestamp: new Date().toISOString(),
   });
+});
+
+// --- Cloud SQLite Sync Middleware (Permanent Persistence across Serverless Instances) ---
+app.use('/api', async (req, res, next) => {
+  if (req.path === '/health') return next();
+  try {
+    const isMutation =
+      req.method === 'POST' ||
+      req.method === 'PUT' ||
+      req.method === 'DELETE' ||
+      (req.method === 'GET' && req.query.incrementView === '1');
+
+    await syncDatabaseBeforeRequest(isMutation);
+
+    if (isMutation && req.path !== '/auth/login') {
+      const origJson = res.json.bind(res);
+      res.json = ((body: any) => {
+        if (res.statusCode < 400) {
+          persistDatabaseToCloud()
+            .catch((err) => console.error('Cloud DB persist error:', err))
+            .finally(() => origJson(body));
+          return res;
+        }
+        return origJson(body);
+      }) as any;
+    }
+    next();
+  } catch (err) {
+    console.error('Cloud DB sync error:', err);
+    next();
+  }
 });
 
 // --- Central Security Gatekeeper: Protect ALL Admin, Write & AI Endpoints ---
@@ -212,9 +250,19 @@ function mapFlowProjectRow(r: any) {
 }
 
 // --- Upload Endpoint (Images, MP4 Videos, Audio) ---
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: 'ไม่พบไฟล์ที่อัปโหลด' });
+    return;
+  }
+  const fileBuffer = fs.readFileSync(req.file.path);
+  const cloudUrl = await uploadMediaToCloudBlob(
+    fileBuffer,
+    req.file.filename,
+    req.file.mimetype
+  );
+  if (cloudUrl) {
+    res.json({ url: cloudUrl });
     return;
   }
   if (
@@ -222,8 +270,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     req.file.mimetype.startsWith('image/') &&
     req.file.size <= 4 * 1024 * 1024
   ) {
-    const b64 = fs.readFileSync(req.file.path).toString('base64');
-    res.json({ url: `data:${req.file.mimetype};base64,${b64}` });
+    res.json({ url: `data:${req.file.mimetype};base64,${fileBuffer.toString('base64')}` });
     return;
   }
   res.json({ url: `/uploads/${req.file.filename}` });
@@ -382,7 +429,7 @@ app.post('/api/posts', (req, res) => {
       `INSERT INTO posts (
         title, subtitle, excerpt, content, category, content_type, cover_image,
         video_url, audio_url, tags_json, author, status, is_featured, views, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
     )
     .run(
       String(title).trim(),

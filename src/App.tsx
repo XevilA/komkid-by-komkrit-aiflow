@@ -22,7 +22,7 @@ export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'public' | 'admin'>(() =>
     isUrlAdminRoute() ? 'admin' : 'public'
   );
-  const [adminMenu, setAdminMenu] = useState<string>('dashboard');
+  const [adminMenu, setAdminMenu] = useState<string>('posts');
   const [adminUsername, setAdminUsername] = useState<string>('');
   const [authChecked, setAuthChecked] = useState<boolean>(false);
 
