@@ -1,0 +1,37 @@
+{
+  "name": "komkid-by-komkrit-aiflow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "description": "คมคิด by KOMKRIT - Responsive CRUD WebApp & Multi-Agent AI Content Creation Ecosystem",
+  "scripts": {
+    "dev": "node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts",
+    "build:api": "esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=api/index.js",
+    "build": "vite build && npm run build:api",
+    "start": "NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^2.29.1",
+    "express": "^5.1.0",
+    "lucide-react": "^0.511.0",
+    "multer": "^2.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.7",
+    "@types/express": "^5.0.2",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.5",
+    "@types/react-dom": "^19.1.5",
+    "@vitejs/plugin-react": "^4.5.0",
+    "tailwindcss": "^4.1.7",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

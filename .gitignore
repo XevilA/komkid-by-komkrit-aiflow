@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/
+uploads/
+.env
+.vercel/
+*.log
+.DS_Store
+._*
+.vercel
