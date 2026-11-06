@@ -35,6 +35,7 @@ RESET="\033[0m"
 COOLIFY_KEY_PATH="${HOME}/.ssh/coolify_contabo_ed25519"
 DEFAULT_VPS_IP="5.183.33.183"
 DEFAULT_VPS_HOST="vmi3731662"
+DEFAULT_COOLIFY_DOMAIN="https://cloud.komkid.in.th"
 
 banner() {
   echo -e "${CYAN}${BOLD}"
@@ -288,15 +289,33 @@ run_direct_ssh_deploy() {
     --exclude='data/*.db*' \
     -czf - . | ssh -i "${COOLIFY_KEY_PATH}" -p "${ssh_port}" "${ssh_user}@${vps_ip}" "tar -xzf - -C ${remote_dir} 2>/dev/null"
 
-  echo -e "${CYAN}🐳 Step 3/3: Building & Starting Container on Contabo VPS (Port ${app_port} & Port 80)...${RESET}"
+  echo -e "${CYAN}🐳 Step 3/4: Building & Starting Backend + WebApp Container on Contabo VPS (Port ${app_port} & Port 80/443)...${RESET}"
   ssh -i "${COOLIFY_KEY_PATH}" -p "${ssh_port}" "${ssh_user}@${vps_ip}" "
     cd ${remote_dir}
     if [[ ! -f .env && -f .env.example ]]; then
       cp .env.example .env
     fi
-    APP_HOST_PORT=${app_port} docker compose up -d --build
-    sleep 4
-    docker compose ps
+    docker rm -f komkid-aiflow 2>/dev/null || true
+    APP_PORT=${app_port} docker compose up -d --build --remove-orphans
+  "
+
+  echo -e "${CYAN}💾 Step 4/4: Syncing Local Backend Database (data/komkrit.db) & Media Uploads into Coolify Persistent Volumes...${RESET}"
+  if [[ -f "data/komkrit.db" ]]; then
+    scp -i "${COOLIFY_KEY_PATH}" -P "${ssh_port}" "data/komkrit.db" "${ssh_user}@${vps_ip}:/tmp/komkrit_seed.db"
+    ssh -i "${COOLIFY_KEY_PATH}" -p "${ssh_port}" "${ssh_user}@${vps_ip}" "
+      docker cp /tmp/komkrit_seed.db komkid-aiflow-app:/app/data/komkrit.db
+      rm -f /tmp/komkrit_seed.db
+    "
+  fi
+  if [[ -d "uploads" ]]; then
+    COPYFILE_DISABLE=1 tar -czf - uploads | ssh -i "${COOLIFY_KEY_PATH}" -p "${ssh_port}" "${ssh_user}@${vps_ip}" "
+      tar -xzf - -C /tmp && docker cp /tmp/uploads/. komkid-aiflow-app:/app/uploads/ && rm -rf /tmp/uploads
+    "
+  fi
+  ssh -i "${COOLIFY_KEY_PATH}" -p "${ssh_port}" "${ssh_user}@${vps_ip}" "
+    docker restart komkid-aiflow-app >/dev/null
+    sleep 3
+    docker ps --filter name=komkid-aiflow-app
     curl -fsS http://127.0.0.1:${app_port}/api/health || true
   "
 
@@ -384,8 +403,15 @@ EOF
     echo -e "${GREEN}✅ GitHub Actions Secrets (VPS_HOST, VPS_USER, VPS_PORT, VPS_SSH_KEY) configured on GitHub!${RESET}"
   fi
 
-  echo -e "${CYAN}📦 Step 3/3: Registering Project & Application inside Coolify v4 on ${vps_ip}...${RESET}"
+  echo -e "${CYAN}📦 Step 3/3: Registering Project, Application & Coolify Domain (${DEFAULT_COOLIFY_DOMAIN}) inside Coolify v4 on ${vps_ip}...${RESET}"
   ssh -i "${COOLIFY_KEY_PATH}" -p "${ssh_port}" "${ssh_user}@${vps_ip}" "docker exec coolify php artisan tinker --execute='
+\$settings = \App\Models\InstanceSettings::get();
+\$settings->fqdn = \"${DEFAULT_COOLIFY_DOMAIN}\";
+\$settings->save();
+\$server = \App\Models\Server::find(0);
+if (\$server) {
+  \$server->setupDynamicProxyConfiguration();
+}
 \$project = \App\Models\Project::firstOrCreate(
   [\"name\" => \"คมคิด by KOMKRIT (aiflow)\", \"team_id\" => 0],
   [\"uuid\" => \"komkid-project-prod\", \"description\" => \"Production AI Ad Studio & 9-Agent Content Flow\"]
@@ -398,21 +424,23 @@ EOF
   [\"uuid\" => \"komkid-aiflow-app\"],
   [
     \"name\" => \"komkid-by-komkrit-aiflow\",
-    \"description\" => \"คมคิด by KOMKRIT — Production WebApp & API\",
-    \"fqdn\" => \"http://${vps_ip}.sslip.io\",
+    \"description\" => \"คมคิด by KOMKRIT — Full-Stack WebApp, Node.js/Express Backend API, 9-Agent Engine & SQLite Storage\",
+    \"fqdn\" => \"https://komkid.in.th,https://www.komkid.in.th,http://${vps_ip}.sslip.io\",
     \"git_repository\" => \"XevilA/komkid-by-komkrit-aiflow\",
     \"git_branch\" => \"main\",
     \"git_full_url\" => \"https://github.com/XevilA/komkid-by-komkrit-aiflow.git\",
     \"build_pack\" => \"dockerfile\",
     \"dockerfile_location\" => \"/Dockerfile\",
     \"ports_exposes\" => \"8080\",
+    \"ports_mappings\" => \"3000:8080\",
     \"base_directory\" => \"/\",
     \"health_check_enabled\" => true,
     \"health_check_path\" => \"/api/health\",
     \"health_check_port\" => \"8080\",
-    \"health_check_Method\" => \"GET\",
+    \"health_check_method\" => \"GET\",
     \"health_check_return_code\" => 200,
     \"status\" => \"running:healthy\",
+    \"container_present\" => true,
     \"environment_id\" => \$env->id,
     \"destination_id\" => 0,
     \"destination_type\" => \App\Models\StandaloneDocker::class,
@@ -422,6 +450,26 @@ EOF
     \"manual_webhook_secret_github\" => \"komkid-coolify-webhook-secret\"
   ]
 );
+\App\Models\LocalPersistentVolume::updateOrCreate(
+  [\"name\" => \"komkid_aiflow_data\", \"resource_id\" => \$app->id, \"resource_type\" => \App\Models\Application::class],
+  [\"mount_path\" => \"/app/data\"]
+);
+\App\Models\LocalPersistentVolume::updateOrCreate(
+  [\"name\" => \"komkid_aiflow_uploads\", \"resource_id\" => \$app->id, \"resource_type\" => \App\Models\Application::class],
+  [\"mount_path\" => \"/app/uploads\"]
+);
+\$defaultEnvs = [
+  \"NODE_ENV\" => \"production\",
+  \"PORT\" => \"8080\",
+  \"DATA_DIR\" => \"/app/data\",
+  \"UPLOADS_DIR\" => \"/app/uploads\"
+];
+foreach (\$defaultEnvs as \$k => \$v) {
+  \App\Models\EnvironmentVariable::updateOrCreate(
+    [\"key\" => \$k, \"resourceable_id\" => \$app->id, \"resourceable_type\" => \App\Models\Application::class, \"is_preview\" => false],
+    [\"value\" => \$v, \"is_build_time\" => false, \"is_literal\" => true]
+  );
+}
 echo \"Coolify Registered App UUID: \" . \$app->uuid . \"\n\";
 '"
 
@@ -429,7 +477,7 @@ echo \"Coolify Registered App UUID: \" . \$app->uuid . \"\n\";
   echo -e "${GREEN}${BOLD}✅ CI/CD Setup Complete!${RESET}"
   echo -e "  • GitHub Actions CI/CD : Push to ${BOLD}origin main${RESET} -> Auto Typecheck + Build + Deploy to ${vps_ip}"
   echo -e "  • Direct Git Push CD   : Run ${BOLD}git push contabo main${RESET} -> Instant build & deploy on ${vps_ip}"
-  echo -e "  • Coolify Resource     : Registered in Coolify Dashboard (${BOLD}http://${vps_ip}:8000${RESET})"
+  echo -e "  • Coolify Resource     : Registered in Coolify Dashboard (${BOLD}${DEFAULT_COOLIFY_DOMAIN}${RESET} / ${BOLD}http://${vps_ip}:8000${RESET})"
 }
 
 interactive_menu() {

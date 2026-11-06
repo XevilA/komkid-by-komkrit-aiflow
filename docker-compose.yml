@@ -1,50 +1,70 @@
 services:
   aiflow:
+    container_name: komkid-aiflow-app
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: komkid-aiflow
     restart: unless-stopped
     ports:
-      - "${APP_HOST_PORT:-3000}:8080"
+      - "${APP_PORT:-3000}:8080"
     networks:
       - default
       - coolify
     labels:
+      - "coolify.managed=true"
+      - "coolify.version=4.6.0"
+      - "coolify.applicationId=1"
+      - "coolify.type=application"
+      - "coolify.name=komkid-aiflow-app"
+      - "coolify.projectName=komkid-by-komkrit-aiflow"
+      - "coolify.serviceName=aiflow"
+      - "coolify.environmentName=production"
       - "traefik.enable=true"
-      - "traefik.http.routers.komkid-aiflow.rule=Host(`${APP_DOMAIN:-5.183.33.183.sslip.io}`) || PathPrefix(`/`)"
-      - "traefik.http.routers.komkid-aiflow.entrypoints=http"
-      - "traefik.http.services.komkid-aiflow.loadbalancer.server.port=8080"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.komkid-aiflow-http.rule=Host(`5.183.33.183.sslip.io`) || Host(`5.183.33.183`) || Host(`komkid.in.th`) || Host(`www.komkid.in.th`) || Host(`api.komkid.in.th`)"
+      - "traefik.http.routers.komkid-aiflow-http.entrypoints=http"
+      - "traefik.http.routers.komkid-aiflow-http.service=komkid-aiflow-svc"
+      - "traefik.http.routers.komkid-aiflow-https.rule=Host(`komkid.in.th`) || Host(`www.komkid.in.th`) || Host(`api.komkid.in.th`) || Host(`5.183.33.183.sslip.io`)"
+      - "traefik.http.routers.komkid-aiflow-https.entrypoints=https"
+      - "traefik.http.routers.komkid-aiflow-https.tls=true"
+      - "traefik.http.routers.komkid-aiflow-https.service=komkid-aiflow-svc"
+      - "traefik.http.services.komkid-aiflow-svc.loadbalancer.server.port=8080"
     environment:
       - NODE_ENV=production
       - PORT=8080
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - DATA_DIR=/app/data
+      - UPLOADS_DIR=/app/uploads
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
-      - KOMKRIT_VAULT_SECRET=${KOMKRIT_VAULT_SECRET:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
-      - VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-}
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - FAL_KEY=${FAL_KEY:-}
+      - RUNWAY_API_KEY=${RUNWAY_API_KEY:-}
+      - LUMA_API_KEY=${LUMA_API_KEY:-}
+      - KLING_API_KEY=${KLING_API_KEY:-}
+      - HEYGEN_API_KEY=${HEYGEN_API_KEY:-}
+      - SUNO_API_KEY=${SUNO_API_KEY:-}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
     volumes:
-      - aiflow_data:/app/data
-      - aiflow_uploads:/app/uploads
+      - komkid_aiflow_data:/app/data
+      - komkid_aiflow_uploads:/app/uploads
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 25s
+      start_period: 15s
 
 volumes:
-  aiflow_data:
+  komkid_aiflow_data:
     name: komkid_aiflow_data
-  aiflow_uploads:
+  komkid_aiflow_uploads:
     name: komkid_aiflow_uploads
 
 networks:
   coolify:
     external: true
-
