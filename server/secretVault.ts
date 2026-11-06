@@ -15,6 +15,11 @@ export const SECRET_SETTING_KEYS = new Set<string>([
   'local_api_key',
 ]);
 
+export interface UnsealedVaultPayload {
+  updatedAt: number;
+  rows: Record<string, string>;
+}
+
 function getMasterSeedMaterial(): string {
   const parts = [
     process.env.VAULT_MASTER_KEY || '',
@@ -89,14 +94,18 @@ export function decryptSecretValue(stored: string | undefined | null, fieldName:
 }
 
 /**
- * Creates a server-sealed, gzipped AES-256-GCM encrypted backup token containing
+ * Creates a server-sealed, versioned, gzipped AES-256-GCM encrypted backup token containing
  * encrypted settings rows. Indecipherable outside the server (requires server secret material).
- * Ensures API keys are remembered across serverless cold starts even if external blob storage is suspended.
+ * Guarantees multi-container serverless consistency & cold-start persistence.
  */
-export function sealSettingsVaultToken(settingsRows: Record<string, string>): string {
+export function sealSettingsVaultToken(
+  settingsRows: Record<string, string>,
+  updatedAt = Date.now()
+): string {
   const payload = JSON.stringify({
     v: 1,
-    iat: Date.now(),
+    iat: updatedAt,
+    updatedAt,
     rows: settingsRows,
   });
   const compressed = zlib.gzipSync(Buffer.from(payload, 'utf8'));
@@ -111,9 +120,9 @@ export function sealSettingsVaultToken(settingsRows: Record<string, string>): st
   return `${SEALED_VAULT_PREFIX}${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
 }
 
-export function unsealSettingsVaultToken(
+export function unsealSettingsVaultWithMeta(
   token?: string | null
-): Record<string, string> | null {
+): UnsealedVaultPayload | null {
   const raw = (token || '').trim();
   if (!raw || !raw.startsWith(SEALED_VAULT_PREFIX)) return null;
 
@@ -134,12 +143,23 @@ export function unsealSettingsVaultToken(
     const jsonStr = zlib.gunzipSync(compressed).toString('utf8');
     const parsed = JSON.parse(jsonStr);
     if (parsed && typeof parsed.rows === 'object' && parsed.rows !== null) {
-      return parsed.rows as Record<string, string>;
+      const ts = Number(parsed.updatedAt || parsed.iat || 0);
+      return {
+        updatedAt: Number.isFinite(ts) ? ts : 0,
+        rows: parsed.rows as Record<string, string>,
+      };
     }
     return null;
   } catch {
     return null;
   }
+}
+
+export function unsealSettingsVaultToken(
+  token?: string | null
+): Record<string, string> | null {
+  const meta = unsealSettingsVaultWithMeta(token);
+  return meta ? meta.rows : null;
 }
 
 /**
@@ -163,7 +183,6 @@ export function redactSecrets(message: string, knownSecrets: (string | undefined
       out = out.split(clean).join('[REDACTED_KEY]');
     }
   }
-  // Redact common API key patterns (OpenAI, Anthropic, DeepSeek, Gemini AIza, Resend, ElevenLabs, Bearer tokens)
   out = out.replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, 'sk-••••••••[REDACTED]');
   out = out.replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, 'AIza••••••••[REDACTED]');
   out = out.replace(/\bre_[A-Za-z0-9_]{12,}\b/g, 're_••••••••[REDACTED]');

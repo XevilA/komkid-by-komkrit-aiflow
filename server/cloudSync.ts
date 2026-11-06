@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {
+  db,
   IS_SERVERLESS,
   exportDatabaseSnapshotBuffer,
   reloadDatabaseFromSnapshotBuffer,
@@ -11,6 +12,7 @@ const STATE_PREFIX = 'state/komkrit-db-';
 let currentLoadedBlobPath = '';
 let lastCheckAt = 0;
 let blobWriteSuspended = false;
+let blobSuspendedRetryAfter = 0;
 let hasUnsyncedLocalMutations = false;
 
 function getBlobToken(): string {
@@ -122,19 +124,63 @@ export async function syncDatabaseBeforeRequest(forceCheck = false): Promise<voi
   if (!dl.ok) return;
   const encryptedBytes = Buffer.from(await dl.arrayBuffer());
   const sqliteBytes = decryptBuffer(encryptedBytes, token);
+
+  // Preserve any newer in-memory encrypted settings before reloading an older cloud snapshot
+  let memVaultTs = 0;
+  let memSettingsRows: { key: string; value: string }[] = [];
+  try {
+    const tsRow = db
+      .prepare("SELECT value FROM settings WHERE key = '_vault_updated_at'")
+      .get() as { value: string } | undefined;
+    memVaultTs = Number(tsRow?.value || '0') || 0;
+    if (memVaultTs > 0) {
+      memSettingsRows = db
+        .prepare('SELECT key, value FROM settings')
+        .all() as { key: string; value: string }[];
+    }
+  } catch {
+    // ignore
+  }
+
   reloadDatabaseFromSnapshotBuffer(sqliteBytes);
+
+  if (memVaultTs > 0 && memSettingsRows.length > 0) {
+    try {
+      const snapTsRow = db
+        .prepare("SELECT value FROM settings WHERE key = '_vault_updated_at'")
+        .get() as { value: string } | undefined;
+      const snapVaultTs = Number(snapTsRow?.value || '0') || 0;
+      if (memVaultTs > snapVaultTs) {
+        const setStmt = db.prepare(
+          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+        );
+        for (const r of memSettingsRows) {
+          setStmt.run(r.key, r.value);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   currentLoadedBlobPath = newest.pathname;
   hasUnsyncedLocalMutations = false;
 }
 
 export async function persistDatabaseToCloud(): Promise<boolean> {
   if (!isCloudSyncEnabled()) return true;
-  const token = getBlobToken();
+  const now = Date.now();
   hasUnsyncedLocalMutations = true;
 
+  // Back off 5 minutes when Vercel Blob store is suspended so requests stay fast
+  if (blobWriteSuspended && now < blobSuspendedRetryAfter) {
+    return false;
+  }
+
+  const token = getBlobToken();
   const sqliteBytes = exportDatabaseSnapshotBuffer();
   const encryptedBytes = encryptBuffer(sqliteBytes, token);
-  const ts = String(Date.now()).padStart(15, '0');
+  const ts = String(now).padStart(15, '0');
   const rand = crypto.randomBytes(3).toString('hex');
   const pathname = `${STATE_PREFIX}${ts}-${rand}.enc`;
 
@@ -152,6 +198,7 @@ export async function persistDatabaseToCloud(): Promise<boolean> {
 
   if (putRes.ok) {
     blobWriteSuspended = false;
+    blobSuspendedRetryAfter = 0;
     hasUnsyncedLocalMutations = false;
     currentLoadedBlobPath = pathname;
     lastCheckAt = Date.now();
@@ -165,6 +212,7 @@ export async function persistDatabaseToCloud(): Promise<boolean> {
   }
 
   blobWriteSuspended = true;
+  blobSuspendedRetryAfter = Date.now() + 5 * 60 * 1000;
   return false;
 }
 

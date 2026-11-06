@@ -77,10 +77,11 @@ function decryptSecretValue(stored, fieldName) {
     return "";
   }
 }
-function sealSettingsVaultToken(settingsRows) {
+function sealSettingsVaultToken(settingsRows, updatedAt = Date.now()) {
   const payload = JSON.stringify({
     v: 1,
-    iat: Date.now(),
+    iat: updatedAt,
+    updatedAt,
     rows: settingsRows
   });
   const compressed = zlib.gzipSync(Buffer.from(payload, "utf8"));
@@ -92,7 +93,7 @@ function sealSettingsVaultToken(settingsRows) {
   const tag = cipher.getAuthTag();
   return `${SEALED_VAULT_PREFIX}${iv.toString("base64url")}.${tag.toString("base64url")}.${encrypted.toString("base64url")}`;
 }
-function unsealSettingsVaultToken(token) {
+function unsealSettingsVaultWithMeta(token) {
   const raw = (token || "").trim();
   if (!raw || !raw.startsWith(SEALED_VAULT_PREFIX)) return null;
   const parts = raw.slice(SEALED_VAULT_PREFIX.length).split(".");
@@ -109,7 +110,11 @@ function unsealSettingsVaultToken(token) {
     const jsonStr = zlib.gunzipSync(compressed).toString("utf8");
     const parsed = JSON.parse(jsonStr);
     if (parsed && typeof parsed.rows === "object" && parsed.rows !== null) {
-      return parsed.rows;
+      const ts = Number(parsed.updatedAt || parsed.iat || 0);
+      return {
+        updatedAt: Number.isFinite(ts) ? ts : 0,
+        rows: parsed.rows
+      };
     }
     return null;
   } catch {
@@ -1121,6 +1126,7 @@ var STATE_PREFIX = "state/komkrit-db-";
 var currentLoadedBlobPath = "";
 var lastCheckAt = 0;
 var blobWriteSuspended = false;
+var blobSuspendedRetryAfter = 0;
 var hasUnsyncedLocalMutations = false;
 function getBlobToken() {
   return (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
@@ -1209,17 +1215,46 @@ async function syncDatabaseBeforeRequest(forceCheck = false) {
   if (!dl.ok) return;
   const encryptedBytes = Buffer.from(await dl.arrayBuffer());
   const sqliteBytes = decryptBuffer(encryptedBytes, token);
+  let memVaultTs = 0;
+  let memSettingsRows = [];
+  try {
+    const tsRow = db.prepare("SELECT value FROM settings WHERE key = '_vault_updated_at'").get();
+    memVaultTs = Number(tsRow?.value || "0") || 0;
+    if (memVaultTs > 0) {
+      memSettingsRows = db.prepare("SELECT key, value FROM settings").all();
+    }
+  } catch {
+  }
   reloadDatabaseFromSnapshotBuffer(sqliteBytes);
+  if (memVaultTs > 0 && memSettingsRows.length > 0) {
+    try {
+      const snapTsRow = db.prepare("SELECT value FROM settings WHERE key = '_vault_updated_at'").get();
+      const snapVaultTs = Number(snapTsRow?.value || "0") || 0;
+      if (memVaultTs > snapVaultTs) {
+        const setStmt = db.prepare(
+          "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+        );
+        for (const r of memSettingsRows) {
+          setStmt.run(r.key, r.value);
+        }
+      }
+    } catch {
+    }
+  }
   currentLoadedBlobPath = newest.pathname;
   hasUnsyncedLocalMutations = false;
 }
 async function persistDatabaseToCloud() {
   if (!isCloudSyncEnabled()) return true;
-  const token = getBlobToken();
+  const now = Date.now();
   hasUnsyncedLocalMutations = true;
+  if (blobWriteSuspended && now < blobSuspendedRetryAfter) {
+    return false;
+  }
+  const token = getBlobToken();
   const sqliteBytes = exportDatabaseSnapshotBuffer();
   const encryptedBytes = encryptBuffer(sqliteBytes, token);
-  const ts = String(Date.now()).padStart(15, "0");
+  const ts = String(now).padStart(15, "0");
   const rand = crypto2.randomBytes(3).toString("hex");
   const pathname = `${STATE_PREFIX}${ts}-${rand}.enc`;
   const putRes = await fetch(`${BLOB_API_BASE}/${pathname}`, {
@@ -1235,6 +1270,7 @@ async function persistDatabaseToCloud() {
   });
   if (putRes.ok) {
     blobWriteSuspended = false;
+    blobSuspendedRetryAfter = 0;
     hasUnsyncedLocalMutations = false;
     currentLoadedBlobPath = pathname;
     lastCheckAt = Date.now();
@@ -1246,6 +1282,7 @@ async function persistDatabaseToCloud() {
     return true;
   }
   blobWriteSuspended = true;
+  blobSuspendedRetryAfter = Date.now() + 5 * 60 * 1e3;
   return false;
 }
 async function uploadMediaToCloudBlob(buffer, filename, mimeType) {
@@ -3171,12 +3208,16 @@ function resolveActiveProvider(requested) {
   if (target !== "auto") {
     return target;
   }
+  if (cfg.defaultProvider === "gemini" && cfg.gemini.apiKey) return "gemini";
+  if (cfg.defaultProvider === "openai" && cfg.openai.apiKey) return "openai";
+  if (cfg.defaultProvider === "claude" && cfg.claude.apiKey) return "claude";
+  if (cfg.defaultProvider === "deepseek" && cfg.deepseek.apiKey) return "deepseek";
   if (cfg.gemini.apiKey) return "gemini";
-  if (cfg.claude.apiKey) return "claude";
   if (cfg.openai.apiKey) return "openai";
+  if (cfg.claude.apiKey) return "claude";
   if (cfg.deepseek.apiKey) return "deepseek";
   throw new Error(
-    '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Key \u0E08\u0E23\u0E34\u0E07\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A AI (\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A Google Gemini, Anthropic Claude, DeepSeek \u0E41\u0E25\u0E30 OpenAI ChatGPT) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E44\u0E1B\u0E17\u0E35\u0E48\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E04\u0E35\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07\u0E01\u0E48\u0E2D\u0E19\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19 (\u0E23\u0E30\u0E1A\u0E1A\u0E1B\u0E34\u0E14\u0E42\u0E2B\u0E21\u0E14 Mockup 100%)'
+    '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Key \u0E08\u0E23\u0E34\u0E07\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A AI (\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A Google Gemini, OpenAI ChatGPT, Anthropic Claude \u0E41\u0E25\u0E30 DeepSeek) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E44\u0E1B\u0E17\u0E35\u0E48\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C AI" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E04\u0E35\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07\u0E01\u0E48\u0E2D\u0E19\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E04\u0E23\u0E31\u0E1A'
   );
 }
 function getActiveKnowledgeContext(topic) {
@@ -4912,34 +4953,94 @@ function updateAdminCredentials(newUsername, newPassword) {
 
 // server/index.ts
 initDatabase();
+var VAULT_COOKIE_NAME = "komkrit_vault";
+var VAULT_UPDATED_AT_KEY = "_vault_updated_at";
+function getLocalVaultUpdatedAt() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(VAULT_UPDATED_AT_KEY);
+  const n = Number(row?.value || "0");
+  return Number.isFinite(n) ? n : 0;
+}
+function hasAnyStoredApiSecret() {
+  const rows = db.prepare("SELECT key, value FROM settings").all();
+  return rows.some(
+    (r) => SECRET_SETTING_KEYS.has(r.key) && Boolean(String(r.value || "").trim())
+  );
+}
 function exportEncryptedSettingsMap() {
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const map = {};
   for (const r of rows) {
     if (!r.key || r.key === "dynamic_model_discovery_v1") continue;
-    const raw = String(r.value || "").trim();
-    if (!raw) continue;
-    map[r.key] = SECRET_SETTING_KEYS.has(r.key) ? encryptSecretValue(raw, r.key) : raw;
+    const raw = String(r.value ?? "").trim();
+    if (SECRET_SETTING_KEYS.has(r.key)) {
+      map[r.key] = raw ? encryptSecretValue(raw, r.key) : "";
+    } else {
+      map[r.key] = raw;
+    }
   }
   return map;
 }
-function hydrateMissingSettingsFromSealedVault(sealedToken) {
-  const unsealed = unsealSettingsVaultToken(sealedToken);
-  if (!unsealed) return;
-  const getStmt = db.prepare("SELECT value FROM settings WHERE key = ?");
-  const setStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
-  let restoredAny = false;
-  for (const [k, v] of Object.entries(unsealed)) {
-    if (!k || typeof v !== "string" || !v.trim()) continue;
-    const cur = getStmt.get(k);
-    if (!cur || !String(cur.value || "").trim()) {
-      const safeVal = SECRET_SETTING_KEYS.has(k) ? isEncryptedSecret(v) ? v : encryptSecretValue(v, k) : v;
-      setStmt.run(k, safeVal);
-      restoredAny = true;
+function parseCookieToken(cookieHeader, name) {
+  if (!cookieHeader) return "";
+  const parts = cookieHeader.split(";");
+  for (const part of parts) {
+    const eqIdx = part.indexOf("=");
+    if (eqIdx === -1) continue;
+    const k = part.slice(0, eqIdx).trim();
+    if (k === name) {
+      try {
+        return decodeURIComponent(part.slice(eqIdx + 1).trim());
+      } catch {
+        return part.slice(eqIdx + 1).trim();
+      }
     }
   }
-  if (restoredAny) {
+  return "";
+}
+function writeSealedVaultCookie(req, res, sealedToken) {
+  if (!sealedToken) return;
+  const isHttps = req.secure || req.headers["x-forwarded-proto"] === "https" || IS_SERVERLESS;
+  res.setHeader(
+    "Set-Cookie",
+    `${VAULT_COOKIE_NAME}=${encodeURIComponent(
+      sealedToken
+    )}; Path=/api; Max-Age=31536000; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`
+  );
+}
+function syncSettingsFromRequestVault(req, res) {
+  const headerVal = typeof req.headers["x-komkrit-sealed-vault"] === "string" ? req.headers["x-komkrit-sealed-vault"].trim() : "";
+  const cookieVal = parseCookieToken(req.headers.cookie, VAULT_COOKIE_NAME);
+  const candidates = [
+    { source: "header", raw: headerVal, parsed: unsealSettingsVaultWithMeta(headerVal) },
+    { source: "cookie", raw: cookieVal, parsed: unsealSettingsVaultWithMeta(cookieVal) }
+  ].filter((c) => c.parsed !== null);
+  if (candidates.length === 0) return;
+  candidates.sort((a, b) => b.parsed.updatedAt - a.parsed.updatedAt);
+  const best = candidates[0];
+  const localUpdatedAt = getLocalVaultUpdatedAt();
+  const bestHasAnySecret = Object.entries(best.parsed.rows).some(
+    ([k, v]) => SECRET_SETTING_KEYS.has(k) && Boolean(String(v || "").trim())
+  );
+  if (best.parsed.updatedAt > localUpdatedAt || localUpdatedAt === 0 && !hasAnyStoredApiSecret() && bestHasAnySecret) {
+    const setStmt = db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+    );
+    for (const [k, v] of Object.entries(best.parsed.rows)) {
+      if (!k || typeof v !== "string") continue;
+      const trimmed = v.trim();
+      if (SECRET_SETTING_KEYS.has(k)) {
+        const safeVal = trimmed ? isEncryptedSecret(trimmed) ? trimmed : encryptSecretValue(trimmed, k) : "";
+        setStmt.run(k, safeVal);
+      } else {
+        setStmt.run(k, trimmed);
+      }
+    }
+    const effectiveTs = best.parsed.updatedAt || Date.now();
+    setStmt.run(VAULT_UPDATED_AT_KEY, String(effectiveTs));
     invalidateModelCatalogCache();
+  }
+  if (!cookieVal || best.source === "header" && cookieVal !== best.raw) {
+    writeSealedVaultCookie(req, res, best.raw);
   }
 }
 var app = express();
@@ -4992,10 +5093,7 @@ app.use("/api", (req, res, next) => {
     return next();
   }
   return requireAdminAuth(req, res, () => {
-    const vaultHeader = req.headers["x-komkrit-sealed-vault"];
-    if (typeof vaultHeader === "string" && vaultHeader.trim()) {
-      hydrateMissingSettingsFromSealedVault(vaultHeader.trim());
-    }
+    syncSettingsFromRequestVault(req, res);
     next();
   });
 });
@@ -6434,16 +6532,22 @@ app.post("/api/ai/models/provider", async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-app.get("/api/settings/ai", (_req, res) => {
+app.get("/api/settings/ai", (req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.setHeader("Pragma", "no-cache");
   const cfg = getProviderConfigs();
-  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
+  const localUpdatedAt = getLocalVaultUpdatedAt();
+  const hasAnyKey = hasAnyStoredApiSecret();
+  const effectiveTs = localUpdatedAt || (hasAnyKey ? Date.now() : 0);
+  const sealedVault = effectiveTs > 0 ? sealSettingsVaultToken(exportEncryptedSettingsMap(), effectiveTs) : void 0;
+  if (sealedVault) {
+    writeSealedVaultCookie(req, res, sealedVault);
+  }
   res.json({
     provider: cfg.defaultProvider,
     encryptedAtRest: true,
     encryptionStandard: "AES-256-GCM",
-    sealedVault,
+    ...sealedVault ? { sealedVault, vaultUpdatedAt: effectiveTs } : {},
     // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
@@ -6529,9 +6633,12 @@ app.put("/api/settings/ai", (req, res) => {
   saveStr("local_endpoint", b.localEndpoint);
   saveStr("local_model", b.localModel);
   saveSecret("local_api_key", b.localApiKey);
+  const updatedAt = Date.now();
+  set.run(VAULT_UPDATED_AT_KEY, String(updatedAt));
   invalidateModelCatalogCache();
-  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
-  res.json({ ok: true, encryptedAtRest: true, sealedVault });
+  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), updatedAt);
+  writeSealedVaultCookie(req, res, sealedVault);
+  res.json({ ok: true, encryptedAtRest: true, vaultUpdatedAt: updatedAt, sealedVault });
 });
 app.post("/api/settings/test-provider", async (req, res) => {
   const { provider, model, apiKey } = req.body || {};

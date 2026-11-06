@@ -100,14 +100,20 @@ function resolveActiveProvider(requested?: LlmProviderId): Exclude<LlmProviderId
     return target;
   }
 
-  // Strictly pick a real configured API provider — ZERO MOCKUPS!
+  // If admin selected a preferred default provider in Settings and its key is present, honor it first
+  if (cfg.defaultProvider === 'gemini' && cfg.gemini.apiKey) return 'gemini';
+  if (cfg.defaultProvider === 'openai' && cfg.openai.apiKey) return 'openai';
+  if (cfg.defaultProvider === 'claude' && cfg.claude.apiKey) return 'claude';
+  if (cfg.defaultProvider === 'deepseek' && cfg.deepseek.apiKey) return 'deepseek';
+
+  // Otherwise pick any real configured API provider — ZERO MOCKUPS!
   if (cfg.gemini.apiKey) return 'gemini';
-  if (cfg.claude.apiKey) return 'claude';
   if (cfg.openai.apiKey) return 'openai';
+  if (cfg.claude.apiKey) return 'claude';
   if (cfg.deepseek.apiKey) return 'deepseek';
 
   throw new Error(
-    'ยังไม่ได้ตั้งค่า API Key จริงสำหรับ AI (รองรับ Google Gemini, Anthropic Claude, DeepSeek และ OpenAI ChatGPT) — กรุณาไปที่เมนู "ตั้งค่า API Keys & Providers" เพื่อบันทึกคีย์จริงก่อนใช้งาน (ระบบปิดโหมด Mockup 100%)'
+    'ยังไม่ได้ตั้งค่า API Key จริงสำหรับ AI (รองรับ Google Gemini, OpenAI ChatGPT, Anthropic Claude และ DeepSeek) — กรุณาไปที่เมนู "ตั้งค่าคีย์ AI" เพื่อบันทึกคีย์จริงก่อนใช้งานครับ'
   );
 }
 

@@ -52,10 +52,31 @@ import {
   maskSecretStrict,
   redactSecrets,
   sealSettingsVaultToken,
-  unsealSettingsVaultToken,
+  unsealSettingsVaultWithMeta,
 } from './secretVault.ts';
 
 initDatabase();
+
+const VAULT_COOKIE_NAME = 'komkrit_vault';
+const VAULT_UPDATED_AT_KEY = '_vault_updated_at';
+
+function getLocalVaultUpdatedAt(): number {
+  const row = db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get(VAULT_UPDATED_AT_KEY) as { value: string } | undefined;
+  const n = Number(row?.value || '0');
+  return Number.isFinite(n) ? n : 0;
+}
+
+function hasAnyStoredApiSecret(): boolean {
+  const rows = db.prepare('SELECT key, value FROM settings').all() as {
+    key: string;
+    value: string;
+  }[];
+  return rows.some(
+    (r) => SECRET_SETTING_KEYS.has(r.key) && Boolean(String(r.value || '').trim())
+  );
+}
 
 function exportEncryptedSettingsMap(): Record<string, string> {
   const rows = db.prepare('SELECT key, value FROM settings').all() as {
@@ -65,37 +86,112 @@ function exportEncryptedSettingsMap(): Record<string, string> {
   const map: Record<string, string> = {};
   for (const r of rows) {
     if (!r.key || r.key === 'dynamic_model_discovery_v1') continue;
-    const raw = String(r.value || '').trim();
-    if (!raw) continue;
-    map[r.key] = SECRET_SETTING_KEYS.has(r.key)
-      ? encryptSecretValue(raw, r.key)
-      : raw;
+    const raw = String(r.value ?? '').trim();
+    if (SECRET_SETTING_KEYS.has(r.key)) {
+      map[r.key] = raw ? encryptSecretValue(raw, r.key) : '';
+    } else {
+      map[r.key] = raw;
+    }
   }
   return map;
 }
 
-function hydrateMissingSettingsFromSealedVault(sealedToken?: string) {
-  const unsealed = unsealSettingsVaultToken(sealedToken);
-  if (!unsealed) return;
-  const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
-  const setStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-  let restoredAny = false;
-
-  for (const [k, v] of Object.entries(unsealed)) {
-    if (!k || typeof v !== 'string' || !v.trim()) continue;
-    const cur = getStmt.get(k) as { value: string } | undefined;
-    if (!cur || !String(cur.value || '').trim()) {
-      const safeVal = SECRET_SETTING_KEYS.has(k)
-        ? isEncryptedSecret(v)
-          ? v
-          : encryptSecretValue(v, k)
-        : v;
-      setStmt.run(k, safeVal);
-      restoredAny = true;
+function parseCookieToken(cookieHeader: string | undefined, name: string): string {
+  if (!cookieHeader) return '';
+  const parts = cookieHeader.split(';');
+  for (const part of parts) {
+    const eqIdx = part.indexOf('=');
+    if (eqIdx === -1) continue;
+    const k = part.slice(0, eqIdx).trim();
+    if (k === name) {
+      try {
+        return decodeURIComponent(part.slice(eqIdx + 1).trim());
+      } catch {
+        return part.slice(eqIdx + 1).trim();
+      }
     }
   }
-  if (restoredAny) {
+  return '';
+}
+
+function writeSealedVaultCookie(
+  req: express.Request,
+  res: express.Response,
+  sealedToken: string
+) {
+  if (!sealedToken) return;
+  const isHttps =
+    req.secure ||
+    req.headers['x-forwarded-proto'] === 'https' ||
+    IS_SERVERLESS;
+  res.setHeader(
+    'Set-Cookie',
+    `${VAULT_COOKIE_NAME}=${encodeURIComponent(
+      sealedToken
+    )}; Path=/api; Max-Age=31536000; HttpOnly; SameSite=Lax${
+      isHttps ? '; Secure' : ''
+    }`
+  );
+}
+
+function syncSettingsFromRequestVault(
+  req: express.Request,
+  res: express.Response
+) {
+  const headerVal =
+    typeof req.headers['x-komkrit-sealed-vault'] === 'string'
+      ? req.headers['x-komkrit-sealed-vault'].trim()
+      : '';
+  const cookieVal = parseCookieToken(req.headers.cookie, VAULT_COOKIE_NAME);
+
+  const candidates = [
+    { source: 'header', raw: headerVal, parsed: unsealSettingsVaultWithMeta(headerVal) },
+    { source: 'cookie', raw: cookieVal, parsed: unsealSettingsVaultWithMeta(cookieVal) },
+  ].filter((c) => c.parsed !== null) as {
+    source: 'header' | 'cookie';
+    raw: string;
+    parsed: NonNullable<ReturnType<typeof unsealSettingsVaultWithMeta>>;
+  }[];
+
+  if (candidates.length === 0) return;
+  candidates.sort((a, b) => b.parsed.updatedAt - a.parsed.updatedAt);
+  const best = candidates[0];
+
+  const localUpdatedAt = getLocalVaultUpdatedAt();
+  const bestHasAnySecret = Object.entries(best.parsed.rows).some(
+    ([k, v]) => SECRET_SETTING_KEYS.has(k) && Boolean(String(v || '').trim())
+  );
+
+  // Hydrate or upgrade this serverless container whenever incoming vault is newer or local container has no secrets yet
+  if (
+    best.parsed.updatedAt > localUpdatedAt ||
+    (localUpdatedAt === 0 && !hasAnyStoredApiSecret() && bestHasAnySecret)
+  ) {
+    const setStmt = db.prepare(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+    );
+    for (const [k, v] of Object.entries(best.parsed.rows)) {
+      if (!k || typeof v !== 'string') continue;
+      const trimmed = v.trim();
+      if (SECRET_SETTING_KEYS.has(k)) {
+        const safeVal = trimmed
+          ? isEncryptedSecret(trimmed)
+            ? trimmed
+            : encryptSecretValue(trimmed, k)
+          : '';
+        setStmt.run(k, safeVal);
+      } else {
+        setStmt.run(k, trimmed);
+      }
+    }
+    const effectiveTs = best.parsed.updatedAt || Date.now();
+    setStmt.run(VAULT_UPDATED_AT_KEY, String(effectiveTs));
     invalidateModelCatalogCache();
+  }
+
+  // Ensure HttpOnly cookie stays synced if request arrived via header only or had a newer header token
+  if (!cookieVal || (best.source === 'header' && cookieVal !== best.raw)) {
+    writeSealedVaultCookie(req, res, best.raw);
   }
 }
 
@@ -167,10 +263,7 @@ app.use('/api', (req, res, next) => {
 
   // Every other /api/* route requires valid Admin Authentication
   return requireAdminAuth(req, res, () => {
-    const vaultHeader = req.headers['x-komkrit-sealed-vault'];
-    if (typeof vaultHeader === 'string' && vaultHeader.trim()) {
-      hydrateMissingSettingsFromSealedVault(vaultHeader.trim());
-    }
+    syncSettingsFromRequestVault(req, res);
     next();
   });
 });
@@ -1893,16 +1986,25 @@ app.post('/api/ai/models/provider', async (req, res) => {
 // ============================================================================
 // AI ENGINE VAULT & MULTI-PROVIDER SETTINGS (GEMINI, CLAUDE, DEEPSEEK, CHATGPT, VEO)
 // ============================================================================
-app.get('/api/settings/ai', (_req, res) => {
+app.get('/api/settings/ai', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.setHeader('Pragma', 'no-cache');
   const cfg = getProviderConfigs();
-  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
+  const localUpdatedAt = getLocalVaultUpdatedAt();
+  const hasAnyKey = hasAnyStoredApiSecret();
+  const effectiveTs = localUpdatedAt || (hasAnyKey ? Date.now() : 0);
+  const sealedVault =
+    effectiveTs > 0
+      ? sealSettingsVaultToken(exportEncryptedSettingsMap(), effectiveTs)
+      : undefined;
+  if (sealedVault) {
+    writeSealedVaultCookie(req, res, sealedVault);
+  }
   res.json({
     provider: cfg.defaultProvider,
     encryptedAtRest: true,
     encryptionStandard: 'AES-256-GCM',
-    sealedVault,
+    ...(sealedVault ? { sealedVault, vaultUpdatedAt: effectiveTs } : {}),
     // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
@@ -1999,9 +2101,13 @@ app.put('/api/settings/ai', (req, res) => {
   saveStr('local_model', b.localModel);
   saveSecret('local_api_key', b.localApiKey);
 
+  const updatedAt = Date.now();
+  set.run(VAULT_UPDATED_AT_KEY, String(updatedAt));
+
   invalidateModelCatalogCache();
-  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
-  res.json({ ok: true, encryptedAtRest: true, sealedVault });
+  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), updatedAt);
+  writeSealedVaultCookie(req, res, sealedVault);
+  res.json({ ok: true, encryptedAtRest: true, vaultUpdatedAt: updatedAt, sealedVault });
 });
 
 app.post('/api/settings/test-provider', async (req, res) => {

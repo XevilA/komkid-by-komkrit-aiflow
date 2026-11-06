@@ -25,6 +25,7 @@ import {
 
 const ADMIN_TOKEN_KEY = 'komkrit_admin_token';
 const SEALED_VAULT_KEY = 'komkrit_sealed_vault_v1';
+const SEALED_VAULT_TS_KEY = 'komkrit_sealed_vault_ts_v1';
 
 export function getStoredAdminToken(): string {
   try {
@@ -54,10 +55,18 @@ function getStoredSealedVault(): string {
   }
 }
 
-function setStoredSealedVault(sealed: string): void {
+function setStoredSealedVault(sealed: string, updatedAt?: number): void {
   try {
-    if (sealed && sealed.startsWith('kvault1.')) {
-      localStorage.setItem(SEALED_VAULT_KEY, sealed);
+    if (!sealed || !sealed.startsWith('kvault1.')) return;
+    const prevTs = Number(localStorage.getItem(SEALED_VAULT_TS_KEY) || '0') || 0;
+    const nextTs = typeof updatedAt === 'number' && Number.isFinite(updatedAt) ? updatedAt : 0;
+    // Never overwrite a newer non-empty vault with an older or unversioned cold-start response
+    if (prevTs > 0 && nextTs < prevTs) {
+      return;
+    }
+    localStorage.setItem(SEALED_VAULT_KEY, sealed);
+    if (nextTs > 0) {
+      localStorage.setItem(SEALED_VAULT_TS_KEY, String(nextTs));
     }
   } catch {
     // ignore storage errors
@@ -82,6 +91,7 @@ function buildAuthHeaders(extra?: HeadersInit): Record<string, string> {
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
+    credentials: 'same-origin',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -93,7 +103,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error(data?.error || `HTTP Error ${res.status}`);
   }
   if (data && typeof data.sealedVault === 'string' && data.sealedVault.startsWith('kvault1.')) {
-    setStoredSealedVault(data.sealedVault);
+    setStoredSealedVault(
+      data.sealedVault,
+      typeof data.vaultUpdatedAt === 'number' ? data.vaultUpdatedAt : undefined
+    );
   }
   return data as T;
 }

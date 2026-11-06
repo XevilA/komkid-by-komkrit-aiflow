@@ -359,6 +359,7 @@ export interface AiEngineSettings {
   encryptedAtRest?: boolean;
   encryptionStandard?: string;
   sealedVault?: string;
+  vaultUpdatedAt?: number;
   // Google Gemini + Media
   geminiModel: string;
   geminiImageModel: string;

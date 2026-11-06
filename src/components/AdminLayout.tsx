@@ -578,6 +578,8 @@ export const AdminLayout: React.FC<Props> = ({
           {/* 2. DEDICATED NORMAL AI CHAT + PROMPT EVALUATOR + NEWS WRITER */}
           {activeMenu === 'ai-chat' && (
             <AiChatStudio
+              initialAiSettings={aiStatus}
+              onSyncAiSettings={(nextSt) => setAiStatus(nextSt)}
               onRefreshAll={onRefreshAll}
               onOpenSettings={() => {
                 toggleChatFullScreen(false);

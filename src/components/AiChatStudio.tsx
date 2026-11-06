@@ -67,6 +67,8 @@ interface Props {
   onToggleFullScreen?: () => void;
   onNavigateMenu?: (menuId: string) => void;
   onOpenPublicWebsite?: () => void;
+  initialAiSettings?: AiEngineSettings | null;
+  onSyncAiSettings?: (st: AiEngineSettings) => void;
 }
 
 const PROVIDER_OPTIONS: {
@@ -130,8 +132,10 @@ export const AiChatStudio: React.FC<Props> = ({
   onToggleFullScreen,
   onNavigateMenu,
   onOpenPublicWebsite,
+  initialAiSettings = null,
+  onSyncAiSettings,
 }) => {
-  const [settings, setSettings] = useState<AiEngineSettings | null>(null);
+  const [settings, setSettings] = useState<AiEngineSettings | null>(initialAiSettings);
   const [liveModels, setLiveModels] = useState<UnifiedLiveModelsResponse | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [sessions, setSessions] = useState<AiChatSession[]>([]);
@@ -266,14 +270,22 @@ export const AiChatStudio: React.FC<Props> = ({
     }, 5000);
   };
 
+  useEffect(() => {
+    if (initialAiSettings) {
+      setSettings(initialAiSettings);
+    }
+  }, [initialAiSettings]);
+
   const loadInitial = async () => {
     try {
-      const [st, sess, lm] = await Promise.all([
-        api.getAiSettings(),
+      // Load AI settings FIRST so sealedVault / HttpOnly cookie hydrates before parallel calls
+      const st = await api.getAiSettings();
+      setSettings(st);
+      onSyncAiSettings?.(st);
+      const [sess, lm] = await Promise.all([
         api.getChatSessions(),
         api.getLiveModels(false),
       ]);
-      setSettings(st);
       setSessions(sess);
       setLiveModels(lm);
       if (sess.length > 0 && messages.length === 0) {
@@ -666,6 +678,21 @@ export const AiChatStudio: React.FC<Props> = ({
     return true;
   };
 
+  const firstConnectedProvider: Exclude<LlmProviderId, 'auto' | 'openai_compatible'> | null =
+    (() => {
+      if (!settings) return null;
+      const pref = settings.provider;
+      if (pref === 'gemini' && settings.hasGeminiKey) return 'gemini';
+      if (pref === 'openai' && settings.hasOpenaiKey) return 'openai';
+      if (pref === 'claude' && settings.hasClaudeKey) return 'claude';
+      if (pref === 'deepseek' && settings.hasDeepseekKey) return 'deepseek';
+      if (settings.hasGeminiKey) return 'gemini';
+      if (settings.hasOpenaiKey) return 'openai';
+      if (settings.hasClaudeKey) return 'claude';
+      if (settings.hasDeepseekKey) return 'deepseek';
+      return null;
+    })();
+
   const activeProviderMeta =
     PROVIDER_OPTIONS.find((p) => p.id === provider) || PROVIDER_OPTIONS[0];
   const currentCatalog =
@@ -674,6 +701,12 @@ export const AiChatStudio: React.FC<Props> = ({
 
   const topModelDisplayLabel = (() => {
     if (provider === 'auto') {
+      if (firstConnectedProvider) {
+        const connectedMeta = PROVIDER_OPTIONS.find(
+          (p) => p.id === firstConnectedProvider
+        );
+        return `คมคิด AI • Auto (${connectedMeta?.shortLabel || firstConnectedProvider})`;
+      }
       return 'คมคิด AI • Auto';
     }
     if (selectedModel) {
@@ -697,153 +730,206 @@ export const AiChatStudio: React.FC<Props> = ({
   const isHeroEmpty =
     messages.length === 0 && !evaluatedPrompt && !previewAsset && !draftPost;
 
+  const selectedProviderMissingKeyButAnotherConnected =
+    Boolean(settings) &&
+    provider !== 'auto' &&
+    !isProviderConnected(provider) &&
+    firstConnectedProvider !== null;
+
   // Reusable Qwen-style Pill Composer (used in both Centered Empty Hero & Sticky Bottom)
   const renderComposerPill = (isCenteredHero: boolean) => (
-    <form
-      onSubmit={handleSendForm}
-      className={`relative w-full transition-all ${
-        isDark
-          ? 'bg-[#242429] border border-white/12 focus-within:border-white/25 shadow-2xl shadow-black/40'
-          : 'bg-white border border-zinc-300 focus-within:border-zinc-500 shadow-md shadow-zinc-200/60'
-      } ${isCenteredHero ? 'rounded-[30px] px-3.5 py-2.5' : 'rounded-[28px] px-3.5 py-2'}`}
-    >
-      <div className="flex items-end gap-2">
-        {/* Left '+' Quick-Tools Menu Button */}
-        <div ref={plusMenuRef} className="relative shrink-0 pb-0.5">
-          <button
-            type="button"
-            onClick={() => setPlusMenuOpen((v) => !v)}
-            title="คำสั่งพิเศษ: เขียนข่าว / ประเมิน Full Prompt รูป-วิดีโอ"
-            className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
-              isDark
-                ? 'text-zinc-300 hover:bg-white/10 hover:text-white'
-                : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
-            }`}
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-
-          {plusMenuOpen && (
-            <div
-              className={`absolute left-0 bottom-12 z-40 w-72 rounded-2xl p-2 shadow-2xl border ${
-                isDark
-                  ? 'bg-[#1f1f24] border-white/15 text-zinc-100'
-                  : 'bg-white border-zinc-200 text-zinc-800'
+    <div className="space-y-2 w-full">
+      {selectedProviderMissingKeyButAnotherConnected && firstConnectedProvider && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold border ${
+            isDark
+              ? 'bg-amber-500/10 border-amber-400/30 text-amber-200'
+              : 'bg-amber-50 border-amber-300 text-amber-950'
+          }`}
+        >
+          <span>
+            ค่าย <strong>{activeProviderMeta.shortLabel}</strong> ยังไม่ได้ใส่คีย์ — แต่เชื่อมคีย์{' '}
+            <strong>
+              {PROVIDER_OPTIONS.find((p) => p.id === firstConnectedProvider)?.label}
+            </strong>{' '}
+            พร้อมใช้แล้ว
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setProvider('auto');
+                setSelectedModel('');
+                setErrorBanner(null);
+              }}
+              className="rounded-full bg-emerald-600 px-3 py-1 text-white font-extrabold hover:bg-emerald-700 cursor-pointer"
+            >
+              สลับใช้ค่ายที่เชื่อมไว้ทันที
+            </button>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className={`rounded-full px-2.5 py-1 font-bold underline cursor-pointer ${
+                isDark ? 'text-amber-300' : 'text-amber-900'
               }`}
             >
+              เพิ่มคีย์ {activeProviderMeta.shortLabel}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <form
+        onSubmit={handleSendForm}
+        className={`relative w-full transition-all ${
+          isDark
+            ? 'bg-[#242429] border border-white/12 focus-within:border-white/25 shadow-2xl shadow-black/40'
+            : 'bg-white border border-zinc-300 focus-within:border-zinc-500 shadow-md shadow-zinc-200/60'
+        } ${isCenteredHero ? 'rounded-[30px] px-3.5 py-2.5' : 'rounded-[28px] px-3.5 py-2'}`}
+      >
+        <div className="flex items-end gap-2">
+          {/* Left '+' Quick-Tools Menu Button */}
+          <div ref={plusMenuRef} className="relative shrink-0 pb-0.5">
+            <button
+              type="button"
+              onClick={() => setPlusMenuOpen((v) => !v)}
+              title="คำสั่งพิเศษ: เขียนข่าว / ประเมิน Full Prompt รูป-วิดีโอ"
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
+                isDark
+                  ? 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+              }`}
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+
+            {plusMenuOpen && (
               <div
-                className={`px-3 py-1.5 text-[11px] font-extrabold ${
+                className={`absolute left-0 bottom-12 z-40 w-72 rounded-2xl p-2 shadow-2xl border ${
+                  isDark
+                    ? 'bg-[#1f1f24] border-white/15 text-zinc-100'
+                    : 'bg-white border-zinc-200 text-zinc-800'
+                }`}
+              >
+                <div
+                  className={`px-3 py-1.5 text-[11px] font-extrabold ${
+                    isDark ? 'text-zinc-400' : 'text-zinc-500'
+                  }`}
+                >
+                  สั่ง AI ทำงานต่อทันที
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDraftNewsFromChat('news')}
+                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
+                    isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
+                  }`}
+                >
+                  <Newspaper className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>ให้ AI เขียนข่าว / บทความลงเว็บ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleEvaluatePrompt('image')}
+                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
+                    isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
+                  }`}
+                >
+                  <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span>ประเมิน & เขียน Full Prompt รูปภาพ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleEvaluatePrompt('video')}
+                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
+                    isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
+                  }`}
+                >
+                  <Film className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>ประเมิน & เขียน Full Prompt วิดีโอ</span>
+                </button>
+                <div
+                  className={`my-1 border-t ${
+                    isDark ? 'border-white/10' : 'border-zinc-100'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlusMenuOpen(false);
+                    handleNewChat();
+                  }}
+                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold transition cursor-pointer ${
+                    isDark
+                      ? 'text-zinc-300 hover:bg-white/10'
+                      : 'text-zinc-600 hover:bg-zinc-100'
+                  }`}
+                >
+                  <SquarePen className="w-4 h-4 shrink-0" />
+                  <span>เริ่มบทสนทนาใหม่</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Auto-expanding Textarea */}
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessageText(input);
+              }
+            }}
+            placeholder="ช่วยเขียน Content เกี่ยวกับการศึกษาไทยให้หน่อย..."
+            className={`flex-1 max-h-44 bg-transparent py-2 px-1 text-[15px] sm:text-base leading-relaxed focus:outline-none resize-none ${
+              isDark
+                ? 'text-zinc-100 placeholder:text-zinc-400'
+                : 'text-zinc-900 placeholder:text-zinc-400'
+            }`}
+          />
+
+          {/* Inline Provider Selector ('Auto ▾') + Circular '↑' Send Button */}
+          <div className="flex items-center gap-1.5 shrink-0 pb-0.5">
+            <div className="relative">
+              <select
+                aria-label="เลือกค่าย AI"
+                value={provider}
+                onChange={(e) => {
+                  setProvider(e.target.value as LlmProviderId);
+                  setSelectedModel('');
+                  setErrorBanner(null);
+                }}
+                className={`appearance-none rounded-full pl-3 pr-7 py-1.5 text-xs sm:text-sm font-bold cursor-pointer focus:outline-none transition ${
+                  isDark
+                    ? 'bg-transparent text-zinc-300 hover:bg-white/10'
+                    : 'bg-transparent text-zinc-600 hover:bg-zinc-100'
+                }`}
+              >
+                {PROVIDER_OPTIONS.map((p) => {
+                  const connected = isProviderConnected(p.id);
+                  return (
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      className="bg-zinc-900 text-white"
+                    >
+                      {p.id === 'auto'
+                        ? 'Auto'
+                        : `${p.shortLabel}${connected ? ' ✓' : ''}`}
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown
+                className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${
                   isDark ? 'text-zinc-400' : 'text-zinc-500'
                 }`}
-              >
-                สั่ง AI ทำงานต่อทันที
-              </div>
-              <button
-                type="button"
-                onClick={() => handleDraftNewsFromChat('news')}
-                className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                  isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
-                }`}
-              >
-                <Newspaper className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>ให้ AI เขียนข่าว / บทความลงเว็บ</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleEvaluatePrompt('image')}
-                className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                  isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
-                }`}
-              >
-                <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
-                <span>ประเมิน & เขียน Full Prompt รูปภาพ</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleEvaluatePrompt('video')}
-                className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                  isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
-                }`}
-              >
-                <Film className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span>ประเมิน & เขียน Full Prompt วิดีโอ</span>
-              </button>
-              <div
-                className={`my-1 border-t ${
-                  isDark ? 'border-white/10' : 'border-zinc-100'
-                }`}
               />
-              <button
-                type="button"
-                onClick={() => {
-                  setPlusMenuOpen(false);
-                  handleNewChat();
-                }}
-                className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold transition cursor-pointer ${
-                  isDark
-                    ? 'text-zinc-300 hover:bg-white/10'
-                    : 'text-zinc-600 hover:bg-zinc-100'
-                }`}
-              >
-                <SquarePen className="w-4 h-4 shrink-0" />
-                <span>เริ่มบทสนทนาใหม่</span>
-              </button>
             </div>
-          )}
-        </div>
-
-        {/* Auto-expanding Textarea */}
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              sendMessageText(input);
-            }
-          }}
-          placeholder="ช่วยเขียน Content เกี่ยวกับการศึกษาไทยให้หน่อย..."
-          className={`flex-1 max-h-44 bg-transparent py-2 px-1 text-[15px] sm:text-base leading-relaxed focus:outline-none resize-none ${
-            isDark
-              ? 'text-zinc-100 placeholder:text-zinc-400'
-              : 'text-zinc-900 placeholder:text-zinc-400'
-          }`}
-        />
-
-        {/* Inline Provider Selector ('Auto ▾') + Circular '↑' Send Button */}
-        <div className="flex items-center gap-1.5 shrink-0 pb-0.5">
-          <div className="relative">
-            <select
-              aria-label="เลือกค่าย AI"
-              value={provider}
-              onChange={(e) => {
-                setProvider(e.target.value as LlmProviderId);
-                setSelectedModel('');
-              }}
-              className={`appearance-none rounded-full pl-3 pr-7 py-1.5 text-xs sm:text-sm font-bold cursor-pointer focus:outline-none transition ${
-                isDark
-                  ? 'bg-transparent text-zinc-300 hover:bg-white/10'
-                  : 'bg-transparent text-zinc-600 hover:bg-zinc-100'
-              }`}
-            >
-              {PROVIDER_OPTIONS.map((p) => (
-                <option
-                  key={p.id}
-                  value={p.id}
-                  className="bg-zinc-900 text-white"
-                >
-                  {p.shortLabel}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${
-                isDark ? 'text-zinc-400' : 'text-zinc-500'
-              }`}
-            />
-          </div>
 
           <button
             type="submit"
@@ -864,6 +950,7 @@ export const AiChatStudio: React.FC<Props> = ({
         </div>
       </div>
     </form>
+    </div>
   );
 
   return (
