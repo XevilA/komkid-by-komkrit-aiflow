@@ -44,8 +44,60 @@ import {
   fetchSingleProviderLiveCatalog,
   invalidateModelCatalogCache,
 } from './modelRegistry.ts';
+import {
+  SECRET_SETTING_KEYS,
+  decryptSecretValue,
+  encryptSecretValue,
+  isEncryptedSecret,
+  maskSecretStrict,
+  redactSecrets,
+  sealSettingsVaultToken,
+  unsealSettingsVaultToken,
+} from './secretVault.ts';
 
 initDatabase();
+
+function exportEncryptedSettingsMap(): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM settings').all() as {
+    key: string;
+    value: string;
+  }[];
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    if (!r.key || r.key === 'dynamic_model_discovery_v1') continue;
+    const raw = String(r.value || '').trim();
+    if (!raw) continue;
+    map[r.key] = SECRET_SETTING_KEYS.has(r.key)
+      ? encryptSecretValue(raw, r.key)
+      : raw;
+  }
+  return map;
+}
+
+function hydrateMissingSettingsFromSealedVault(sealedToken?: string) {
+  const unsealed = unsealSettingsVaultToken(sealedToken);
+  if (!unsealed) return;
+  const getStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+  const setStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  let restoredAny = false;
+
+  for (const [k, v] of Object.entries(unsealed)) {
+    if (!k || typeof v !== 'string' || !v.trim()) continue;
+    const cur = getStmt.get(k) as { value: string } | undefined;
+    if (!cur || !String(cur.value || '').trim()) {
+      const safeVal = SECRET_SETTING_KEYS.has(k)
+        ? isEncryptedSecret(v)
+          ? v
+          : encryptSecretValue(v, k)
+        : v;
+      setStmt.run(k, safeVal);
+      restoredAny = true;
+    }
+  }
+  if (restoredAny) {
+    invalidateModelCatalogCache();
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -114,7 +166,13 @@ app.use('/api', (req, res, next) => {
   }
 
   // Every other /api/* route requires valid Admin Authentication
-  return requireAdminAuth(req, res, next);
+  return requireAdminAuth(req, res, () => {
+    const vaultHeader = req.headers['x-komkrit-sealed-vault'];
+    if (typeof vaultHeader === 'string' && vaultHeader.trim()) {
+      hydrateMissingSettingsFromSealedVault(vaultHeader.trim());
+    }
+    next();
+  });
 });
 
 // --- Admin Authentication Endpoints ---
@@ -165,10 +223,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
 
 function maskSecret(val?: string): string {
-  const s = (val || '').trim();
-  if (!s) return '';
-  if (s.length <= 10) return '••••••••';
-  return `${s.slice(0, 6)}••••••••${s.slice(-4)}`;
+  return maskSecretStrict(val);
 }
 
 function mapPostRow(r: any) {
@@ -1839,9 +1894,15 @@ app.post('/api/ai/models/provider', async (req, res) => {
 // AI ENGINE VAULT & MULTI-PROVIDER SETTINGS (GEMINI, CLAUDE, DEEPSEEK, CHATGPT, VEO)
 // ============================================================================
 app.get('/api/settings/ai', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
   const cfg = getProviderConfigs();
+  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
   res.json({
     provider: cfg.defaultProvider,
+    encryptedAtRest: true,
+    encryptionStandard: 'AES-256-GCM',
+    sealedVault,
     // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
@@ -1883,6 +1944,8 @@ app.get('/api/settings/ai', (_req, res) => {
 });
 
 app.put('/api/settings/ai', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
   const b = req.body || {};
   const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
   const saveStr = (settingKey: string, val: unknown) => {
@@ -1891,9 +1954,17 @@ app.put('/api/settings/ai', (req, res) => {
     }
   };
   const saveSecret = (settingKey: string, val: unknown) => {
-    if (typeof val === 'string' && val !== '__KEEP__') {
-      set.run(settingKey, val.trim());
+    if (typeof val !== 'string') return;
+    const trimmed = val.trim();
+    if (trimmed === '__KEEP__' || trimmed === '') {
+      // Never accidentally wipe a saved encrypted secret with a blank input
+      return;
     }
+    if (trimmed === '__CLEAR__') {
+      set.run(settingKey, '');
+      return;
+    }
+    set.run(settingKey, encryptSecretValue(trimmed, settingKey));
   };
 
   saveStr('ai_provider', b.provider);
@@ -1929,12 +2000,13 @@ app.put('/api/settings/ai', (req, res) => {
   saveSecret('local_api_key', b.localApiKey);
 
   invalidateModelCatalogCache();
-  res.json({ ok: true });
+  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
+  res.json({ ok: true, encryptedAtRest: true, sealedVault });
 });
 
 app.post('/api/settings/test-provider', async (req, res) => {
+  const { provider, model, apiKey } = req.body || {};
   try {
-    const { provider, model, apiKey } = req.body;
     const result = await testProviderConnection({
       provider,
       model,
@@ -1942,13 +2014,15 @@ app.post('/api/settings/test-provider', async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    res
+      .status(400)
+      .json({ error: redactSecrets((err as Error).message, [String(apiKey || '')]) });
   }
 });
 
 app.post('/api/settings/test-extra', async (req, res) => {
+  const { service, apiKey } = req.body || {};
   try {
-    const { service, apiKey } = req.body || {};
     const cfg = getProviderConfigs();
     const startedAt = Date.now();
 
@@ -1999,7 +2073,9 @@ app.post('/api/settings/test-extra', async (req, res) => {
 
     res.status(400).json({ error: 'ไม่รู้จักบริการที่ต้องการทดสอบ' });
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    res
+      .status(400)
+      .json({ error: redactSecrets((err as Error).message, [String(apiKey || '')]) });
   }
 });
 
@@ -2007,13 +2083,15 @@ app.post('/api/settings/test-extra', async (req, res) => {
 // OMNICHANNEL PUBLISH & DISTRIBUTE (8 CHANNELS — 100% REAL API / WEBHOOK / DB)
 // ============================================================================
 app.get('/api/channels', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, private');
   const resendGlobalKey = getProviderConfigs().resend.apiKey;
   const rows = db
     .prepare('SELECT * FROM channel_configs ORDER BY id ASC')
     .all()
     .map((c: any) => {
+      const decryptedTok = decryptSecretValue(c.access_token, `channel:${c.channel_key}`);
       const tok =
-        String(c.access_token || '').trim() ||
+        decryptedTok ||
         (c.channel_key === 'email_newsletter' ? resendGlobalKey : '');
       return {
         id: c.id,
@@ -2050,10 +2128,15 @@ app.put('/api/channels/:key', (req, res) => {
     webhookUrl = existing.webhook_url,
   } = req.body;
 
-  const nextToken =
-    typeof accessToken === 'string' && accessToken !== '__KEEP__'
-      ? accessToken.trim()
-      : existing.access_token;
+  let nextToken = existing.access_token;
+  if (typeof accessToken === 'string') {
+    const trimmed = accessToken.trim();
+    if (trimmed === '__CLEAR__') {
+      nextToken = '';
+    } else if (trimmed !== '__KEEP__' && trimmed !== '') {
+      nextToken = encryptSecretValue(trimmed, `channel:${key}`);
+    }
+  }
 
   const now = new Date().toISOString();
   db.prepare(

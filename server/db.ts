@@ -1,6 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
+import {
+  SECRET_SETTING_KEYS,
+  encryptSecretValue,
+  isEncryptedSecret,
+} from './secretVault.ts';
 
 // Automatically load .env if present (Node 22 native loadEnvFile)
 const ENV_PATH = path.resolve(process.cwd(), '.env');
@@ -303,6 +308,36 @@ export function initDatabase() {
 
   seedIfEmpty();
   seedOmnichannelIfEmpty();
+  upgradePlaintextSecretsToAes256Gcm();
+}
+
+function upgradePlaintextSecretsToAes256Gcm() {
+  try {
+    const rows = db.prepare('SELECT key, value FROM settings').all() as {
+      key: string;
+      value: string;
+    }[];
+    const upd = db.prepare('UPDATE settings SET value = ? WHERE key = ?');
+    for (const r of rows) {
+      if (SECRET_SETTING_KEYS.has(r.key) && r.value && r.value.trim() && !isEncryptedSecret(r.value)) {
+        upd.run(encryptSecretValue(r.value, r.key), r.key);
+      }
+    }
+    const chRows = db
+      .prepare("SELECT id, channel_key, access_token FROM channel_configs WHERE access_token != ''")
+      .all() as { id: number; channel_key: string; access_token: string }[];
+    const updCh = db.prepare('UPDATE channel_configs SET access_token = ? WHERE id = ?');
+    for (const ch of chRows) {
+      if (ch.access_token && ch.access_token.trim() && !isEncryptedSecret(ch.access_token)) {
+        updCh.run(
+          encryptSecretValue(ch.access_token, `channel:${ch.channel_key}`),
+          ch.id
+        );
+      }
+    }
+  } catch {
+    // ignore migration errors on initial creation
+  }
 }
 
 function seedOmnichannelIfEmpty() {

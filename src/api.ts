@@ -24,6 +24,7 @@ import {
 } from './types';
 
 const ADMIN_TOKEN_KEY = 'komkrit_admin_token';
+const SEALED_VAULT_KEY = 'komkrit_sealed_vault_v1';
 
 export function getStoredAdminToken(): string {
   try {
@@ -45,11 +46,33 @@ export function setStoredAdminToken(token: string): void {
   }
 }
 
+function getStoredSealedVault(): string {
+  try {
+    return localStorage.getItem(SEALED_VAULT_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setStoredSealedVault(sealed: string): void {
+  try {
+    if (sealed && sealed.startsWith('kvault1.')) {
+      localStorage.setItem(SEALED_VAULT_KEY, sealed);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function buildAuthHeaders(extra?: HeadersInit): Record<string, string> {
   const token = getStoredAdminToken();
   const base: Record<string, string> = {};
   if (token) {
     base.Authorization = `Bearer ${token}`;
+    const sealed = getStoredSealedVault();
+    if (sealed) {
+      base['X-Komkrit-Sealed-Vault'] = sealed;
+    }
   }
   if (extra) {
     Object.assign(base, extra);
@@ -68,6 +91,9 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data?.error || `HTTP Error ${res.status}`);
+  }
+  if (data && typeof data.sealedVault === 'string' && data.sealedVault.startsWith('kvault1.')) {
+    setStoredSealedVault(data.sealedVault);
   }
   return data as T;
 }

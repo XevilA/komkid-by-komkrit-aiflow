@@ -20,6 +20,9 @@ import {
   Bot,
   Image as ImageIcon,
   AlertTriangle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Maximize2,
 } from 'lucide-react';
 import {
   Post,
@@ -83,10 +86,48 @@ export const AdminLayout: React.FC<Props> = ({
   onPreviewPost,
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopMenuCollapsed, setDesktopMenuCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('komkrit_admin_menu_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [chatFullScreen, setChatFullScreen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('komkrit_chat_fullscreen') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [settingsTab, setSettingsTab] = useState<SettingsSubTab>('inbox');
   const [mediaHandoff, setMediaHandoff] = useState<MediaAgentHandoff | null>(null);
   const [prefillNewPost, setPrefillNewPost] = useState<Partial<Post> | null>(null);
   const [aiStatus, setAiStatus] = useState<AiEngineSettings | null>(null);
+
+  const toggleDesktopMenu = useCallback((next?: boolean) => {
+    setDesktopMenuCollapsed((prev) => {
+      const val = typeof next === 'boolean' ? next : !prev;
+      try {
+        localStorage.setItem('komkrit_admin_menu_collapsed', val ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return val;
+    });
+  }, []);
+
+  const toggleChatFullScreen = useCallback((next?: boolean) => {
+    setChatFullScreen((prev) => {
+      const val = typeof next === 'boolean' ? next : !prev;
+      try {
+        localStorage.setItem('komkrit_chat_fullscreen', val ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return val;
+    });
+  }, []);
 
   const refreshAiStatus = useCallback(async () => {
     try {
@@ -208,8 +249,14 @@ export const AdminLayout: React.FC<Props> = ({
     },
   ];
 
+  const isAiChatActive = activeMenu === 'ai-chat';
+
   return (
-    <div className="min-h-screen flex bg-[#f4f7fb]">
+    <div
+      className={`${
+        isAiChatActive ? 'h-screen overflow-hidden' : 'min-h-screen'
+      } flex bg-[#f4f7fb]`}
+    >
       {/* Mobile Sidebar Backdrop */}
       {sidebarOpen && (
         <div
@@ -218,35 +265,46 @@ export const AdminLayout: React.FC<Props> = ({
         />
       )}
 
-      {/* Large, Clear Left Sidebar */}
+      {/* Large, Clear Left Tab Menu (Collapsible on Desktop & Mobile) */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-72 bg-[#0b1f3a] text-white flex flex-col justify-between transition-transform duration-200 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#0b1f3a] text-white flex flex-col justify-between transition-transform duration-200 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } ${desktopMenuCollapsed ? 'lg:hidden' : 'lg:static lg:translate-x-0'}`}
       >
         <div>
-          <div className="p-5 border-b border-white/10 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="p-5 border-b border-white/10 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3 min-w-0">
               <img
                 src="/images/avatar-komkrit.png"
                 alt="Komkrit"
-                className="h-11 w-11 rounded-full border-2 border-amber-400"
+                className="h-11 w-11 rounded-full border-2 border-amber-400 shrink-0"
               />
-              <div>
-                <div className="font-extrabold text-base leading-tight">
+              <div className="min-w-0">
+                <div className="font-extrabold text-base leading-tight truncate">
                   ระบบจัดการเว็บไซต์
                 </div>
-                <div className="text-xs text-amber-300 font-bold mt-0.5">
+                <div className="text-xs text-amber-300 font-bold mt-0.5 truncate">
                   คมคิด by KOMKRIT
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-1.5 text-slate-300"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => toggleDesktopMenu(true)}
+                title="พับปิดเมนูแท็บด้านซ้าย"
+                className="hidden lg:inline-flex items-center justify-center p-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              >
+                <PanelLeftClose className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(false)}
+                className="lg:hidden p-1.5 text-slate-300"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
 
           <nav className="p-3.5 space-y-2">
@@ -316,23 +374,45 @@ export const AdminLayout: React.FC<Props> = ({
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Clean Large-Font Top Bar */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button
+              type="button"
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d2546] text-white text-sm font-bold"
+              className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d2546] text-white text-sm font-bold cursor-pointer shrink-0"
             >
               <Menu className="w-5 h-5" />
               เมนู
             </button>
-            <h1 className="text-base sm:text-lg font-extrabold text-[#0d2546]">
+            {desktopMenuCollapsed && (
+              <button
+                type="button"
+                onClick={() => toggleDesktopMenu(false)}
+                title="เปิดแสดงเมนูแท็บด้านซ้าย"
+                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d2546] text-white text-xs sm:text-sm font-extrabold hover:bg-[#163a6b] transition cursor-pointer shrink-0"
+              >
+                <PanelLeftOpen className="w-4 h-4 text-amber-300" />
+                เปิดเมนูแท็บ
+              </button>
+            )}
+            <h1 className="text-base sm:text-lg font-extrabold text-[#0d2546] truncate">
               {menuItems.find((m) => m.id === activeMenu)?.label || 'จัดการข่าวและบทความ'}
             </h1>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            {isAiChatActive && (
+              <button
+                type="button"
+                onClick={() => toggleChatFullScreen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-extrabold text-amber-300 hover:bg-[#163a6b] transition cursor-pointer"
+              >
+                <Maximize2 className="w-4 h-4" />
+                <span className="hidden sm:inline">เต็มจอ 100%</span>
+              </button>
+            )}
             {aiStatus && (
               <button
                 type="button"
@@ -353,7 +433,7 @@ export const AdminLayout: React.FC<Props> = ({
               onClick={onOpenPublicWebsite}
               className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
             >
-              <Globe className="w-4 h-4" /> ดูหน้าเว็บจริง
+              <Globe className="w-4 h-4" /> <span className="hidden sm:inline">ดูหน้าเว็บจริง</span>
             </button>
             <button
               onClick={onLogout}
@@ -364,13 +444,17 @@ export const AdminLayout: React.FC<Props> = ({
           </div>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6 max-w-[1240px] w-full mx-auto space-y-5">
+        <main
+          className={
+            isAiChatActive
+              ? 'flex-1 flex flex-col min-h-0 w-full overflow-hidden'
+              : 'flex-1 p-4 sm:p-6 max-w-[1240px] w-full mx-auto space-y-5'
+          }
+        >
           {/* Guided 1-Click Callout Banner if AI Keys haven't been saved yet */}
           {aiStatus &&
             connectedProvidersCount === 0 &&
-            (activeMenu === 'ai-chat' ||
-              activeMenu === 'media-gen' ||
-              activeMenu === 'ai-command') && (
+            (activeMenu === 'media-gen' || activeMenu === 'ai-command') && (
               <div className="rounded-2xl bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
@@ -495,16 +579,33 @@ export const AdminLayout: React.FC<Props> = ({
           {activeMenu === 'ai-chat' && (
             <AiChatStudio
               onRefreshAll={onRefreshAll}
-              onOpenSettings={() => openSettingsSection('api_keys')}
-              onPreviewPost={onPreviewPost}
+              onOpenSettings={() => {
+                toggleChatFullScreen(false);
+                openSettingsSection('api_keys');
+              }}
+              onPreviewPost={(id) => {
+                toggleChatFullScreen(false);
+                onPreviewPost(id);
+              }}
               onSendToMediaStudio={(handoff) => {
+                toggleChatFullScreen(false);
                 setMediaHandoff(handoff);
                 setActiveMenu('media-gen');
               }}
               onOpenInPostEditor={(draft) => {
+                toggleChatFullScreen(false);
                 setPrefillNewPost(draft);
                 setActiveMenu('posts');
               }}
+              isTabMenuCollapsed={desktopMenuCollapsed}
+              onToggleTabMenu={() => toggleDesktopMenu()}
+              isFullScreen={chatFullScreen}
+              onToggleFullScreen={() => toggleChatFullScreen()}
+              onNavigateMenu={(menuId) => {
+                toggleChatFullScreen(false);
+                setActiveMenu(menuId);
+              }}
+              onOpenPublicWebsite={onOpenPublicWebsite}
             />
           )}
 

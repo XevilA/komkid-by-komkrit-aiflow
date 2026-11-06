@@ -356,6 +356,9 @@ export interface UnifiedLiveModelsResponse {
 
 export interface AiEngineSettings {
   provider: LlmProviderId;
+  encryptedAtRest?: boolean;
+  encryptionStandard?: string;
+  sealedVault?: string;
   // Google Gemini + Media
   geminiModel: string;
   geminiImageModel: string;

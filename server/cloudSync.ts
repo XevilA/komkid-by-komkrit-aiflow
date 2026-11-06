@@ -10,6 +10,8 @@ const STATE_PREFIX = 'state/komkrit-db-';
 
 let currentLoadedBlobPath = '';
 let lastCheckAt = 0;
+let blobWriteSuspended = false;
+let hasUnsyncedLocalMutations = false;
 
 function getBlobToken(): string {
   return (process.env.BLOB_READ_WRITE_TOKEN || '').trim();
@@ -91,17 +93,23 @@ async function deleteOldStateBlobs(token: string, urlsToDelete: string[]): Promi
 
 export async function syncDatabaseBeforeRequest(forceCheck = false): Promise<void> {
   if (!isCloudSyncEnabled()) return;
+  // Never overwrite newer local encrypted writes when the cloud blob store is suspended
+  if (hasUnsyncedLocalMutations && blobWriteSuspended) {
+    return;
+  }
   const token = getBlobToken();
   const now = Date.now();
-  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 1200) {
+  // Throttle read-only checks to 30s so Hobby Blob advanced-ops quota is preserved
+  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 30000) {
     return;
   }
   lastCheckAt = now;
 
   const blobs = await listStateBlobs(token);
   if (blobs.length === 0) {
-    // First boot on cloud: push initial seeded SQLite DB so all instances share the exact baseline
-    await persistDatabaseToCloud();
+    if (!currentLoadedBlobPath && !blobWriteSuspended) {
+      await persistDatabaseToCloud();
+    }
     return;
   }
 
@@ -116,11 +124,13 @@ export async function syncDatabaseBeforeRequest(forceCheck = false): Promise<voi
   const sqliteBytes = decryptBuffer(encryptedBytes, token);
   reloadDatabaseFromSnapshotBuffer(sqliteBytes);
   currentLoadedBlobPath = newest.pathname;
+  hasUnsyncedLocalMutations = false;
 }
 
-export async function persistDatabaseToCloud(): Promise<void> {
-  if (!isCloudSyncEnabled()) return;
+export async function persistDatabaseToCloud(): Promise<boolean> {
+  if (!isCloudSyncEnabled()) return true;
   const token = getBlobToken();
+  hasUnsyncedLocalMutations = true;
 
   const sqliteBytes = exportDatabaseSnapshotBuffer();
   const encryptedBytes = encryptBuffer(sqliteBytes, token);
@@ -141,16 +151,21 @@ export async function persistDatabaseToCloud(): Promise<void> {
   });
 
   if (putRes.ok) {
+    blobWriteSuspended = false;
+    hasUnsyncedLocalMutations = false;
     currentLoadedBlobPath = pathname;
     lastCheckAt = Date.now();
 
-    // Clean up older snapshots keeping only the 2 most recent
     const blobs = await listStateBlobs(token);
     if (blobs.length > 2) {
       const oldUrls = blobs.slice(2).map((b) => b.url);
       await deleteOldStateBlobs(token, oldUrls);
     }
+    return true;
   }
+
+  blobWriteSuspended = true;
+  return false;
 }
 
 export async function uploadMediaToCloudBlob(

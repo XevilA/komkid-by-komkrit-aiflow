@@ -8,6 +8,136 @@ import multer from "multer";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
+
+// server/secretVault.ts
+import crypto from "node:crypto";
+import zlib from "node:zlib";
+var ENC_PREFIX = "enc:v1:";
+var SEALED_VAULT_PREFIX = "kvault1.";
+var SECRET_SETTING_KEYS = /* @__PURE__ */ new Set([
+  "gemini_api_key",
+  "claude_api_key",
+  "deepseek_api_key",
+  "openai_api_key",
+  "vertex_access_token",
+  "elevenlabs_api_key",
+  "resend_api_key",
+  "local_api_key"
+]);
+function getMasterSeedMaterial() {
+  const parts = [
+    process.env.VAULT_MASTER_KEY || "",
+    process.env.BLOB_READ_WRITE_TOKEN || "",
+    process.env.ADMIN_AUTH_SECRET || "",
+    "komkid-by-komkrit-aes256gcm-vault-v1"
+  ];
+  return parts.join("|");
+}
+function deriveSubkey(purpose) {
+  const ikm = Buffer.from(getMasterSeedMaterial(), "utf8");
+  const salt = Buffer.from("komkid-by-komkrit-hkdf-salt-2026", "utf8");
+  const info = Buffer.from(`komkid:${purpose}`, "utf8");
+  return Buffer.from(crypto.hkdfSync("sha256", ikm, salt, info, 32));
+}
+function isEncryptedSecret(val) {
+  return typeof val === "string" && val.startsWith(ENC_PREFIX);
+}
+function encryptSecretValue(plain, fieldName) {
+  const clean = (plain || "").trim();
+  if (!clean) return "";
+  if (isEncryptedSecret(clean)) return clean;
+  const key = deriveSubkey("field-encryption-v1");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`field:${fieldName}`, "utf8"));
+  const encrypted = Buffer.concat([cipher.update(clean, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${ENC_PREFIX}${iv.toString("base64url")}:${tag.toString("base64url")}:${encrypted.toString("base64url")}`;
+}
+function decryptSecretValue(stored, fieldName) {
+  const raw = (stored || "").trim();
+  if (!raw) return "";
+  if (!raw.startsWith(ENC_PREFIX)) {
+    return raw;
+  }
+  const body = raw.slice(ENC_PREFIX.length);
+  const parts = body.split(":");
+  if (parts.length !== 3) return "";
+  try {
+    const iv = Buffer.from(parts[0], "base64url");
+    const tag = Buffer.from(parts[1], "base64url");
+    const ciphertext = Buffer.from(parts[2], "base64url");
+    const key = deriveSubkey("field-encryption-v1");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAAD(Buffer.from(`field:${fieldName}`, "utf8"));
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch {
+    return "";
+  }
+}
+function sealSettingsVaultToken(settingsRows) {
+  const payload = JSON.stringify({
+    v: 1,
+    iat: Date.now(),
+    rows: settingsRows
+  });
+  const compressed = zlib.gzipSync(Buffer.from(payload, "utf8"));
+  const key = deriveSubkey("stateless-sealed-vault-v1");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from("komkid-sealed-vault-v1", "utf8"));
+  const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${SEALED_VAULT_PREFIX}${iv.toString("base64url")}.${tag.toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+function unsealSettingsVaultToken(token) {
+  const raw = (token || "").trim();
+  if (!raw || !raw.startsWith(SEALED_VAULT_PREFIX)) return null;
+  const parts = raw.slice(SEALED_VAULT_PREFIX.length).split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const iv = Buffer.from(parts[0], "base64url");
+    const tag = Buffer.from(parts[1], "base64url");
+    const ciphertext = Buffer.from(parts[2], "base64url");
+    const key = deriveSubkey("stateless-sealed-vault-v1");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAAD(Buffer.from("komkid-sealed-vault-v1", "utf8"));
+    decipher.setAuthTag(tag);
+    const compressed = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    const jsonStr = zlib.gunzipSync(compressed).toString("utf8");
+    const parsed = JSON.parse(jsonStr);
+    if (parsed && typeof parsed.rows === "object" && parsed.rows !== null) {
+      return parsed.rows;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function maskSecretStrict(val) {
+  const s = (val || "").trim();
+  if (!s) return "";
+  if (s.length <= 12) return "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+  return `${s.slice(0, 4)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${s.slice(-4)}`;
+}
+function redactSecrets(message, knownSecrets = []) {
+  let out = String(message || "");
+  for (const sec of knownSecrets) {
+    const clean = (sec || "").trim();
+    if (clean.length >= 8) {
+      out = out.split(clean).join("[REDACTED_KEY]");
+    }
+  }
+  out = out.replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "sk-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022[REDACTED]");
+  out = out.replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, "AIza\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022[REDACTED]");
+  out = out.replace(/\bre_[A-Za-z0-9_]{12,}\b/g, "re_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022[REDACTED]");
+  out = out.replace(/\bvercel_blob_rw_[A-Za-z0-9_]{10,}\b/g, "[REDACTED_BLOB_TOKEN]");
+  return out;
+}
+
+// server/db.ts
 var ENV_PATH = path.resolve(process.cwd(), ".env");
 if (fs.existsSync(ENV_PATH) && typeof process.loadEnvFile === "function") {
   try {
@@ -280,6 +410,29 @@ function initDatabase() {
   }
   seedIfEmpty();
   seedOmnichannelIfEmpty();
+  upgradePlaintextSecretsToAes256Gcm();
+}
+function upgradePlaintextSecretsToAes256Gcm() {
+  try {
+    const rows = db.prepare("SELECT key, value FROM settings").all();
+    const upd = db.prepare("UPDATE settings SET value = ? WHERE key = ?");
+    for (const r of rows) {
+      if (SECRET_SETTING_KEYS.has(r.key) && r.value && r.value.trim() && !isEncryptedSecret(r.value)) {
+        upd.run(encryptSecretValue(r.value, r.key), r.key);
+      }
+    }
+    const chRows = db.prepare("SELECT id, channel_key, access_token FROM channel_configs WHERE access_token != ''").all();
+    const updCh = db.prepare("UPDATE channel_configs SET access_token = ? WHERE id = ?");
+    for (const ch of chRows) {
+      if (ch.access_token && ch.access_token.trim() && !isEncryptedSecret(ch.access_token)) {
+        updCh.run(
+          encryptSecretValue(ch.access_token, `channel:${ch.channel_key}`),
+          ch.id
+        );
+      }
+    }
+  } catch {
+  }
 }
 function seedOmnichannelIfEmpty() {
   const chCount = db.prepare("SELECT COUNT(*) as c FROM channel_configs").get().c;
@@ -962,11 +1115,13 @@ import { promisify as promisify2 } from "node:util";
 import { GoogleGenAI } from "@google/genai";
 
 // server/cloudSync.ts
-import crypto from "node:crypto";
+import crypto2 from "node:crypto";
 var BLOB_API_BASE = "https://blob.vercel-storage.com";
 var STATE_PREFIX = "state/komkrit-db-";
 var currentLoadedBlobPath = "";
 var lastCheckAt = 0;
+var blobWriteSuspended = false;
+var hasUnsyncedLocalMutations = false;
 function getBlobToken() {
   return (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
 }
@@ -974,12 +1129,12 @@ function isCloudSyncEnabled() {
   return IS_SERVERLESS && Boolean(getBlobToken());
 }
 function deriveEncryptionKey(token) {
-  return crypto.createHash("sha256").update(`komkrit-sqlite-v1:${token}`).digest();
+  return crypto2.createHash("sha256").update(`komkrit-sqlite-v1:${token}`).digest();
 }
 function encryptBuffer(plain, token) {
   const key = deriveEncryptionKey(token);
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const iv = crypto2.randomBytes(12);
+  const cipher = crypto2.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, encrypted]);
@@ -992,7 +1147,7 @@ function decryptBuffer(packed, token) {
   const iv = packed.subarray(0, 12);
   const tag = packed.subarray(12, 28);
   const ciphertext = packed.subarray(28);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  const decipher = crypto2.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
@@ -1030,15 +1185,20 @@ async function deleteOldStateBlobs(token, urlsToDelete) {
 }
 async function syncDatabaseBeforeRequest(forceCheck = false) {
   if (!isCloudSyncEnabled()) return;
+  if (hasUnsyncedLocalMutations && blobWriteSuspended) {
+    return;
+  }
   const token = getBlobToken();
   const now = Date.now();
-  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 1200) {
+  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 3e4) {
     return;
   }
   lastCheckAt = now;
   const blobs = await listStateBlobs(token);
   if (blobs.length === 0) {
-    await persistDatabaseToCloud();
+    if (!currentLoadedBlobPath && !blobWriteSuspended) {
+      await persistDatabaseToCloud();
+    }
     return;
   }
   const newest = blobs[0];
@@ -1051,14 +1211,16 @@ async function syncDatabaseBeforeRequest(forceCheck = false) {
   const sqliteBytes = decryptBuffer(encryptedBytes, token);
   reloadDatabaseFromSnapshotBuffer(sqliteBytes);
   currentLoadedBlobPath = newest.pathname;
+  hasUnsyncedLocalMutations = false;
 }
 async function persistDatabaseToCloud() {
-  if (!isCloudSyncEnabled()) return;
+  if (!isCloudSyncEnabled()) return true;
   const token = getBlobToken();
+  hasUnsyncedLocalMutations = true;
   const sqliteBytes = exportDatabaseSnapshotBuffer();
   const encryptedBytes = encryptBuffer(sqliteBytes, token);
   const ts = String(Date.now()).padStart(15, "0");
-  const rand = crypto.randomBytes(3).toString("hex");
+  const rand = crypto2.randomBytes(3).toString("hex");
   const pathname = `${STATE_PREFIX}${ts}-${rand}.enc`;
   const putRes = await fetch(`${BLOB_API_BASE}/${pathname}`, {
     method: "PUT",
@@ -1072,6 +1234,8 @@ async function persistDatabaseToCloud() {
     body: new Uint8Array(encryptedBytes)
   });
   if (putRes.ok) {
+    blobWriteSuspended = false;
+    hasUnsyncedLocalMutations = false;
     currentLoadedBlobPath = pathname;
     lastCheckAt = Date.now();
     const blobs = await listStateBlobs(token);
@@ -1079,7 +1243,10 @@ async function persistDatabaseToCloud() {
       const oldUrls = blobs.slice(2).map((b) => b.url);
       await deleteOldStateBlobs(token, oldUrls);
     }
+    return true;
   }
+  blobWriteSuspended = true;
+  return false;
 }
 async function uploadMediaToCloudBlob(buffer, filename, mimeType) {
   const token = getBlobToken();
@@ -1795,7 +1962,9 @@ for (const dir of [UPLOADS_ROOT, IMAGES_DIR, VIDEOS_DIR, AUDIO_DIR]) {
 function getSettingValue(key, envFallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
   if (row && row.value && row.value.trim()) {
-    return row.value.trim();
+    const raw = row.value.trim();
+    const val = SECRET_SETTING_KEYS.has(key) ? decryptSecretValue(raw, key) : raw;
+    if (val) return val;
   }
   if (envFallback && process.env[envFallback]?.trim()) {
     return process.env[envFallback].trim();
@@ -4044,7 +4213,7 @@ async function resolveVideoBytes(videoUrl) {
 async function dispatchSingleChannelReal(input) {
   const cfg = db.prepare("SELECT * FROM channel_configs WHERE channel_key = ?").get(input.channelKey);
   const chName = cfg ? String(cfg.channel_name) : input.channelKey;
-  const token = String(cfg?.access_token || "").trim();
+  const token = decryptSecretValue(cfg?.access_token, `channel:${input.channelKey}`);
   const targetId = String(cfg?.target_id || "").trim();
   const webhookUrl = String(cfg?.webhook_url || "").trim();
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -4658,7 +4827,7 @@ ${input.content}`.slice(0, 275);
 }
 
 // server/auth.ts
-import crypto2 from "node:crypto";
+import crypto3 from "node:crypto";
 var TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
 function getAuthSecret() {
   const configured = getSettingValue("admin_auth_secret", "ADMIN_AUTH_SECRET");
@@ -4674,7 +4843,7 @@ function safeEqual(a, b) {
   const bufA = Buffer.from(a, "utf8");
   const bufB = Buffer.from(b, "utf8");
   if (bufA.length !== bufB.length) return false;
-  return crypto2.timingSafeEqual(bufA, bufB);
+  return crypto3.timingSafeEqual(bufA, bufB);
 }
 function verifyCredentials(usernameInput, passwordInput) {
   const { username, password } = getAdminCredentials();
@@ -4686,7 +4855,7 @@ function createAdminToken(username) {
     JSON.stringify({ u: username, exp: expiresAt }),
     "utf8"
   ).toString("base64url");
-  const sig = crypto2.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  const sig = crypto3.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
   return {
     token: `${payload}.${sig}`,
     expiresAt
@@ -4696,7 +4865,7 @@ function verifyAdminToken(token) {
   if (!token || !token.includes(".")) return { valid: false };
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return { valid: false };
-  const expectedSig = crypto2.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  const expectedSig = crypto3.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
   if (!safeEqual(sig, expectedSig)) return { valid: false };
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
@@ -4743,6 +4912,36 @@ function updateAdminCredentials(newUsername, newPassword) {
 
 // server/index.ts
 initDatabase();
+function exportEncryptedSettingsMap() {
+  const rows = db.prepare("SELECT key, value FROM settings").all();
+  const map = {};
+  for (const r of rows) {
+    if (!r.key || r.key === "dynamic_model_discovery_v1") continue;
+    const raw = String(r.value || "").trim();
+    if (!raw) continue;
+    map[r.key] = SECRET_SETTING_KEYS.has(r.key) ? encryptSecretValue(raw, r.key) : raw;
+  }
+  return map;
+}
+function hydrateMissingSettingsFromSealedVault(sealedToken) {
+  const unsealed = unsealSettingsVaultToken(sealedToken);
+  if (!unsealed) return;
+  const getStmt = db.prepare("SELECT value FROM settings WHERE key = ?");
+  const setStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+  let restoredAny = false;
+  for (const [k, v] of Object.entries(unsealed)) {
+    if (!k || typeof v !== "string" || !v.trim()) continue;
+    const cur = getStmt.get(k);
+    if (!cur || !String(cur.value || "").trim()) {
+      const safeVal = SECRET_SETTING_KEYS.has(k) ? isEncryptedSecret(v) ? v : encryptSecretValue(v, k) : v;
+      setStmt.run(k, safeVal);
+      restoredAny = true;
+    }
+  }
+  if (restoredAny) {
+    invalidateModelCatalogCache();
+  }
+}
 var app = express();
 app.use(express.json({ limit: "50mb" }));
 var UPLOADS_DIR = UPLOADS_ROOT;
@@ -4792,7 +4991,13 @@ app.use("/api", (req, res, next) => {
   if (m === "POST" && (p === "/subscribers" || p === "/contacts" || p === "/surveys")) {
     return next();
   }
-  return requireAdminAuth(req, res, next);
+  return requireAdminAuth(req, res, () => {
+    const vaultHeader = req.headers["x-komkrit-sealed-vault"];
+    if (typeof vaultHeader === "string" && vaultHeader.trim()) {
+      hydrateMissingSettingsFromSealedVault(vaultHeader.trim());
+    }
+    next();
+  });
 });
 app.post("/api/auth/login", (req, res) => {
   const { username = "", password = "" } = req.body || {};
@@ -4837,10 +5042,7 @@ var storage = multer.diskStorage({
 });
 var upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
 function maskSecret(val) {
-  const s = (val || "").trim();
-  if (!s) return "";
-  if (s.length <= 10) return "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
-  return `${s.slice(0, 6)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${s.slice(-4)}`;
+  return maskSecretStrict(val);
 }
 function mapPostRow(r) {
   let tags = [];
@@ -6233,9 +6435,15 @@ app.post("/api/ai/models/provider", async (req, res) => {
   }
 });
 app.get("/api/settings/ai", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
   const cfg = getProviderConfigs();
+  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
   res.json({
     provider: cfg.defaultProvider,
+    encryptedAtRest: true,
+    encryptionStandard: "AES-256-GCM",
+    sealedVault,
     // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
@@ -6276,6 +6484,8 @@ app.get("/api/settings/ai", (_req, res) => {
   });
 });
 app.put("/api/settings/ai", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
   const b = req.body || {};
   const set = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
   const saveStr = (settingKey, val) => {
@@ -6284,9 +6494,16 @@ app.put("/api/settings/ai", (req, res) => {
     }
   };
   const saveSecret = (settingKey, val) => {
-    if (typeof val === "string" && val !== "__KEEP__") {
-      set.run(settingKey, val.trim());
+    if (typeof val !== "string") return;
+    const trimmed = val.trim();
+    if (trimmed === "__KEEP__" || trimmed === "") {
+      return;
     }
+    if (trimmed === "__CLEAR__") {
+      set.run(settingKey, "");
+      return;
+    }
+    set.run(settingKey, encryptSecretValue(trimmed, settingKey));
   };
   saveStr("ai_provider", b.provider);
   saveStr("gemini_model", b.geminiModel);
@@ -6313,11 +6530,12 @@ app.put("/api/settings/ai", (req, res) => {
   saveStr("local_model", b.localModel);
   saveSecret("local_api_key", b.localApiKey);
   invalidateModelCatalogCache();
-  res.json({ ok: true });
+  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap());
+  res.json({ ok: true, encryptedAtRest: true, sealedVault });
 });
 app.post("/api/settings/test-provider", async (req, res) => {
+  const { provider, model, apiKey } = req.body || {};
   try {
-    const { provider, model, apiKey } = req.body;
     const result = await testProviderConnection({
       provider,
       model,
@@ -6325,12 +6543,12 @@ app.post("/api/settings/test-provider", async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: redactSecrets(err.message, [String(apiKey || "")]) });
   }
 });
 app.post("/api/settings/test-extra", async (req, res) => {
+  const { service, apiKey } = req.body || {};
   try {
-    const { service, apiKey } = req.body || {};
     const cfg = getProviderConfigs();
     const startedAt = Date.now();
     if (service === "elevenlabs") {
@@ -6378,13 +6596,15 @@ app.post("/api/settings/test-extra", async (req, res) => {
     }
     res.status(400).json({ error: "\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E08\u0E31\u0E01\u0E1A\u0E23\u0E34\u0E01\u0E32\u0E23\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E17\u0E14\u0E2A\u0E2D\u0E1A" });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: redactSecrets(err.message, [String(apiKey || "")]) });
   }
 });
 app.get("/api/channels", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, private");
   const resendGlobalKey = getProviderConfigs().resend.apiKey;
   const rows = db.prepare("SELECT * FROM channel_configs ORDER BY id ASC").all().map((c) => {
-    const tok = String(c.access_token || "").trim() || (c.channel_key === "email_newsletter" ? resendGlobalKey : "");
+    const decryptedTok = decryptSecretValue(c.access_token, `channel:${c.channel_key}`);
+    const tok = decryptedTok || (c.channel_key === "email_newsletter" ? resendGlobalKey : "");
     return {
       id: c.id,
       channelKey: c.channel_key,
@@ -6416,7 +6636,15 @@ app.put("/api/channels/:key", (req, res) => {
     targetId = existing.target_id,
     webhookUrl = existing.webhook_url
   } = req.body;
-  const nextToken = typeof accessToken === "string" && accessToken !== "__KEEP__" ? accessToken.trim() : existing.access_token;
+  let nextToken = existing.access_token;
+  if (typeof accessToken === "string") {
+    const trimmed = accessToken.trim();
+    if (trimmed === "__CLEAR__") {
+      nextToken = "";
+    } else if (trimmed !== "__KEEP__" && trimmed !== "") {
+      nextToken = encryptSecretValue(trimmed, `channel:${key}`);
+    }
+  }
   const now = (/* @__PURE__ */ new Date()).toISOString();
   db.prepare(
     `UPDATE channel_configs SET

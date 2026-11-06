@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db } from './db.ts';
 import { getSettingValue, UPLOADS_ROOT } from './mediaEngine.ts';
+import { decryptSecretValue } from './secretVault.ts';
 
 export interface DispatchChannelInput {
   channelKey: string;
@@ -54,7 +55,7 @@ export async function dispatchSingleChannelReal(
     .get(input.channelKey) as any;
 
   const chName = cfg ? String(cfg.channel_name) : input.channelKey;
-  const token = String(cfg?.access_token || '').trim();
+  const token = decryptSecretValue(cfg?.access_token, `channel:${input.channelKey}`);
   const targetId = String(cfg?.target_id || '').trim();
   const webhookUrl = String(cfg?.webhook_url || '').trim();
   const now = new Date().toISOString();

@@ -10,6 +10,7 @@ import {
   resolveLatestElevenLabsVoice,
   resolveLatestModel,
 } from './modelRegistry.ts';
+import { SECRET_SETTING_KEYS, decryptSecretValue } from './secretVault.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +32,9 @@ export function getSettingValue(key: string, envFallback?: string): string {
     | { value: string }
     | undefined;
   if (row && row.value && row.value.trim()) {
-    return row.value.trim();
+    const raw = row.value.trim();
+    const val = SECRET_SETTING_KEYS.has(key) ? decryptSecretValue(raw, key) : raw;
+    if (val) return val;
   }
   if (envFallback && process.env[envFallback]?.trim()) {
     return process.env[envFallback]!.trim();

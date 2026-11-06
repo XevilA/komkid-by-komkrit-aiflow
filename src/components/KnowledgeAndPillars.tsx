@@ -799,10 +799,10 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
               <div>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2.5 py-0.5 text-[10.5px] font-extrabold text-emerald-300">
-                  เชื่อมต่อ API จริง 100% • ดึงโมเดลล่าสุดจาก API เสมอ (Zero Hardcode)
+                  🔒 เข้ารหัส AES-256-GCM รายฟิลด์ • จำคีย์ถาวรไม่หาย • ดึงโมเดลล่าสุดจาก API เสมอ
                 </span>
                 <h2 className="mt-1 text-lg sm:text-xl font-extrabold">
-                  เชื่อมต่อคีย์ AI (วางคีย์แล้วกดปุ่ม "บันทึก & ทดสอบยิง API จริง" ได้เลย)
+                  ตู้นิรภัยคีย์ AI (วางคีย์แล้วกด "บันทึก & ทดสอบยิง API จริง" ระบบจะเข้ารหัสและจำคีย์ไว้ถาวร)
                 </h2>
               </div>
             </div>
@@ -956,13 +956,15 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
                   <input
                     type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
                     value={secrets.geminiApiKey}
                     onChange={(e) =>
                       setSecrets({ ...secrets, geminiApiKey: e.target.value })
                     }
                     placeholder={
                       settings.hasGeminiKey
-                        ? 'ใช้คีย์เดิมอยู่แล้ว — วางคีย์ใหม่เฉพาะเมื่อต้องการเปลี่ยน'
+                        ? `เข้ารหัสและจำคีย์ไว้แล้ว (${settings.geminiKeyMasked}) — วางคีย์ใหม่เฉพาะเมื่อต้องการเปลี่ยน`
                         : 'วางคีย์ที่ขึ้นต้นด้วย AIza... แล้วกดปุ่มสีฟ้าด้านบน'
                     }
                     className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-sky-500 focus:outline-none"
@@ -1121,13 +1123,15 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
                   <input
                     type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
                     value={secrets.claudeApiKey}
                     onChange={(e) =>
                       setSecrets({ ...secrets, claudeApiKey: e.target.value })
                     }
                     placeholder={
                       settings.hasClaudeKey
-                        ? 'ใช้คีย์เดิมอยู่แล้ว — วางคีย์ใหม่หากต้องการเปลี่ยน'
+                        ? `เข้ารหัสและจำคีย์ไว้แล้ว (${settings.claudeKeyMasked}) — วางคีย์ใหม่หากต้องการเปลี่ยน`
                         : 'วางคีย์ที่ขึ้นต้นด้วย sk-ant-...'
                     }
                     className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-amber-600 focus:outline-none"
@@ -1236,13 +1240,15 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
                   <input
                     type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
                     value={secrets.deepseekApiKey}
                     onChange={(e) =>
                       setSecrets({ ...secrets, deepseekApiKey: e.target.value })
                     }
                     placeholder={
                       settings.hasDeepseekKey
-                        ? 'ใช้คีย์เดิมอยู่แล้ว — วางคีย์ใหม่หากต้องการเปลี่ยน'
+                        ? `เข้ารหัสและจำคีย์ไว้แล้ว (${settings.deepseekKeyMasked}) — วางคีย์ใหม่หากต้องการเปลี่ยน`
                         : 'วางคีย์ที่ขึ้นต้นด้วย sk-...'
                     }
                     className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:outline-none"
@@ -1357,13 +1363,15 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
                   <input
                     type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
                     value={secrets.openaiApiKey}
                     onChange={(e) =>
                       setSecrets({ ...secrets, openaiApiKey: e.target.value })
                     }
                     placeholder={
                       settings.hasOpenaiKey
-                        ? 'ใช้คีย์เดิมอยู่แล้ว — วางคีย์ใหม่หากต้องการเปลี่ยน'
+                        ? `เข้ารหัสและจำคีย์ไว้แล้ว (${settings.openaiKeyMasked}) — วางคีย์ใหม่หากต้องการเปลี่ยน`
                         : 'วางคีย์ที่ขึ้นต้นด้วย sk-proj-...'
                     }
                     className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
