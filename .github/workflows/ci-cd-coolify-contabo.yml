@@ -1,0 +1,112 @@
+name: CI/CD — Build & Deploy to Contabo VPS + Coolify
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-contabo-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    name: 1. TypeScript Check & Production Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Typecheck & Production Build (Vite + Serverless API Bundle)
+        run: |
+          npx tsc --noEmit
+          npm run build
+
+  deploy-contabo-coolify:
+    name: 2. Auto-Deploy to Contabo VPS (5.183.33.183) & Coolify
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key for Contabo VPS
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "${VPS_HOST:-5.183.33.183}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync Release & Rebuild Container on Contabo VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          HOST="${VPS_HOST:-5.183.33.183}"
+          USER="${VPS_USER:-root}"
+          PORT="${VPS_PORT:-22}"
+          REMOTE_DIR="/opt/komkid-aiflow"
+
+          ssh -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p $REMOTE_DIR/data $REMOTE_DIR/uploads"
+
+          tar --exclude='.git' \
+              --exclude='node_modules' \
+              --exclude='dist' \
+              --exclude='data/*.db*' \
+              --exclude='uploads/*' \
+              --exclude='.microcode' \
+              -czf /tmp/komkid-aiflow-ci.tar.gz .
+
+          scp -P "$PORT" -o StrictHostKeyChecking=no /tmp/komkid-aiflow-ci.tar.gz "$USER@$HOST:/tmp/komkid-aiflow-ci.tar.gz"
+          rm -f /tmp/komkid-aiflow-ci.tar.gz
+
+          ssh -p "$PORT" -o StrictHostKeyChecking=no "$USER@$HOST" "bash -s" <<'EOF'
+          set -e
+          cd /opt/komkid-aiflow
+          tar -xzf /tmp/komkid-aiflow-ci.tar.gz -C /opt/komkid-aiflow
+          rm -f /tmp/komkid-aiflow-ci.tar.gz
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+          docker network inspect coolify >/dev/null 2>&1 || docker network create --attachable coolify
+          docker compose up -d --build --remove-orphans
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              echo "✅ Healthcheck passed on http://5.183.33.183/api/health"
+              curl -fsS http://127.0.0.1:3000/api/health
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ Healthcheck timed out"
+          docker compose logs --tail=50
+          exit 1
+          EOF
+
+      - name: Trigger Coolify Webhook (If Configured)
+        if: ${{ secrets.COOLIFY_WEBHOOK_URL != '' }}
+        env:
+          COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+        run: |
+          if [ -n "$COOLIFY_API_TOKEN" ]; then
+            curl -fsSL -X GET "$COOLIFY_WEBHOOK_URL" -H "Authorization: Bearer $COOLIFY_API_TOKEN" || true
+          else
+            curl -fsSL -X GET "$COOLIFY_WEBHOOK_URL" || true
+          fi

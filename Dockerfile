@@ -1,17 +1,17 @@
 FROM node:22-bookworm-slim
 
-# Install FFmpeg (for real Google Flow Multi-Scene .mp4 video stitching & audio mixing) and CA certificates
+# Install FFmpeg (for real Google Flow Multi-Scene .mp4 video stitching & audio mixing), curl (for Coolify healthcheck), and CA certificates
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+  && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Install dependencies (including tsx & vite for build and TypeScript server execution)
 COPY package.json package-lock.json ./
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 
-# Copy application source and build production frontend bundle
+# Copy application source and build production frontend & API bundle
 COPY . .
 RUN npm run build
 
@@ -21,5 +21,8 @@ RUN mkdir -p /app/data /app/uploads/images /app/uploads/videos /app/uploads/audi
 ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=25s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:${PORT:-8080}/api/health || exit 1
 
 CMD ["npm", "run", "start"]

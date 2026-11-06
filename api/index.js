@@ -5050,7 +5050,7 @@ if (!fs4.existsSync(UPLOADS_DIR)) {
   fs4.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 app.use("/uploads", express.static(UPLOADS_DIR));
-app.get("/api/health", (_req, res) => {
+var handleHealthCheck = (_req, res) => {
   res.json({
     ok: true,
     service: "komkid-by-komkrit-aiflow",
@@ -5059,7 +5059,9 @@ app.get("/api/health", (_req, res) => {
     node: process.version,
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
-});
+};
+app.get("/health", handleHealthCheck);
+app.get("/api/health", handleHealthCheck);
 app.use("/api", async (req, res, next) => {
   if (req.path === "/health") return next();
   try {
@@ -6683,10 +6685,12 @@ app.post("/api/settings/test-extra", async (req, res) => {
         return;
       }
       const u = await r.json();
+      const quotaUsed = u?.subscription?.character_count ?? 0;
+      const quotaLimit = u?.subscription?.character_limit ?? "?";
       res.json({
         ok: true,
         latencyMs: Date.now() - startedAt,
-        detail: `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D ElevenLabs \u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (\u0E42\u0E04\u0E27\u0E15\u0E49\u0E32\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23: ${u?.subscription?.character_count ?? 0}/${u?.subscription?.character_limit ?? "?"})`
+        detail: `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D ElevenLabs \u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (\u0E42\u0E04\u0E27\u0E15\u0E49\u0E32\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23: ${quotaUsed}/${quotaLimit})`
       });
       return;
     }

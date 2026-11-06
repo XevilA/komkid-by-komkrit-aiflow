@@ -1,0 +1,50 @@
+services:
+  aiflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: komkid-aiflow
+    restart: unless-stopped
+    ports:
+      - "${APP_HOST_PORT:-3000}:8080"
+    networks:
+      - default
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.komkid-aiflow.rule=Host(`${APP_DOMAIN:-5.183.33.183.sslip.io}`) || PathPrefix(`/`)"
+      - "traefik.http.routers.komkid-aiflow.entrypoints=http"
+      - "traefik.http.services.komkid-aiflow.loadbalancer.server.port=8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - KOMKRIT_VAULT_SECRET=${KOMKRIT_VAULT_SECRET:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+    volumes:
+      - aiflow_data:/app/data
+      - aiflow_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 25s
+
+volumes:
+  aiflow_data:
+    name: komkid_aiflow_data
+  aiflow_uploads:
+    name: komkid_aiflow_uploads
+
+networks:
+  coolify:
+    external: true
+

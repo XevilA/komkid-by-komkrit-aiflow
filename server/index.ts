@@ -204,7 +204,7 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-app.get('/api/health', (_req, res) => {
+const handleHealthCheck = (_req: express.Request, res: express.Response) => {
   res.json({
     ok: true,
     service: 'komkid-by-komkrit-aiflow',
@@ -213,7 +213,10 @@ app.get('/api/health', (_req, res) => {
     node: process.version,
     timestamp: new Date().toISOString(),
   });
-});
+};
+
+app.get('/health', handleHealthCheck);
+app.get('/api/health', handleHealthCheck);
 
 // --- Cloud SQLite Sync Middleware (Permanent Persistence across Serverless Instances) ---
 app.use('/api', async (req, res, next) => {
@@ -2168,10 +2171,12 @@ app.post('/api/settings/test-extra', async (req, res) => {
         return;
       }
       const u = (await r.json()) as any;
+      const quotaUsed = u?.subscription?.character_count ?? 0;
+      const quotaLimit = u?.subscription?.character_limit ?? '?';
       res.json({
         ok: true,
         latencyMs: Date.now() - startedAt,
-        detail: `เชื่อมต่อ ElevenLabs สำเร็จ (โควต้าตัวอักษร: ${u?.subscription?.character_count ?? 0}/${u?.subscription?.character_limit ?? '?'})`,
+        detail: `เชื่อมต่อ ElevenLabs สำเร็จ (โควต้าตัวอักษร: ${quotaUsed}/${quotaLimit})`,
       });
       return;
     }
