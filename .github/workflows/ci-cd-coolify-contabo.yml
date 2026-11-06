@@ -100,11 +100,14 @@ jobs:
           EOF
 
       - name: Trigger Coolify Webhook (If Configured)
-        if: ${{ secrets.COOLIFY_WEBHOOK_URL != '' }}
         env:
           COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
           COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
         run: |
+          if [ -z "$COOLIFY_WEBHOOK_URL" ]; then
+            echo "ℹ️ COOLIFY_WEBHOOK_URL not set, skipping optional webhook trigger."
+            exit 0
+          fi
           if [ -n "$COOLIFY_API_TOKEN" ]; then
             curl -fsSL -X GET "$COOLIFY_WEBHOOK_URL" -H "Authorization: Bearer $COOLIFY_API_TOKEN" || true
           else
