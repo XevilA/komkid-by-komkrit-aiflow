@@ -29,6 +29,8 @@ import {
   SquarePen,
   FileText,
   Globe,
+  FolderOpen,
+  Layers,
 } from 'lucide-react';
 import {
   AiChatMessage,
@@ -53,6 +55,13 @@ export interface MediaAgentHandoff {
   assessmentThai: string;
   aspectRatio: '16:9' | '9:16' | '1:1';
   suggestedPostTitle?: string;
+}
+
+interface TeamStepStatus {
+  id: 'writer' | 'image' | 'video';
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'skipped' | 'error';
+  detail?: string;
 }
 
 interface Props {
@@ -120,6 +129,34 @@ function createSessionId() {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function embedMediaIntoMarkdownBody(
+  body: string,
+  fileUrl: string,
+  rawCaption: string,
+  isVideo: boolean,
+  insertAfterIntro = false
+): string {
+  if (!fileUrl) return body;
+  if (body.includes(fileUrl)) return body;
+  const safeCaption = (rawCaption || (isVideo ? 'วิดีโอประกอบเนื้อหา' : 'ภาพประกอบเนื้อหา'))
+    .replace(/[\[\]\n]/g, ' ')
+    .trim();
+  const mdTag = isVideo
+    ? `![วิดีโอ: ${safeCaption}](${fileUrl})`
+    : `![${safeCaption}](${fileUrl})`;
+
+  const trimmed = body.trim();
+  if (!trimmed) return mdTag;
+
+  if (insertAfterIntro) {
+    const blocks = trimmed.split(/\n\s*\n/);
+    if (blocks.length >= 2) {
+      return [blocks[0], mdTag, ...blocks.slice(1)].join('\n\n');
+    }
+  }
+  return `${trimmed}\n\n${mdTag}`;
+}
+
 export const AiChatStudio: React.FC<Props> = ({
   onRefreshAll,
   onOpenSettings,
@@ -146,7 +183,18 @@ export const AiChatStudio: React.FC<Props> = ({
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  // Studio UI States (Dark/Light Qwen-style, Collapsible Chat History Sidebar, Search, Popovers)
+  // Shared AI Media Assets across Agents (Images & Videos ready to drop into Content)
+  const [mediaAssets, setMediaAssets] = useState<AiMediaAsset[]>([]);
+  const [showDraftMediaTray, setShowDraftMediaTray] = useState(false);
+
+  // Multi-Agent Collaboration Pipeline State (Writer + Image Agent + Video Agent -> Content)
+  const [teamIncludeImage, setTeamIncludeImage] = useState(true);
+  const [teamIncludeVideo, setTeamIncludeVideo] = useState(false);
+  const [teamVideoTouched, setTeamVideoTouched] = useState(false);
+  const [teamRunning, setTeamRunning] = useState(false);
+  const [teamSteps, setTeamSteps] = useState<TeamStepStatus[]>([]);
+
+  // Studio UI States
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const saved = localStorage.getItem('komkrit_chat_theme');
@@ -172,18 +220,19 @@ export const AiChatStudio: React.FC<Props> = ({
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
-  // 1) AI Evaluated Prompt State (Chat -> Evaluate -> Full Prompt -> Send to Image/VDO Agent)
+  // 1) AI Evaluated Prompt State
   const [evaluatingTarget, setEvaluatingTarget] = useState<'image' | 'video' | null>(null);
   const [evaluatedPrompt, setEvaluatedPrompt] = useState<AiEvaluatedPrompt | null>(null);
   const [editableFullPrompt, setEditableFullPrompt] = useState('');
   const [selectedAspect, setSelectedAspect] = useState<'16:9' | '9:16' | '1:1'>('16:9');
   const [agentGenerating, setAgentGenerating] = useState(false);
 
-  // 2) Recheck & Preview Media Asset State (Like/Keep vs Delete vs Use in News)
+  // 2) Recheck & Preview Media Asset State
   const [previewAsset, setPreviewAsset] = useState<AiMediaAsset | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [writingAroundAsset, setWritingAroundAsset] = useState(false);
 
-  // 3) AI News / Content Writer State (Chat -> Draft News/Article/Content -> Recheck Preview -> Publish/Delete)
+  // 3) AI News / Content Writer + Inline Media State
   const [draftingFormat, setDraftingFormat] = useState<
     'news' | 'article' | 'social_post' | null
   >(null);
@@ -193,6 +242,8 @@ export const AiChatStudio: React.FC<Props> = ({
   const [draftPreviewMode, setDraftPreviewMode] = useState<'preview' | 'edit'>('preview');
   const [publishingDraft, setPublishingDraft] = useState(false);
   const [generatingDraftCover, setGeneratingDraftCover] = useState(false);
+  const [generatingDraftInlineImg, setGeneratingDraftInlineImg] = useState(false);
+  const [generatingDraftVideo, setGeneratingDraftVideo] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const actionPanelRef = useRef<HTMLDivElement | null>(null);
@@ -227,7 +278,6 @@ export const AiChatStudio: React.FC<Props> = ({
     });
   };
 
-  // Close popovers on outside click & exit fullscreen on Escape
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       if (
@@ -255,7 +305,6 @@ export const AiChatStudio: React.FC<Props> = ({
     };
   }, [modelPopoverOpen, plusMenuOpen, isFullScreen, onToggleFullScreen]);
 
-  // Auto-resize composer textarea smoothly
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -270,24 +319,44 @@ export const AiChatStudio: React.FC<Props> = ({
     }, 5000);
   };
 
+  const refreshMediaLibrary = async () => {
+    try {
+      const assets = await api.getMediaAssets();
+      setMediaAssets(
+        assets.filter((a) => a.mediaType === 'image' || a.mediaType === 'video')
+      );
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     if (initialAiSettings) {
       setSettings(initialAiSettings);
+      if (!teamVideoTouched && initialAiSettings.hasGeminiKey) {
+        setTeamIncludeVideo(true);
+      }
     }
-  }, [initialAiSettings]);
+  }, [initialAiSettings, teamVideoTouched]);
 
   const loadInitial = async () => {
     try {
-      // Load AI settings FIRST so sealedVault / HttpOnly cookie hydrates before parallel calls
       const st = await api.getAiSettings();
       setSettings(st);
       onSyncAiSettings?.(st);
-      const [sess, lm] = await Promise.all([
+      if (!teamVideoTouched && st.hasGeminiKey) {
+        setTeamIncludeVideo(true);
+      }
+      const [sess, lm, assets] = await Promise.all([
         api.getChatSessions(),
         api.getLiveModels(false),
+        api.getMediaAssets().catch(() => [] as AiMediaAsset[]),
       ]);
       setSessions(sess);
       setLiveModels(lm);
+      setMediaAssets(
+        assets.filter((a) => a.mediaType === 'image' || a.mediaType === 'video')
+      );
       if (sess.length > 0 && messages.length === 0) {
         setActiveSessionId(sess[0].sessionId);
         const hist = await api.getChatHistory(sess[0].sessionId);
@@ -345,6 +414,7 @@ export const AiChatStudio: React.FC<Props> = ({
     setEvaluatedPrompt(null);
     setPreviewAsset(null);
     setDraftPost(null);
+    setTeamSteps([]);
     setErrorBanner(null);
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setChatSidebarOpen(false);
@@ -419,6 +489,220 @@ export const AiChatStudio: React.FC<Props> = ({
     await sendMessageText(input);
   };
 
+  // ============================================================================
+  // UNIFIED MULTI-AGENT COLLABORATION PIPELINE (Writer + Image + Video -> Content)
+  // ============================================================================
+  const handleRunUnifiedAgentTeam = async (customContextText?: string) => {
+    setPlusMenuOpen(false);
+    const idea = (customContextText || input).trim();
+    if (messages.length === 0 && !idea) {
+      setErrorBanner(
+        'กรุณาพิมพ์หัวข้อที่อยากทำในช่องแชทก่อน แล้วกด “ให้ทีม Agent ทำครบชุด” ได้เลยครับ'
+      );
+      textareaRef.current?.focus();
+      return;
+    }
+
+    setErrorBanner(null);
+    setTeamRunning(true);
+    const canGenerateImage = Boolean(settings?.hasGeminiKey || settings?.hasOpenaiKey);
+    const canGenerateVideo = Boolean(settings?.hasGeminiKey);
+
+    const initialSteps: TeamStepStatus[] = [
+      {
+        id: 'writer',
+        label: '1. Agent นักเขียน Content (เรียบเรียงข่าว & บทความฉบับเต็ม)',
+        status: 'running',
+        detail: 'กำลังวิเคราะห์ประเด็นและเขียนเนื้อหา...',
+      },
+      {
+        id: 'image',
+        label: '2. Agent ครีเอทีฟ & วาดรูปภาพ (สร้างรูปปก + แทรกรูปเข้าเนื้อหา)',
+        status: teamIncludeImage ? 'pending' : 'skipped',
+        detail: teamIncludeImage ? 'รอรับเนื้อหาจาก Agent นักเขียน...' : 'ปิดไว้',
+      },
+      {
+        id: 'video',
+        label: '3. Agent ผู้กำกับ & สร้างวิดีโอ (สร้างคลิป VDO + แทรกเข้าเนื้อหา)',
+        status: teamIncludeVideo ? 'pending' : 'skipped',
+        detail: teamIncludeVideo ? 'รอคิวสร้างวิดีโอประกอบ Content...' : 'ปิดไว้',
+      },
+    ];
+    setTeamSteps(initialSteps);
+
+    const updateStep = (
+      id: TeamStepStatus['id'],
+      patch: Partial<TeamStepStatus>
+    ) => {
+      setTeamSteps((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+      );
+    };
+
+    try {
+      setTimeout(() => {
+        actionPanelRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 80);
+
+      // 1) CONTENT WRITER AGENT
+      const draft = await api.draftContentFromChat({
+        sessionId: messages.length > 0 ? activeSessionId : undefined,
+        ideaText: idea || undefined,
+        contentFormat: 'article',
+        provider,
+        model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
+      });
+
+      let workingContent = draft.content;
+      setDraftPost(draft);
+      setDraftPreviewMode('preview');
+      setDraftCoverUrl('/images/thumb-ai-edu.jpg');
+      setDraftVideoUrl('');
+      if (idea && idea === input.trim()) {
+        setInput('');
+      }
+
+      updateStep('writer', {
+        status: 'done',
+        detail: `เขียนเสร็จแล้ว: “${draft.title}”`,
+      });
+
+      // 2) PROMPT EVALUATOR + IMAGE AGENT -> PUT DIRECTLY INTO CONTENT (COVER + INLINE)
+      if (teamIncludeImage) {
+        if (!canGenerateImage) {
+          updateStep('image', {
+            status: 'skipped',
+            detail:
+              'ข้ามการวาดรูปอัตโนมัติ (ต้องเชื่อมคีย์ Gemini หรือ OpenAI สำหรับสร้างรูปภาพ)',
+          });
+        } else {
+          updateStep('image', {
+            status: 'running',
+            detail: 'กำลังเขียน Full Prompt และวาดรูปภาพจริงใส่ปก + เนื้อหา...',
+          });
+          try {
+            let finalImgPrompt = draft.suggestedImagePrompt || '';
+            let imgSummaryThai = `ภาพประกอบ: ${draft.title}`;
+            try {
+              const evalImg = await api.evaluateMediaPrompt({
+                target: 'image',
+                ideaText: `${draft.title}\n${draft.excerpt}`,
+                aspectRatio: '16:9',
+                provider,
+                model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
+              });
+              finalImgPrompt = evalImg.fullPrompt || finalImgPrompt;
+              imgSummaryThai = evalImg.visualSummaryThai || imgSummaryThai;
+            } catch {
+              // fallback to draft.suggestedImagePrompt
+            }
+
+            if (!finalImgPrompt) {
+              finalImgPrompt = `Editorial 16:9 photography illustrating "${draft.title}", authentic Thai educational context, warm natural lighting, no text`;
+            }
+
+            const imgAsset = await api.generateRealImage({
+              prompt: finalImgPrompt,
+              aspectRatio: '16:9',
+              thaiSummary: imgSummaryThai,
+              reviewStatus: 'approved',
+            });
+
+            workingContent = embedMediaIntoMarkdownBody(
+              workingContent,
+              imgAsset.fileUrl,
+              imgAsset.thaiSummary || draft.title,
+              false,
+              true
+            );
+            setDraftCoverUrl(imgAsset.fileUrl);
+            setDraftPost((prev) =>
+              prev ? { ...prev, content: workingContent } : prev
+            );
+            updateStep('image', {
+              status: 'done',
+              detail: 'สร้างรูปปกและแทรกรูปภาพเข้าไปในเนื้อหาบทความเรียบร้อยแล้ว!',
+            });
+          } catch (imgErr) {
+            updateStep('image', {
+              status: 'error',
+              detail: (imgErr as Error).message,
+            });
+          }
+        }
+      }
+
+      // 3) PROMPT EVALUATOR + VIDEO AGENT -> PUT DIRECTLY INTO CONTENT (BANNER + INLINE)
+      if (teamIncludeVideo) {
+        if (!canGenerateVideo) {
+          updateStep('video', {
+            status: 'skipped',
+            detail:
+              'ข้ามการสร้าง VDO (ต้องเชื่อม Google Gemini API Key สำหรับโมเดลวิดีโอ Veo)',
+          });
+        } else {
+          updateStep('video', {
+            status: 'running',
+            detail: 'กำลังกำกับฉากและสร้างวิดีโอ AI จริง (ประมาณ 30-90 วินาที)...',
+          });
+          try {
+            const evalVid = await api.evaluateMediaPrompt({
+              target: 'video',
+              ideaText: `${draft.title}\n${draft.excerpt}`,
+              aspectRatio: '16:9',
+              provider,
+              model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
+            });
+
+            const vidAsset = await api.generateRealVideo({
+              prompt: evalVid.fullPrompt,
+              engine: settings?.geminiVideoModel || undefined,
+              aspectRatio: '16:9',
+              durationSec: 6,
+              resolution: '720p',
+              thaiSummary: evalVid.visualSummaryThai || `วิดีโอประกอบ: ${draft.title}`,
+            });
+
+            workingContent = embedMediaIntoMarkdownBody(
+              workingContent,
+              vidAsset.fileUrl,
+              vidAsset.thaiSummary || draft.title,
+              true,
+              false
+            );
+            setDraftVideoUrl(vidAsset.fileUrl);
+            setDraftPost((prev) =>
+              prev ? { ...prev, content: workingContent } : prev
+            );
+            updateStep('video', {
+              status: 'done',
+              detail: 'สร้างวิดีโอ AI และแทรกเครื่องเล่นวิดีโอเข้าสู่ Content เรียบร้อยแล้ว!',
+            });
+          } catch (vidErr) {
+            updateStep('video', {
+              status: 'error',
+              detail: (vidErr as Error).message,
+            });
+          }
+        }
+      }
+
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
+      showToast('ทีม Agent ร่วมกันเขียน Content พร้อมประกอบสื่อเสร็จเรียบร้อยแล้ว!');
+      setTimeout(() => {
+        actionPanelRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 150);
+    } catch (err) {
+      updateStep('writer', {
+        status: 'error',
+        detail: (err as Error).message,
+      });
+      setErrorBanner((err as Error).message);
+    } finally {
+      setTeamRunning(false);
+    }
+  };
+
   // ---------------- STEP A: AI EVALUATES CHAT & WRITES FULL IMAGE/VIDEO PROMPT ----------------
   const handleEvaluatePrompt = async (
     target: 'image' | 'video',
@@ -469,7 +753,26 @@ export const AiChatStudio: React.FC<Props> = ({
           thaiSummary: evaluatedPrompt.visualSummaryThai,
         });
         setPreviewAsset(asset);
-        showToast('Agent สร้างรูปภาพเสร็จแล้ว! กรุณาตรวจดูตัวอย่างด้านล่างว่าชอบหรือไม่');
+        if (draftPost) {
+          setDraftCoverUrl(asset.fileUrl);
+          setDraftPost((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  content: embedMediaIntoMarkdownBody(
+                    prev.content,
+                    asset.fileUrl,
+                    asset.thaiSummary || prev.title,
+                    false,
+                    true
+                  ),
+                }
+              : prev
+          );
+          showToast('สร้างรูปภาพเสร็จและแทรกเข้าไปใน Content ด้านล่างให้ทันทีแล้ว!');
+        } else {
+          showToast('Agent สร้างรูปภาพเสร็จแล้ว! กดส่งเข้า Content หรือเก็บไว้ได้เลย');
+        }
       } else {
         const vidAspect: '16:9' | '9:16' = selectedAspect === '9:16' ? '9:16' : '16:9';
         const asset = await api.generateRealVideo({
@@ -481,9 +784,28 @@ export const AiChatStudio: React.FC<Props> = ({
           thaiSummary: evaluatedPrompt.visualSummaryThai,
         });
         setPreviewAsset(asset);
-        showToast('Agent สร้างวิดีโอเสร็จแล้ว! กรุณาเปิดเล่นดูตัวอย่างด้านล่างว่าชอบหรือไม่');
+        if (draftPost) {
+          setDraftVideoUrl(asset.fileUrl);
+          setDraftPost((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  content: embedMediaIntoMarkdownBody(
+                    prev.content,
+                    asset.fileUrl,
+                    asset.thaiSummary || prev.title,
+                    true,
+                    false
+                  ),
+                }
+              : prev
+          );
+          showToast('สร้างวิดีโอเสร็จและแทรกเข้าไปใน Content ด้านล่างให้ทันทีแล้ว!');
+        } else {
+          showToast('Agent สร้างวิดีโอเสร็จแล้ว! กดส่งเข้า Content หรือเปิดดูได้เลย');
+        }
       }
-      await onRefreshAll();
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
       setTimeout(() => {
         actionPanelRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 150);
@@ -494,7 +816,85 @@ export const AiChatStudio: React.FC<Props> = ({
     }
   };
 
-  // ---------------- STEP C: RECHECK PREVIEW DECISION (KEEP / USE IN NEWS / DELETE) ----------------
+  // ---------------- INSERT ANY ASSET DIRECTLY INTO DRAFT CONTENT ----------------
+  const handleInsertAssetIntoDraft = (
+    asset: AiMediaAsset,
+    mode: 'cover_or_main' | 'inline_body' | 'both'
+  ) => {
+    if (!draftPost) return;
+    if (mode === 'cover_or_main' || mode === 'both') {
+      if (asset.mediaType === 'image') {
+        setDraftCoverUrl(asset.fileUrl);
+      } else {
+        setDraftVideoUrl(asset.fileUrl);
+      }
+    }
+    if (mode === 'inline_body' || mode === 'both') {
+      setDraftPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              content: embedMediaIntoMarkdownBody(
+                prev.content,
+                asset.fileUrl,
+                asset.thaiSummary || prev.title,
+                asset.mediaType === 'video',
+                asset.mediaType === 'image'
+              ),
+            }
+          : prev
+      );
+    }
+    showToast(
+      asset.mediaType === 'video'
+        ? 'นำวิดีโอ AI ไปใส่ใน Content ด้านล่างเรียบร้อยแล้ว!'
+        : 'นำรูปภาพ AI ไปใส่ใน Content ด้านล่างเรียบร้อยแล้ว!'
+    );
+  };
+
+  const handleWriteContentAroundAsset = async (asset: AiMediaAsset) => {
+    setWritingAroundAsset(true);
+    setErrorBanner(null);
+    try {
+      if (asset.reviewStatus === 'pending_review') {
+        await api.reviewMediaAsset(asset.id, 'approved').catch(() => {});
+      }
+      const draft = await api.draftContentFromChat({
+        sessionId: messages.length > 0 ? activeSessionId : undefined,
+        ideaText:
+          evaluatedPrompt?.suggestedPostTitle ||
+          asset.thaiSummary ||
+          `เขียนบทความและข่าวให้ความรู้ประกอบสื่อหัวข้อ: ${asset.prompt}`,
+        contentFormat: 'article',
+        provider,
+        model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
+      });
+      const contentWithMedia = embedMediaIntoMarkdownBody(
+        draft.content,
+        asset.fileUrl,
+        asset.thaiSummary || draft.title,
+        asset.mediaType === 'video',
+        asset.mediaType === 'image'
+      );
+      setDraftPost({ ...draft, content: contentWithMedia });
+      setDraftPreviewMode('preview');
+      if (asset.mediaType === 'image') {
+        setDraftCoverUrl(asset.fileUrl);
+      } else {
+        setDraftVideoUrl(asset.fileUrl);
+      }
+      showToast('Agent เขียน Content พร้อมนำรูป/วิดีโอใส่เข้าเนื้อหาให้เรียบร้อยแล้ว!');
+      setTimeout(() => {
+        actionPanelRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 120);
+    } catch (err) {
+      setErrorBanner((err as Error).message);
+    } finally {
+      setWritingAroundAsset(false);
+    }
+  };
+
+  // ---------------- STEP C: RECHECK PREVIEW DECISION ----------------
   const handleApproveKeepAsset = async () => {
     if (!previewAsset) return;
     setReviewBusy(true);
@@ -502,15 +902,12 @@ export const AiChatStudio: React.FC<Props> = ({
     try {
       await api.reviewMediaAsset(previewAsset.id, 'approved');
       if (draftPost) {
-        if (previewAsset.mediaType === 'image') {
-          setDraftCoverUrl(previewAsset.fileUrl);
-        } else if (previewAsset.mediaType === 'video') {
-          setDraftVideoUrl(previewAsset.fileUrl);
-        }
+        handleInsertAssetIntoDraft(previewAsset, 'both');
+      } else {
+        showToast('อนุมัติและเก็บผลงานไว้ในคลังเรียบร้อยแล้ว!');
       }
-      showToast('อนุมัติและเก็บผลงานไว้ในคลังเรียบร้อยแล้ว!');
       setPreviewAsset({ ...previewAsset, reviewStatus: 'approved' });
-      await onRefreshAll();
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -526,36 +923,12 @@ export const AiChatStudio: React.FC<Props> = ({
       await api.deleteMediaAsset(previewAsset.id);
       setPreviewAsset(null);
       showToast('ลบผลงานที่ไม่ชอบออกจากระบบเรียบร้อยแล้ว');
-      await onRefreshAll();
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
       setReviewBusy(false);
     }
-  };
-
-  const handleUseAssetInNewPost = async () => {
-    if (!previewAsset) return;
-    try {
-      await api.reviewMediaAsset(previewAsset.id, 'approved');
-    } catch {
-      // ignore
-    }
-    if (draftPost) {
-      if (previewAsset.mediaType === 'image') setDraftCoverUrl(previewAsset.fileUrl);
-      if (previewAsset.mediaType === 'video') setDraftVideoUrl(previewAsset.fileUrl);
-      showToast('แนบผลงานนี้เข้ากับร่างข่าวด้านล่างเรียบร้อยแล้ว!');
-      return;
-    }
-    onOpenInPostEditor({
-      title: evaluatedPrompt?.suggestedPostTitle || '',
-      coverImage:
-        previewAsset.mediaType === 'image'
-          ? previewAsset.fileUrl
-          : '/images/thumb-ai-edu.jpg',
-      videoUrl: previewAsset.mediaType === 'video' ? previewAsset.fileUrl : '',
-      contentType: previewAsset.mediaType === 'video' ? 'video' : 'news',
-    });
   };
 
   // ---------------- STEP D: AI WRITES NEWS / ARTICLE / CONTENT FROM CHAT ----------------
@@ -581,7 +954,19 @@ export const AiChatStudio: React.FC<Props> = ({
         provider,
         model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
       });
-      setDraftPost(draft);
+
+      let contentWithExistingMedia = draft.content;
+      if (previewAsset) {
+        contentWithExistingMedia = embedMediaIntoMarkdownBody(
+          contentWithExistingMedia,
+          previewAsset.fileUrl,
+          previewAsset.thaiSummary || draft.title,
+          previewAsset.mediaType === 'video',
+          previewAsset.mediaType === 'image'
+        );
+      }
+
+      setDraftPost({ ...draft, content: contentWithExistingMedia });
       setDraftPreviewMode('preview');
       if (previewAsset?.mediaType === 'image') {
         setDraftCoverUrl(previewAsset.fileUrl);
@@ -615,15 +1000,118 @@ export const AiChatStudio: React.FC<Props> = ({
         prompt: promptToUse,
         aspectRatio: '16:9',
         thaiSummary: `ภาพปกข่าว: ${draftPost.title}`,
+        reviewStatus: 'approved',
       });
       setPreviewAsset(asset);
       setDraftCoverUrl(asset.fileUrl);
-      showToast('สร้างภาพปกข่าวเสร็จแล้ว! ตรวจดูตัวอย่างรูปปกได้ด้านล่าง');
-      await onRefreshAll();
+      showToast('Agent วาดรูปปกข่าวเสร็จและใส่ให้เรียบร้อยแล้ว!');
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
       setGeneratingDraftCover(false);
+    }
+  };
+
+  const handleGenerateInlineImageForDraft = async () => {
+    if (!draftPost) return;
+    setGeneratingDraftInlineImg(true);
+    setErrorBanner(null);
+    try {
+      const evalRes = await api
+        .evaluateMediaPrompt({
+          target: 'image',
+          ideaText: `${draftPost.title}\n${draftPost.excerpt}`,
+          aspectRatio: '16:9',
+          provider,
+          model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
+        })
+        .catch(() => null);
+
+      const promptToUse =
+        evalRes?.fullPrompt ||
+        draftPost.suggestedImagePrompt ||
+        `Documentary 16:9 editorial illustration for "${draftPost.title}", modern Thai classroom and technology, natural lighting, no text`;
+      const summary = evalRes?.visualSummaryThai || `ภาพประกอบ: ${draftPost.title}`;
+
+      const asset = await api.generateRealImage({
+        prompt: promptToUse,
+        aspectRatio: '16:9',
+        thaiSummary: summary,
+        reviewStatus: 'approved',
+      });
+
+      if (draftCoverUrl === '/images/thumb-ai-edu.jpg') {
+        setDraftCoverUrl(asset.fileUrl);
+      }
+      setDraftPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              content: embedMediaIntoMarkdownBody(
+                prev.content,
+                asset.fileUrl,
+                summary,
+                false,
+                false
+              ),
+            }
+          : prev
+      );
+      setDraftPreviewMode('preview');
+      showToast('Agent วาดรูปประกอบใหม่และแทรกลงในเนื้อหาบทความให้แล้ว!');
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
+    } catch (err) {
+      setErrorBanner((err as Error).message);
+    } finally {
+      setGeneratingDraftInlineImg(false);
+    }
+  };
+
+  const handleGenerateVideoForDraft = async () => {
+    if (!draftPost) return;
+    setGeneratingDraftVideo(true);
+    setErrorBanner(null);
+    try {
+      const evalVid = await api.evaluateMediaPrompt({
+        target: 'video',
+        ideaText: `${draftPost.title}\n${draftPost.excerpt}`,
+        aspectRatio: '16:9',
+        provider,
+        model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
+      });
+
+      const asset = await api.generateRealVideo({
+        prompt: evalVid.fullPrompt,
+        engine: settings?.geminiVideoModel || undefined,
+        aspectRatio: '16:9',
+        durationSec: 6,
+        resolution: '720p',
+        thaiSummary: evalVid.visualSummaryThai || `วิดีโอประกอบ: ${draftPost.title}`,
+      });
+
+      setDraftVideoUrl(asset.fileUrl);
+      setDraftPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              content: embedMediaIntoMarkdownBody(
+                prev.content,
+                asset.fileUrl,
+                asset.thaiSummary || prev.title,
+                true,
+                false
+              ),
+            }
+          : prev
+      );
+      setDraftPreviewMode('preview');
+      showToast('Agent สร้างวิดีโอเสร็จและแทรกลงใน Content ให้เรียบร้อยแล้ว!');
+      await Promise.all([refreshMediaLibrary(), onRefreshAll()]);
+    } catch (err) {
+      setErrorBanner((err as Error).message);
+    } finally {
+      setGeneratingDraftVideo(false);
     }
   };
 
@@ -649,8 +1137,9 @@ export const AiChatStudio: React.FC<Props> = ({
       }
       await onRefreshAll();
       setDraftPost(null);
+      setTeamSteps([]);
       if (status === 'published') {
-        showToast('บันทึกและนำข่าวขึ้นหน้าเว็บไซต์เรียบร้อยแล้ว!');
+        showToast('บันทึกและนำ Content (พร้อมรูป/วิดีโอ) ขึ้นหน้าเว็บไซต์เรียบร้อยแล้ว!');
         onPreviewPost(created.id);
       } else {
         showToast('บันทึกเก็บเป็นฉบับร่างไว้ในระบบจัดการข่าวเรียบร้อยแล้ว!');
@@ -728,7 +1217,11 @@ export const AiChatStudio: React.FC<Props> = ({
   });
 
   const isHeroEmpty =
-    messages.length === 0 && !evaluatedPrompt && !previewAsset && !draftPost;
+    messages.length === 0 &&
+    !evaluatedPrompt &&
+    !previewAsset &&
+    !draftPost &&
+    teamSteps.length === 0;
 
   const selectedProviderMissingKeyButAnotherConnected =
     Boolean(settings) &&
@@ -736,7 +1229,7 @@ export const AiChatStudio: React.FC<Props> = ({
     !isProviderConnected(provider) &&
     firstConnectedProvider !== null;
 
-  // Reusable Qwen-style Pill Composer (used in both Centered Empty Hero & Sticky Bottom)
+  // Reusable Qwen-style Pill Composer
   const renderComposerPill = (isCenteredHero: boolean) => (
     <div className="space-y-2 w-full">
       {selectedProviderMissingKeyButAnotherConnected && firstConnectedProvider && (
@@ -793,7 +1286,7 @@ export const AiChatStudio: React.FC<Props> = ({
             <button
               type="button"
               onClick={() => setPlusMenuOpen((v) => !v)}
-              title="คำสั่งพิเศษ: เขียนข่าว / ประเมิน Full Prompt รูป-วิดีโอ"
+              title="คำสั่งทีม Agent: ทำครบชุด Content + รูป + VDO"
               className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
                 isDark
                   ? 'text-zinc-300 hover:bg-white/10 hover:text-white'
@@ -805,7 +1298,7 @@ export const AiChatStudio: React.FC<Props> = ({
 
             {plusMenuOpen && (
               <div
-                className={`absolute left-0 bottom-12 z-40 w-72 rounded-2xl p-2 shadow-2xl border ${
+                className={`absolute left-0 bottom-12 z-40 w-80 rounded-2xl p-2 shadow-2xl border ${
                   isDark
                     ? 'bg-[#1f1f24] border-white/15 text-zinc-100'
                     : 'bg-white border-zinc-200 text-zinc-800'
@@ -816,17 +1309,25 @@ export const AiChatStudio: React.FC<Props> = ({
                     isDark ? 'text-zinc-400' : 'text-zinc-500'
                   }`}
                 >
-                  สั่ง AI ทำงานต่อทันที
+                  สั่งทีม AI Agent ทำงานร่วมกัน
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleDraftNewsFromChat('news')}
+                  onClick={() => handleRunUnifiedAgentTeam()}
+                  className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-extrabold bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer mb-1"
+                >
+                  <Layers className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>ทีม Agent ทำครบชุด (Content + รูป + VDO)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDraftNewsFromChat('article')}
                   className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
                     isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
                   }`}
                 >
                   <Newspaper className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span>ให้ AI เขียนข่าว / บทความลงเว็บ</span>
+                  <span>เขียนข่าว / บทความลงเว็บ</span>
                 </button>
                 <button
                   type="button"
@@ -836,7 +1337,7 @@ export const AiChatStudio: React.FC<Props> = ({
                   }`}
                 >
                   <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>ประเมิน & เขียน Full Prompt รูปภาพ</span>
+                  <span>ประเมิน & สร้างรูปภาพใส่ Content</span>
                 </button>
                 <button
                   type="button"
@@ -846,7 +1347,7 @@ export const AiChatStudio: React.FC<Props> = ({
                   }`}
                 >
                   <Film className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span>ประเมิน & เขียน Full Prompt วิดีโอ</span>
+                  <span>ประเมิน & สร้างวิดีโอใส่ Content</span>
                 </button>
                 <div
                   className={`my-1 border-t ${
@@ -884,7 +1385,7 @@ export const AiChatStudio: React.FC<Props> = ({
                 sendMessageText(input);
               }
             }}
-            placeholder="ช่วยเขียน Content เกี่ยวกับการศึกษาไทยให้หน่อย..."
+            placeholder="พิมพ์เรื่องที่ต้องการคุย หรือพิมพ์หัวข้อแล้วกด “ทีม Agent ทำครบชุด” ได้เลย..."
             className={`flex-1 max-h-44 bg-transparent py-2 px-1 text-[15px] sm:text-base leading-relaxed focus:outline-none resize-none ${
               isDark
                 ? 'text-zinc-100 placeholder:text-zinc-400'
@@ -892,7 +1393,7 @@ export const AiChatStudio: React.FC<Props> = ({
             }`}
           />
 
-          {/* Inline Provider Selector ('Auto ▾') + Circular '↑' Send Button */}
+          {/* Inline Provider Selector + Circular '↑' Send Button */}
           <div className="flex items-center gap-1.5 shrink-0 pb-0.5">
             <div className="relative">
               <select
@@ -931,25 +1432,25 @@ export const AiChatStudio: React.FC<Props> = ({
               />
             </div>
 
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            title="ส่งข้อความ (Enter)"
-            className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer shrink-0 ${
-              isDark
-                ? 'bg-white text-zinc-950 hover:bg-zinc-200 disabled:bg-zinc-700 disabled:text-zinc-500'
-                : 'bg-zinc-900 text-white hover:bg-zinc-700 disabled:bg-zinc-200 disabled:text-zinc-400'
-            }`}
-          >
-            {sending ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <ArrowUp className="w-5 h-5 stroke-[2.5]" />
-            )}
-          </button>
+            <button
+              type="submit"
+              disabled={sending || !input.trim()}
+              title="ส่งข้อความแชท (Enter)"
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer shrink-0 ${
+                isDark
+                  ? 'bg-white text-zinc-950 hover:bg-zinc-200 disabled:bg-zinc-700 disabled:text-zinc-500'
+                  : 'bg-zinc-900 text-white hover:bg-zinc-700 disabled:bg-zinc-200 disabled:text-zinc-400'
+              }`}
+            >
+              {sending ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+              )}
+            </button>
+          </div>
         </div>
-      </div>
-    </form>
+      </form>
     </div>
   );
 
@@ -972,7 +1473,7 @@ export const AiChatStudio: React.FC<Props> = ({
       )}
 
       {/* =================================================================== */}
-      {/* LEFT COLLAPSIBLE CHAT HISTORY & STUDIO SIDEBAR (Qwen Style)         */}
+      {/* LEFT COLLAPSIBLE CHAT HISTORY & STUDIO SIDEBAR                      */}
       {/* =================================================================== */}
       <aside
         className={`${
@@ -986,7 +1487,6 @@ export const AiChatStudio: React.FC<Props> = ({
         }`}
       >
         <div className="flex flex-col flex-1 min-h-0 w-[268px]">
-          {/* Sidebar Brand + Collapse [|<] Button */}
           <div className="h-14 px-3.5 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div
@@ -999,7 +1499,7 @@ export const AiChatStudio: React.FC<Props> = ({
                 <Sparkles className="w-4 h-4" />
               </div>
               <span className="font-extrabold text-base tracking-tight truncate">
-                คมคิด AI
+                คมคิด AI Studio
               </span>
             </div>
 
@@ -1017,7 +1517,6 @@ export const AiChatStudio: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Primary Actions: New Chat, Search Chats, Quick Studio Links */}
           <div className="px-2.5 space-y-1 shrink-0">
             <button
               type="button"
@@ -1066,7 +1565,6 @@ export const AiChatStudio: React.FC<Props> = ({
               )}
             </div>
 
-            {/* Studio Quick Navigation (Works seamlessly even in 100% Fullscreen) */}
             {onNavigateMenu && (
               <div className="pt-1 space-y-0.5">
                 <button
@@ -1080,7 +1578,7 @@ export const AiChatStudio: React.FC<Props> = ({
                 >
                   <span className="flex items-center gap-2.5">
                     <ImageIcon className="w-4 h-4 text-amber-400 shrink-0" />
-                    สร้างรูปภาพ & วิดีโอ AI
+                    คลัง & สตูดิโอรูป/วิดีโอ ({mediaAssets.length})
                   </span>
                   <ArrowRight className="w-3.5 h-3.5 opacity-50" />
                 </button>
@@ -1103,7 +1601,6 @@ export const AiChatStudio: React.FC<Props> = ({
             )}
           </div>
 
-          {/* All Chats Scrollable History */}
           <div className="mt-4 px-2.5 flex-1 flex flex-col min-h-0">
             <div
               className={`px-2.5 pb-1.5 text-[11px] font-extrabold uppercase tracking-wider flex items-center justify-between ${
@@ -1164,7 +1661,6 @@ export const AiChatStudio: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Sidebar Bottom User / Key Status Bar */}
         <div
           className={`w-[268px] p-3 border-t flex items-center justify-between gap-2 shrink-0 ${
             isDark ? 'border-white/10' : 'border-zinc-200'
@@ -1215,12 +1711,11 @@ export const AiChatStudio: React.FC<Props> = ({
       </aside>
 
       {/* =================================================================== */}
-      {/* MAIN FULL-SCREEN CHAT CANVAS                                        */}
+      {/* MAIN FULL-SCREEN CHAT & MULTI-AGENT CONTENT CANVAS                  */}
       {/* =================================================================== */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Minimal Qwen-Style Top Bar */}
+        {/* Top Bar */}
         <header className="h-14 px-3 sm:px-5 flex items-center justify-between gap-2 shrink-0">
-          {/* Top-Left: Reopen Sidebar [>|] + Model/Provider Selector Dropdown */}
           <div className="flex items-center gap-1.5 min-w-0">
             {!chatSidebarOpen && (
               <>
@@ -1251,7 +1746,6 @@ export const AiChatStudio: React.FC<Props> = ({
               </>
             )}
 
-            {/* Qwen-Style Top-Left Model & Provider Dropdown */}
             <div ref={modelDropdownRef} className="relative">
               <button
                 type="button"
@@ -1381,7 +1875,6 @@ export const AiChatStudio: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Top-Right Controls: API Key Badge, Theme Switch, Tab Menu Toggle, Fullscreen Toggle */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {!anyApiKeyConfigured && settings && (
               <button
@@ -1394,7 +1887,6 @@ export const AiChatStudio: React.FC<Props> = ({
               </button>
             )}
 
-            {/* Dark / Light Theme Switch */}
             <button
               type="button"
               onClick={toggleTheme}
@@ -1418,7 +1910,6 @@ export const AiChatStudio: React.FC<Props> = ({
               )}
             </button>
 
-            {/* Close / Open Admin Left Tab Menu (Desktop, when not in fixed Fullscreen) */}
             {!isFullScreen && onToggleTabMenu && (
               <button
                 type="button"
@@ -1448,7 +1939,6 @@ export const AiChatStudio: React.FC<Props> = ({
               </button>
             )}
 
-            {/* 100% Fullscreen Toggle */}
             {onToggleFullScreen && (
               <button
                 type="button"
@@ -1484,7 +1974,7 @@ export const AiChatStudio: React.FC<Props> = ({
           </div>
         </header>
 
-        {/* Floating Alerts (Error / Toast) */}
+        {/* Alerts */}
         {(errorBanner || successBanner) && (
           <div className="px-4 sm:px-6 pt-1 shrink-0 max-w-3xl w-full mx-auto space-y-2">
             {errorBanner && (
@@ -1536,30 +2026,86 @@ export const AiChatStudio: React.FC<Props> = ({
         )}
 
         {/* ================================================================= */}
-        {/* BODY: CENTERED HERO EMPTY STATE vs ACTIVE CONVERSATION + STUDIO   */}
+        {/* BODY: HERO EMPTY STATE vs CONVERSATION + COLLABORATIVE WORKBENCH  */}
         {/* ================================================================= */}
         {isHeroEmpty ? (
           <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 pb-10 overflow-y-auto">
-            <div className="w-full max-w-3xl space-y-7">
-              <div className="text-center space-y-2">
+            <div className="w-full max-w-3xl space-y-6">
+              <div className="text-center space-y-1.5">
                 <h2
                   className={`text-2xl sm:text-3xl font-semibold tracking-tight ${
                     isDark ? 'text-zinc-100' : 'text-zinc-900'
                   }`}
                 >
-                  วันนี้ให้ AI ช่วยคิดหรือสร้างงานอะไรดีครับ?
+                  วันนี้ให้ทีม AI Agent ช่วยคิดหรือทำ Content อะไรดีครับ?
                 </h2>
+                <p
+                  className={`text-xs sm:text-sm ${
+                    isDark ? 'text-zinc-400' : 'text-zinc-500'
+                  }`}
+                >
+                  พิมพ์คุยปรึกษาก่อน หรือกดให้ทีม Agent เขียน Content พร้อมวาดรูปและสร้างวิดีโอใส่เข้าเนื้อหาให้ครบในคลิกเดียว
+                </p>
               </div>
 
-              {/* Centered Qwen-Style Pill Input Bar */}
               {renderComposerPill(true)}
 
-              {/* Quick 1-Click Studio Action Pills */}
+              {/* UNIFIED 1-CLICK MULTI-AGENT TEAM ORCHESTRATION BAR */}
+              <div
+                className={`rounded-2xl border p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 ${
+                  isDark
+                    ? 'bg-emerald-500/10 border-emerald-500/30'
+                    : 'bg-emerald-50/80 border-emerald-200'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm font-bold">
+                  <span
+                    className={`font-extrabold ${
+                      isDark ? 'text-emerald-300' : 'text-emerald-950'
+                    }`}
+                  >
+                    🤖 ทีม Agent ทำงานร่วมกัน:
+                  </span>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={teamIncludeImage}
+                      onChange={(e) => setTeamIncludeImage(e.target.checked)}
+                      className="h-4 w-4 accent-emerald-600"
+                    />
+                    <span>วาดรูปใส่ปก + เนื้อหา</span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={teamIncludeVideo}
+                      onChange={(e) => {
+                        setTeamVideoTouched(true);
+                        setTeamIncludeVideo(e.target.checked);
+                      }}
+                      className="h-4 w-4 accent-indigo-600"
+                    />
+                    <span>สร้างวิดีโอ VDO ใส่เนื้อหา</span>
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={teamRunning}
+                  onClick={() => handleRunUnifiedAgentTeam()}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2.5 text-xs sm:text-sm font-extrabold text-white hover:bg-emerald-700 shadow-md transition cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  <Layers className="w-4 h-4 text-amber-300" />
+                  สั่งทีม Agent ทำครบชุด (Content + รูป + VDO)
+                </button>
+              </div>
+
+              {/* Individual Quick Pills */}
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
                   disabled={draftingFormat !== null}
-                  onClick={() => handleDraftNewsFromChat('news')}
+                  onClick={() => handleDraftNewsFromChat('article')}
                   className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs sm:text-sm font-bold border transition cursor-pointer ${
                     isDark
                       ? 'border-white/12 bg-white/5 text-zinc-200 hover:bg-white/10'
@@ -1567,7 +2113,7 @@ export const AiChatStudio: React.FC<Props> = ({
                   }`}
                 >
                   <Newspaper className="w-4 h-4 text-emerald-500" />
-                  เขียนข่าว / คอนเทนต์ลงเว็บ
+                  เขียนเฉพาะข่าว / บทความ
                 </button>
                 <button
                   type="button"
@@ -1580,7 +2126,7 @@ export const AiChatStudio: React.FC<Props> = ({
                   }`}
                 >
                   <ImageIcon className="w-4 h-4 text-amber-400" />
-                  ประเมิน & เขียน Full Prompt รูปภาพ
+                  ประเมิน & สร้างรูปภาพ
                 </button>
                 <button
                   type="button"
@@ -1593,11 +2139,10 @@ export const AiChatStudio: React.FC<Props> = ({
                   }`}
                 >
                   <Film className="w-4 h-4 text-indigo-400" />
-                  ประเมิน & เขียน Full Prompt วิดีโอ
+                  ประเมิน & สร้างวิดีโอ
                 </button>
               </div>
 
-              {/* Starter Prompts */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                 {QUICK_STARTERS.map((q, idx) => (
                   <button
@@ -1618,7 +2163,7 @@ export const AiChatStudio: React.FC<Props> = ({
           </div>
         ) : (
           <>
-            {/* Active Conversation + Workbench Scroll Area */}
+            {/* Active Conversation + Unified Multi-Agent Workbench */}
             <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5">
               <div className="max-w-3xl w-full mx-auto space-y-6">
                 {messages.map((m) => {
@@ -1686,8 +2231,30 @@ export const AiChatStudio: React.FC<Props> = ({
                             {renderRichMarkdown(m.content)}
                           </div>
 
-                          {/* 1-Click Handoff Action Pills beneath every AI turn */}
+                          {/* 1-Click Collaborative & Individual Handoff Pills beneath every AI turn */}
                           <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleRunUnifiedAgentTeam(m.content)}
+                              disabled={teamRunning}
+                              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-extrabold text-white hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50 shadow-xs"
+                            >
+                              <Layers className="w-3.5 h-3.5 text-amber-300" />
+                              ให้ทีม Agent ทำครบชุด (เขียน Content + รูป + VDO)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDraftNewsFromChat('article', m.content)}
+                              disabled={draftingFormat !== null}
+                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold border transition cursor-pointer disabled:opacity-50 ${
+                                isDark
+                                  ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
+                                  : 'border-emerald-300 bg-emerald-50 text-emerald-950 hover:bg-emerald-100'
+                              }`}
+                            >
+                              <Newspaper className="w-3.5 h-3.5 text-emerald-500" />
+                              นำไปเขียนข่าวลงเว็บ
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleEvaluatePrompt('image', m.content)}
@@ -1699,7 +2266,7 @@ export const AiChatStudio: React.FC<Props> = ({
                               }`}
                             >
                               <ImageIcon className="w-3.5 h-3.5 text-amber-500" />
-                              เขียน Full Prompt รูปภาพ
+                              สร้างรูปภาพ
                             </button>
                             <button
                               type="button"
@@ -1712,20 +2279,7 @@ export const AiChatStudio: React.FC<Props> = ({
                               }`}
                             >
                               <Film className="w-3.5 h-3.5 text-indigo-500" />
-                              เขียน Full Prompt วิดีโอ
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDraftNewsFromChat('news', m.content)}
-                              disabled={draftingFormat !== null}
-                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold border transition cursor-pointer disabled:opacity-50 ${
-                                isDark
-                                  ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
-                                  : 'border-emerald-300 bg-emerald-50 text-emerald-950 hover:bg-emerald-100'
-                              }`}
-                            >
-                              <Newspaper className="w-3.5 h-3.5 text-emerald-500" />
-                              นำไปเขียนข่าวลงเว็บ
+                              สร้างวิดีโอ
                             </button>
                           </div>
                         </div>
@@ -1748,9 +2302,67 @@ export const AiChatStudio: React.FC<Props> = ({
                 )}
 
                 {/* =========================================================== */}
-                {/* INLINE WORKBENCH CARDS (PROMPT EVAL / RECHECK / NEWS DRAFT) */}
+                {/* UNIFIED MULTI-AGENT WORKBENCH                               */}
                 {/* =========================================================== */}
                 <div ref={actionPanelRef} className="space-y-5">
+                  {/* 0) LIVE MULTI-AGENT TEAM PROGRESS CARD */}
+                  {teamSteps.length > 0 && (
+                    <div className="rounded-3xl border-2 border-emerald-500 bg-white text-slate-900 p-5 shadow-lg space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Layers className="w-5 h-5 text-emerald-600" />
+                          <h3 className="text-base sm:text-lg font-extrabold text-[#0d2546]">
+                            สถานะการทำงานร่วมกันของทีม AI Agent
+                          </h3>
+                        </div>
+                        {!teamRunning && (
+                          <button
+                            type="button"
+                            onClick={() => setTeamSteps([])}
+                            className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                          >
+                            ซ่อนสถานะ
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        {teamSteps.map((st) => (
+                          <div
+                            key={st.id}
+                            className={`rounded-2xl border px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs sm:text-sm ${
+                              st.status === 'done'
+                                ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950'
+                                : st.status === 'running'
+                                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                                : st.status === 'error'
+                                ? 'border-rose-200 bg-rose-50 text-rose-900'
+                                : 'border-slate-200 bg-slate-50 text-slate-600'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="font-extrabold flex items-center gap-2">
+                                {st.status === 'running' && (
+                                  <RefreshCw className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                                )}
+                                {st.status === 'done' && (
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                )}
+                                {st.status === 'error' && (
+                                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                                )}
+                                <span>{st.label}</span>
+                              </div>
+                              {st.detail && (
+                                <div className="text-xs opacity-85 pl-6">{st.detail}</div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* 1) AI PROMPT EVALUATION & DISPATCH TO IMAGE/VDO AGENT */}
                   {evaluatedPrompt && (
                     <div className="rounded-3xl border-2 border-amber-400 bg-white text-slate-900 p-5 sm:p-6 shadow-xl space-y-5">
@@ -1762,8 +2374,8 @@ export const AiChatStudio: React.FC<Props> = ({
                           </span>
                           <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
                             {evaluatedPrompt.target === 'image'
-                              ? '🎨 เตรียมส่ง Full Prompt ให้ Agent สร้างรูปภาพจริง'
-                              : '🎬 เตรียมส่ง Full Prompt ให้ Agent สร้างวิดีโอจริง (Google Veo / Gemini Video)'}
+                              ? '🎨 ส่ง Full Prompt ให้ Agent วาดรูปภาพ (และใส่เข้า Content ได้ทันที)'
+                              : '🎬 ส่ง Full Prompt ให้ Agent สร้างวิดีโอ (และใส่เข้า Content ได้ทันที)'}
                           </h3>
                         </div>
                         <button
@@ -1805,7 +2417,7 @@ export const AiChatStudio: React.FC<Props> = ({
                                 { id: '9:16', label: 'แนวตั้ง 9:16 (คลิปสั้น มือถือ)' },
                               ] as const)
                             : ([
-                                { id: '16:9', label: 'แนวนอน 16:9 (ภาพปกข่าวบนเว็บ)' },
+                                { id: '16:9', label: 'แนวนอน 16:9 (ภาพปก/ประกอบบนเว็บ)' },
                                 { id: '1:1', label: 'จัตุรัส 1:1 (Facebook / LINE)' },
                                 { id: '9:16', label: 'แนวตั้ง 9:16 (จอมือถือ)' },
                               ] as const)
@@ -1828,7 +2440,7 @@ export const AiChatStudio: React.FC<Props> = ({
 
                       <div className="space-y-2">
                         <label className="block text-sm font-extrabold text-[#0d2546]">
-                          Full Prompt สำหรับส่งให้ Agent (ตรวจสอบหรือแก้ไขได้):
+                          Full Prompt สำหรับส่งให้ Agent (แก้ไขได้):
                         </label>
                         <textarea
                           rows={4}
@@ -1856,8 +2468,12 @@ export const AiChatStudio: React.FC<Props> = ({
                             <>
                               <Sparkles className="w-5 h-5" />
                               {evaluatedPrompt.target === 'image'
-                                ? 'ส่งให้ Agent สร้างรูปภาพทันที (ดู Preview ก่อน)'
-                                : 'ส่งให้ Agent สร้างวิดีโอทันที (ดู Preview ก่อน)'}
+                                ? draftPost
+                                  ? 'สร้างรูปภาพแล้วใส่เข้า Content ด้านล่างทันที'
+                                  : 'ส่งให้ Agent สร้างรูปภาพทันที'
+                                : draftPost
+                                ? 'สร้างวิดีโอแล้วใส่เข้า Content ด้านล่างทันที'
+                                : 'ส่งให้ Agent สร้างวิดีโอทันที'}
                             </>
                           )}
                         </button>
@@ -1876,7 +2492,7 @@ export const AiChatStudio: React.FC<Props> = ({
                           }
                           className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-[#0d2546] bg-white px-4 py-3 text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 transition cursor-pointer"
                         >
-                          เปิดในหน้า “สร้างรูปภาพ & วิดีโอ AI”
+                          เปิดในสตูดิโอรูป/วิดีโอเต็ม
                           <ArrowRight className="w-4 h-4" />
                         </button>
                       </div>
@@ -1885,21 +2501,23 @@ export const AiChatStudio: React.FC<Props> = ({
 
                   {/* 2) RECHECK & PREVIEW BOX FOR GENERATED IMAGE OR VIDEO */}
                   {previewAsset && (
-                    <div className="rounded-3xl border-4 border-emerald-500 bg-white text-slate-900 p-5 sm:p-6 shadow-xl space-y-5">
+                    <div className="rounded-2xl border border-slate-200/90 bg-white text-slate-900 p-5 sm:p-6 shadow-md space-y-5">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-1 text-xs font-extrabold text-emerald-900">
-                            <Eye className="w-4 h-4" /> ระบบตรวจสอบผลงานก่อนนำไปใช้ (Recheck & Preview)
+                            <Eye className="w-4 h-4" /> ตรวจดูตัวอย่างผลงานก่อนนำไปใส่ Content
                           </span>
                           <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546] mt-1">
-                            ผลงาน{previewAsset.mediaType === 'video' ? 'วิดีโอ AI' : 'รูปภาพ AI'}เสร็จแล้ว — ชอบผลงานนี้ไหมครับ?
+                            ผลงาน{previewAsset.mediaType === 'video' ? 'วิดีโอ AI' : 'รูปภาพ AI'}เสร็จแล้ว — กดส่งเข้า Content ได้เลย!
                           </h3>
                         </div>
-                        {previewAsset.reviewStatus === 'approved' && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-1.5 text-xs sm:text-sm font-extrabold text-white">
-                            <CheckCircle2 className="w-4 h-4" /> อนุมัติเก็บไว้แล้ว
-                          </span>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAsset(null)}
+                          className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                        >
+                          ซ่อนกรอบนี้
+                        </button>
                       </div>
 
                       <div className="rounded-2xl bg-slate-950 p-3 flex items-center justify-center overflow-hidden">
@@ -1908,87 +2526,122 @@ export const AiChatStudio: React.FC<Props> = ({
                             src={previewAsset.fileUrl}
                             controls
                             autoPlay
-                            className="max-h-[440px] w-auto rounded-xl"
+                            className="max-h-[420px] w-auto rounded-xl"
                           />
                         ) : (
                           <img
                             src={previewAsset.fileUrl}
                             alt={previewAsset.thaiSummary || 'AI Generated'}
-                            className="max-h-[440px] w-auto object-contain rounded-xl"
+                            className="max-h-[420px] w-auto object-contain rounded-xl"
                           />
                         )}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          disabled={reviewBusy}
-                          onClick={handleApproveKeepAsset}
-                          className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="w-5 h-5" />
-                          ชอบ! เก็บไว้ในคลัง
-                        </button>
+                        {draftPost ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={reviewBusy}
+                              onClick={() => handleInsertAssetIntoDraft(previewAsset, 'both')}
+                              className="flex items-center justify-center gap-2 rounded-2xl bg-[#0d2546] px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-[#163a6b] cursor-pointer"
+                            >
+                              <Newspaper className="w-5 h-5 text-amber-300" />
+                              {previewAsset.mediaType === 'video'
+                                ? 'แนบ & แทรกวิดีโอเข้า Content ด้านล่าง'
+                                : 'ตั้งเป็นปก & แทรกรูปเข้า Content ด้านล่าง'}
+                            </button>
 
-                        <button
-                          type="button"
-                          disabled={reviewBusy}
-                          onClick={handleUseAssetInNewPost}
-                          className="flex items-center justify-center gap-2 rounded-2xl bg-[#0d2546] px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-[#163a6b] cursor-pointer disabled:opacity-50"
-                        >
-                          <Newspaper className="w-5 h-5 text-amber-300" />
-                          {draftPost ? 'แนบใส่ร่างข่าวด้านล่าง' : 'ชอบ! นำไปลงข่าวใหม่'}
-                        </button>
+                            <button
+                              type="button"
+                              disabled={reviewBusy}
+                              onClick={handleApproveKeepAsset}
+                              className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-5 h-5" />
+                              อนุมัติเก็บไว้ในคลัง AI
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={writingAroundAsset}
+                              onClick={() => handleWriteContentAroundAsset(previewAsset)}
+                              className="flex items-center justify-center gap-2 rounded-2xl bg-[#0d2546] px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-[#163a6b] cursor-pointer disabled:opacity-50"
+                            >
+                              {writingAroundAsset ? (
+                                <>
+                                  <RefreshCw className="w-5 h-5 animate-spin text-amber-300" />
+                                  Agent กำลังเขียน Content พร้อมใส่สื่อนี้...
+                                </>
+                              ) : (
+                                <>
+                                  <Newspaper className="w-5 h-5 text-amber-300" />
+                                  ให้ Agent เขียน Content พร้อมใส่รูป/วิดีโอนี้เลย!
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={reviewBusy}
+                              onClick={handleApproveKeepAsset}
+                              className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-5 h-5" />
+                              ชอบ! เก็บไว้ในคลัง
+                            </button>
+                          </>
+                        )}
 
                         <button
                           type="button"
                           disabled={reviewBusy || agentGenerating}
                           onClick={() => {
-                            if (!evaluatedPrompt) {
-                              setEvaluatedPrompt({
-                                target: previewAsset.mediaType === 'video' ? 'video' : 'image',
-                                assessmentThai:
-                                  'ปรับแก้รายละเอียด Full Prompt ด้านล่างแล้วกดสั่งสร้างใหม่ได้เลยครับ',
-                                visualSummaryThai: previewAsset.thaiSummary || '',
-                                fullPrompt: previewAsset.prompt,
-                                recommendedAspectRatio:
-                                  (previewAsset.aspectRatio as any) || '16:9',
-                                suggestedPostTitle: '',
-                                engineUsed: previewAsset.model,
-                              });
-                              setEditableFullPrompt(previewAsset.prompt);
-                            }
-                            showToast('ปรับแก้ Full Prompt ด้านบนแล้วกดสร้างใหม่ได้เลยครับ');
+                            setEvaluatedPrompt({
+                              target: previewAsset.mediaType === 'video' ? 'video' : 'image',
+                              assessmentThai:
+                                'ปรับแก้รายละเอียด Full Prompt ด้านบนแล้วกดสั่งสร้างใหม่ได้เลยครับ',
+                              visualSummaryThai: previewAsset.thaiSummary || '',
+                              fullPrompt: previewAsset.prompt,
+                              recommendedAspectRatio:
+                                (previewAsset.aspectRatio as any) || '16:9',
+                              suggestedPostTitle: '',
+                              engineUsed: previewAsset.model,
+                            });
+                            setEditableFullPrompt(previewAsset.prompt);
+                            showToast('เปิด Full Prompt ให้แก้ไขด้านบนแล้วครับ');
                           }}
-                          className="flex items-center justify-center gap-2 rounded-2xl border-2 border-amber-400 bg-amber-50 px-4 py-3.5 text-sm sm:text-base font-extrabold text-amber-950 hover:bg-amber-100 cursor-pointer"
+                          className="flex items-center justify-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-950 hover:bg-amber-100 cursor-pointer"
                         >
-                          <RefreshCw className="w-5 h-5" />
-                          ปรับแก้แล้วสร้างใหม่
+                          <RefreshCw className="w-4 h-4" />
+                          ปรับแก้ Prompt แล้วสร้างใหม่
                         </button>
 
                         <button
                           type="button"
                           disabled={reviewBusy}
                           onClick={handleRejectDeleteAsset}
-                          className="flex items-center justify-center gap-2 rounded-2xl border-2 border-rose-300 bg-rose-50 px-4 py-3.5 text-sm sm:text-base font-extrabold text-rose-700 hover:bg-rose-600 hover:text-white transition cursor-pointer disabled:opacity-50"
+                          className="flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 hover:bg-rose-600 hover:text-white transition cursor-pointer disabled:opacity-50"
                         >
-                          <Trash2 className="w-5 h-5" />
+                          <Trash2 className="w-4 h-4" />
                           ไม่ชอบ — ลบทิ้งทันที
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* 3) AI WRITTEN NEWS / ARTICLE / CONTENT RECHECK PREVIEW */}
+                  {/* 3) UNIFIED CONTENT + IMAGE + VIDEO STUDIO CARD */}
                   {draftPost && (
-                    <div className="rounded-3xl border-4 border-[#0d2546] bg-white text-slate-900 p-5 sm:p-6 shadow-xl space-y-5">
+                    <div className="rounded-2xl border border-slate-200/90 bg-white text-slate-900 p-5 sm:p-6 shadow-md space-y-5">
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
                         <div>
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3.5 py-1 text-xs font-extrabold text-amber-950">
-                            <Newspaper className="w-4 h-4" /> ตรวจทานข่าว / บทความที่ AI เขียนให้
+                            <Newspaper className="w-4 h-4" /> สตูดิโอประกอบร่าง Content + รูปภาพ + วิดีโอ (ในจุดเดียว)
                           </span>
                           <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546] mt-1">
-                            อ่านตรวจทานก่อนตัดสินใจ — แก้ไขได้ หรือกดลงหน้าเว็บได้ทันที!
+                            ตรวจดูเนื้อหา รูปปก รูปประกอบ และวิดีโอ — พร้อมกดลงหน้าเว็บได้ทันที!
                           </h3>
                         </div>
 
@@ -2017,35 +2670,199 @@ export const AiChatStudio: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 flex flex-col sm:flex-row items-center gap-4">
-                        <img
-                          src={draftCoverUrl}
-                          alt="Cover preview"
-                          className="w-full sm:w-44 h-28 object-cover rounded-xl border border-slate-200 shrink-0"
-                        />
-                        <div className="flex-1 space-y-2">
-                          <div className="text-sm font-extrabold text-[#0d2546]">
-                            รูปปกสำหรับข่าวนี้:
+                      {/* COLLABORATIVE MEDIA BAR RIGHT ON THE CONTENT DRAFT */}
+                      <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                          {/* Cover Image Preview */}
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={draftCoverUrl}
+                              alt="Cover preview"
+                              className="w-32 h-20 object-cover rounded-xl border border-slate-300 shrink-0 bg-[#0d2546]"
+                            />
+                            <div className="text-xs space-y-1">
+                              <div className="font-extrabold text-[#0d2546]">
+                                🖼️ รูปหน้าปก Content
+                              </div>
+                              <div className="text-slate-500">
+                                แสดงเป็นภาพปกบนหน้าแรกของเว็บ
+                              </div>
+                            </div>
                           </div>
+
+                          {/* Attached Main Video Preview (if any) */}
+                          <div className="flex items-center gap-3">
+                            {draftVideoUrl ? (
+                              <>
+                                <video
+                                  src={draftVideoUrl}
+                                  controls
+                                  playsInline
+                                  className="w-36 h-20 object-cover rounded-xl border border-indigo-300 bg-black shrink-0"
+                                />
+                                <div className="text-xs space-y-1">
+                                  <div className="font-extrabold text-indigo-950">
+                                    🎬 แนบวิดีโอ AI แล้ว!
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDraftVideoUrl('')}
+                                    className="text-rose-600 font-bold hover:underline cursor-pointer"
+                                  >
+                                    เอาวิดีโอหลักออก
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-xs text-slate-500 bg-white border border-dashed border-slate-300 rounded-xl px-3.5 py-3 w-full">
+                                ยังไม่มีวิดีโอหลัก — กดปุ่ม <strong>“สร้างวิดีโอใส่ Content นี้”</strong> หรือเลือกจากคลัง AI ด้านล่างได้เลยครับ
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 1-CLICK AGENT COLLABORATION BUTTONS FOR THIS CONTENT */}
+                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200">
                           <button
                             type="button"
                             onClick={handleGenerateCoverForDraft}
                             disabled={generatingDraftCover}
-                            className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-amber-300 cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-amber-300 cursor-pointer disabled:opacity-50"
                           >
                             {generatingDraftCover ? (
                               <>
                                 <RefreshCw className="w-4 h-4 animate-spin" />
-                                Agent กำลังวาดรูปปกข่าวให้...
+                                กำลังวาดรูปปก...
                               </>
                             ) : (
                               <>
                                 <ImageIcon className="w-4 h-4" />
-                                สั่ง Agent สร้างรูปปกข่าวด้วย AI
+                                สั่ง Agent วาดรูปปก
                               </>
                             )}
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={handleGenerateInlineImageForDraft}
+                            disabled={generatingDraftInlineImg}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
+                          >
+                            {generatingDraftInlineImg ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                กำลังวาดรูปแทรกเนื้อหา...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4 text-amber-200" />
+                                สั่ง Agent วาดรูปแทรกในเนื้อหา
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleGenerateVideoForDraft}
+                            disabled={generatingDraftVideo}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-indigo-700 cursor-pointer disabled:opacity-50"
+                          >
+                            {generatingDraftVideo ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                กำลังสร้างวิดีโอใส่เนื้อหา...
+                              </>
+                            ) : (
+                              <>
+                                <Film className="w-4 h-4" />
+                                สั่ง Agent สร้างวิดีโอใส่ Content นี้
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowDraftMediaTray((v) => !v)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#0d2546] bg-white px-3.5 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-100 cursor-pointer"
+                          >
+                            <FolderOpen className="w-4 h-4 text-amber-600" />
+                            เลือกจากคลังรูป & วิดีโอ AI ({mediaAssets.length})
+                          </button>
                         </div>
+
+                        {/* SHARED AI MEDIA TRAY (1-Click drop any generated image or video into Content) */}
+                        {showDraftMediaTray && (
+                          <div className="pt-2 border-t border-slate-200 space-y-2">
+                            <div className="text-xs font-extrabold text-[#0d2546]">
+                              คลิกรูปภาพหรือวิดีโอที่ AI Agent เคยสร้างไว้ เพื่อนำไปใส่ใน Content นี้ทันที:
+                            </div>
+                            {mediaAssets.length === 0 ? (
+                              <div className="text-xs text-slate-500 py-3">
+                                ยังไม่มีรูปภาพหรือวิดีโอในคลัง กดปุ่มสั่ง Agent สร้างด้านบนได้เลยครับ
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                                {mediaAssets.slice(0, 12).map((item) => (
+                                  <div
+                                    key={item.id}
+                                    className="rounded-xl border border-slate-200 bg-white p-2 space-y-1.5"
+                                  >
+                                    <div className="relative aspect-video rounded-lg bg-slate-900 overflow-hidden">
+                                      {item.mediaType === 'video' ? (
+                                        <video
+                                          src={item.fileUrl}
+                                          muted
+                                          playsInline
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : (
+                                        <img
+                                          src={item.fileUrl}
+                                          alt={item.thaiSummary || 'AI Asset'}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      )}
+                                      <span
+                                        className={`absolute top-1 left-1 rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white ${
+                                          item.mediaType === 'video'
+                                            ? 'bg-indigo-600'
+                                            : 'bg-amber-600'
+                                        }`}
+                                      >
+                                        {item.mediaType === 'video' ? 'VDO' : 'รูป AI'}
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] font-bold text-slate-700 line-clamp-1">
+                                      {item.thaiSummary || item.prompt}
+                                    </div>
+                                    <div className="flex gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleInsertAssetIntoDraft(item, 'cover_or_main')
+                                        }
+                                        className="flex-1 rounded-lg bg-[#0d2546] px-2 py-1 text-[11px] font-extrabold text-white hover:bg-[#193d6e] cursor-pointer"
+                                      >
+                                        {item.mediaType === 'video'
+                                          ? 'ตั้งเป็น VDO หลัก'
+                                          : 'ตั้งเป็นปก'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleInsertAssetIntoDraft(item, 'inline_body')
+                                        }
+                                        className="flex-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
+                                      >
+                                        + แทรกในเนื้อหา
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {draftPreviewMode === 'edit' ? (
@@ -2103,7 +2920,7 @@ export const AiChatStudio: React.FC<Props> = ({
 
                           <div>
                             <label className="block text-sm font-extrabold text-slate-700 mb-1">
-                              เนื้อหาข่าว / บทความฉบับเต็ม
+                              เนื้อหาฉบับเต็ม (รองรับโค้ดรูป ![คำอธิบาย](url) และวิดีโอ ![วิดีโอ: คำอธิบาย](url))
                             </label>
                             <textarea
                               rows={10}
@@ -2185,7 +3002,7 @@ export const AiChatStudio: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Sticky Bottom Qwen-Style Pill Composer + Quick Action Chips */}
+            {/* Sticky Bottom Qwen-Style Pill Composer + Unified Team Quick Bar */}
             <div
               className={`px-4 sm:px-6 pb-4 pt-2 shrink-0 ${
                 isDark
@@ -2195,6 +3012,73 @@ export const AiChatStudio: React.FC<Props> = ({
             >
               <div className="max-w-3xl w-full mx-auto space-y-2">
                 <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleRunUnifiedAgentTeam()}
+                    disabled={teamRunning}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1 text-xs font-extrabold text-white hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {teamRunning ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Layers className="w-3.5 h-3.5 text-amber-300" />
+                    )}
+                    ทีม Agent ครบชุด (Content+รูป+VDO)
+                  </button>
+
+                  <label
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border cursor-pointer ${
+                      isDark
+                        ? 'border-white/12 bg-white/5 text-zinc-300'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={teamIncludeImage}
+                      onChange={(e) => setTeamIncludeImage(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-emerald-600"
+                    />
+                    รูป AI
+                  </label>
+
+                  <label
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold border cursor-pointer ${
+                      isDark
+                        ? 'border-white/12 bg-white/5 text-zinc-300'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={teamIncludeVideo}
+                      onChange={(e) => {
+                        setTeamVideoTouched(true);
+                        setTeamIncludeVideo(e.target.checked);
+                      }}
+                      className="h-3.5 w-3.5 accent-indigo-600"
+                    />
+                    VDO AI
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDraftNewsFromChat('article')}
+                    disabled={draftingFormat !== null}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold border transition cursor-pointer disabled:opacity-50 ${
+                      isDark
+                        ? 'border-white/12 bg-white/5 text-zinc-300 hover:bg-white/10'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100'
+                    }`}
+                  >
+                    {draftingFormat !== null ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Newspaper className="w-3.5 h-3.5 text-emerald-500" />
+                    )}
+                    เขียน Content
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => handleEvaluatePrompt('image')}
@@ -2210,7 +3094,7 @@ export const AiChatStudio: React.FC<Props> = ({
                     ) : (
                       <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
                     )}
-                    เขียน Full Prompt รูปภาพ
+                    สร้างรูป
                   </button>
 
                   <button
@@ -2228,25 +3112,7 @@ export const AiChatStudio: React.FC<Props> = ({
                     ) : (
                       <Film className="w-3.5 h-3.5 text-indigo-400" />
                     )}
-                    เขียน Full Prompt วิดีโอ
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDraftNewsFromChat('news')}
-                    disabled={draftingFormat !== null}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold border transition cursor-pointer disabled:opacity-50 ${
-                      isDark
-                        ? 'border-white/12 bg-white/5 text-zinc-300 hover:bg-white/10'
-                        : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100'
-                    }`}
-                  >
-                    {draftingFormat !== null ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Newspaper className="w-3.5 h-3.5 text-emerald-500" />
-                    )}
-                    เขียนข่าว / คอนเทนต์
+                    สร้าง VDO
                   </button>
                 </div>
 

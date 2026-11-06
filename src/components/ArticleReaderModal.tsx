@@ -33,6 +33,17 @@ function getYoutubeEmbedUrl(url?: string): string | null {
   return match ? `https://www.youtube.com/embed/${match[1]}` : null;
 }
 
+export function isVideoMediaUrl(url?: string, altText?: string): boolean {
+  if (!url) return false;
+  const clean = url.trim();
+  if (!clean) return false;
+  if (clean.startsWith('data:video/')) return true;
+  if (/\.(mp4|webm|mov)(\?|$|#)/i.test(clean)) return true;
+  if (clean.includes('/uploads/videos/') || clean.includes('/videos/')) return true;
+  if (altText && /^(video:|วิดีโอ:|คลิป:)/i.test(altText.trim())) return true;
+  return false;
+}
+
 export function renderRichMarkdown(md: string) {
   const lines = md.split('\n');
   const elements: React.ReactNode[] = [];
@@ -65,6 +76,57 @@ export function renderRichMarkdown(md: string) {
       elements.push(<div key={key++} className="h-2.5" />);
       continue;
     }
+
+    // Inline Markdown Media: ![คำอธิบายรูป](url) or ![วิดีโอ: คำอธิบาย](videoUrl)
+    const mediaMatch = line.match(/^!\[([^\]]*)\]\((.+)\)$/);
+    if (mediaMatch) {
+      const rawAlt = mediaMatch[1].trim();
+      const mediaUrl = mediaMatch[2].trim();
+      const isVid = isVideoMediaUrl(mediaUrl, rawAlt);
+      const cleanCaption = rawAlt.replace(/^(video:|วิดีโอ:|คลิป:)\s*/i, '').trim();
+
+      if (isVid) {
+        elements.push(
+          <figure
+            key={key++}
+            className="my-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 shadow-sm"
+          >
+            <video
+              src={mediaUrl}
+              controls
+              playsInline
+              className="w-full max-h-[500px] aspect-video mx-auto bg-black"
+            />
+            {cleanCaption && (
+              <figcaption className="bg-slate-900 px-4 py-2.5 text-center text-xs sm:text-sm font-medium text-amber-200">
+                🎬 {cleanCaption}
+              </figcaption>
+            )}
+          </figure>
+        );
+      } else {
+        elements.push(
+          <figure
+            key={key++}
+            className="my-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm"
+          >
+            <img
+              src={mediaUrl}
+              alt={cleanCaption || 'ภาพประกอบเนื้อหา'}
+              loading="lazy"
+              className="w-full max-h-[520px] object-cover"
+            />
+            {cleanCaption && (
+              <figcaption className="border-t border-slate-100 bg-white px-4 py-2.5 text-center text-xs sm:text-sm font-medium text-slate-600">
+                {cleanCaption}
+              </figcaption>
+            )}
+          </figure>
+        );
+      }
+      continue;
+    }
+
     if (line.startsWith('## ')) {
       elements.push(
         <h2
@@ -168,8 +230,7 @@ export const ArticleReaderModal: React.FC<Props> = ({
   const isDirectVideoFile = Boolean(
     post?.videoUrl &&
       !ytEmbed &&
-      (/\.(mp4|webm|mov)(\?|$)/i.test(post.videoUrl) ||
-        post.videoUrl.startsWith('/uploads/'))
+      (isVideoMediaUrl(post.videoUrl) || post.videoUrl.startsWith('/uploads/'))
   );
 
   const toggleSpeak = () => {
@@ -179,7 +240,10 @@ export const ArticleReaderModal: React.FC<Props> = ({
       setSpeaking(false);
       return;
     }
-    const cleanText = `${post.title}. ${post.subtitle || ''}. ${post.content.replace(/[#>*_`]/g, '')}`;
+    const cleanBody = post.content
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+      .replace(/[#>*_`]/g, '');
+    const cleanText = `${post.title}. ${post.subtitle || ''}. ${cleanBody}`;
     const utter = new SpeechSynthesisUtterance(cleanText);
     utter.lang = 'th-TH';
     utter.rate = 1.02;

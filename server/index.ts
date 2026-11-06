@@ -579,7 +579,12 @@ app.post('/api/posts', (req, res) => {
   const autoExcerpt =
     excerpt && String(excerpt).trim()
       ? String(excerpt).trim()
-      : String(content).replace(/[#>*_`]/g, '').slice(0, 180);
+      : String(content)
+          .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+          .replace(/[#>*_`]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 180);
 
   const result = db
     .prepare(
@@ -1076,7 +1081,16 @@ app.delete('/api/ai/media/:id', async (req, res) => {
 
 app.post('/api/ai/image/generate', async (req, res) => {
   try {
-    const { prompt, provider, model, aspectRatio, imageSize, workflowId, thaiSummary } = req.body;
+    const {
+      prompt,
+      provider,
+      model,
+      aspectRatio,
+      imageSize,
+      workflowId,
+      thaiSummary,
+      reviewStatus,
+    } = req.body;
     const asset = await generateRealImage({
       prompt: String(prompt || ''),
       provider,
@@ -1085,7 +1099,7 @@ app.post('/api/ai/image/generate', async (req, res) => {
       imageSize,
       workflowId: workflowId ? Number(workflowId) : null,
       thaiSummary: thaiSummary ? String(thaiSummary) : '',
-      reviewStatus: 'pending_review',
+      reviewStatus: reviewStatus === 'approved' ? 'approved' : 'pending_review',
     });
 
     // If linked to an AI workflow, attach the real generated image URL directly to visualOutput
@@ -1694,6 +1708,8 @@ app.post('/api/ai/workflows/:id/approve-publish', async (req, res) => {
       customTitle,
       customContent,
       coverImageChoice,
+      videoUrlChoice,
+      audioUrlChoice,
       isFeatured = false,
       reviewerNote = 'อนุมัติโดย Human Approval พร้อมเผยแพร่ขึ้นเว็บไซต์หลัก',
       channelsToPublish = ['Website / Blog'],
@@ -1706,8 +1722,14 @@ app.post('/api/ai/workflows/:id/approve-publish', async (req, res) => {
       wf.visualOutput?.generatedRealImageUrl ||
       wf.visualOutput?.generatedSvgDataUrl ||
       '/images/thumb-ai-edu.jpg';
-    const finalVideoUrl = wf.videoOutput?.generatedVideoUrl || '';
-    const finalAudioUrl = wf.audioOutput?.generatedAudioUrl || '';
+    const finalVideoUrl =
+      (typeof videoUrlChoice === 'string' && videoUrlChoice.trim()) ||
+      wf.videoOutput?.generatedVideoUrl ||
+      '';
+    const finalAudioUrl =
+      (typeof audioUrlChoice === 'string' && audioUrlChoice.trim()) ||
+      wf.audioOutput?.generatedAudioUrl ||
+      '';
 
     if (isFeatured) {
       db.prepare('UPDATE posts SET is_featured = 0').run();

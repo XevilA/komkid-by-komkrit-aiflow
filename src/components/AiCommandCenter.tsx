@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Sparkles,
   Bot,
@@ -29,9 +29,17 @@ import {
   KeyRound,
   Clapperboard,
   AlertTriangle,
+  Crown,
+  GraduationCap,
+  ShoppingBag,
+  Handshake,
+  PlusCircle,
+  ArrowRight,
+  FolderOpen,
 } from 'lucide-react';
 import {
   AiWorkflow,
+  AiMediaAsset,
   CATEGORIES,
   INPUT_SOURCES,
   CategoryId,
@@ -57,14 +65,45 @@ const QUICK_PROMPTS = [
   'ยกระดับภูเก็ตสู่ศูนย์กลางการเรียนรู้ตลอดชีวิต (Lifelong Learning Hub)',
 ];
 
+const REVENUE_ENGINES = [
+  {
+    id: '1. Content Creation | ผลิตสื่อสร้างผู้ติดตาม (Website & Social)',
+    short: '1. Content Creation',
+    sub: 'บทความ • วิดีโอ • Infographic',
+    defaultCategory: 'ai-tech' as CategoryId,
+    icon: <Clapperboard className="w-3.5 h-3.5 text-sky-600" />,
+  },
+  {
+    id: '2. School Sponsorship | ความร่วมมือโรงเรียนและพันธมิตร',
+    short: '2. School Sponsorship',
+    sub: 'ข้อเสนอความร่วมมือ • เครือข่ายโรงเรียน',
+    defaultCategory: 'education' as CategoryId,
+    icon: <Handshake className="w-3.5 h-3.5 text-emerald-600" />,
+  },
+  {
+    id: '3. Online Courses | คอร์สออนไลน์พัฒนาทักษะแห่งอนาคต',
+    short: '3. Online Courses',
+    sub: 'หลักสูตรคุณภาพ • เรียนได้ทุกที่',
+    defaultCategory: 'career' as CategoryId,
+    icon: <GraduationCap className="w-3.5 h-3.5 text-amber-600" />,
+  },
+  {
+    id: '4. Marketplace | สินค้าเพื่อการศึกษา & Affiliate',
+    short: '4. Marketplace',
+    sub: 'ร้านตัวเอง • Shopee • Lazada • LINE OA',
+    defaultCategory: 'innovation' as CategoryId,
+    icon: <ShoppingBag className="w-3.5 h-3.5 text-violet-600" />,
+  },
+];
+
 const AGENT_PIPELINE_STEPS = [
-  'CEO Agent กำลังวิเคราะห์โจทย์ & วางกลยุทธ์...',
-  '01 Research Agent กำลังค้นคว้าฐานความรู้ (Knowledge Base)...',
-  '02 Idea & Script Agent กำลังเขียนบทความและสคริปต์...',
-  '03 Content Design & 04 Visual Agent กำลังสร้างโครงสไลด์และ Infographic...',
-  '05 Video & 06 Audio Agent กำลังจัดทำ Storyboard และบทพากย์...',
-  '07 QA Agent กำลังตรวจ Fact Check / ภาษา / แบรนด์ / ความเสี่ยง...',
-  '08 Analytics & Omnichannel Agent กำลังเตรียมเนื้อหา 8 แพลตฟอร์ม...',
+  'AGENT CEO กำลังวางแผนกลยุทธ์ กำหนดเป้าหมาย และมอบหมายงาน...',
+  '01 Research Agent กำลังค้นคว้าข้อมูล อ้างอิงแหล่งข้อมูล และสร้าง Insight...',
+  '02 Idea & Script Agent กำลังระดมไอเดีย วางโครงเรื่อง และเขียนบทความ/สคริปต์...',
+  '03 Content Design & 04 Visual Agent กำลังออกแบบโครงสไลด์และสื่อภาพประกอบ...',
+  '05 Video & 06 Audio Agent กำลังจัดทำ Storyboard วิดีโอและบทพากย์เสียง...',
+  '07 Quality Check Agent กำลังตรวจสอบความถูกต้อง ความเหมาะสม และคุณภาพสื่อ...',
+  '08 Analytics & Improvement Agent กำลังวิเคราะห์ผลและเตรียมกระจายสื่อทุกช่องทาง...',
 ];
 
 const ALL_CHANNELS = [
@@ -79,14 +118,74 @@ const ALL_CHANNELS = [
 ];
 
 const AI_TOOLS_ECOSYSTEM = [
-  { group: 'RESEARCH', color: 'bg-sky-600', tools: ['Gemini Deep Research', 'ChatGPT', 'Perplexity', 'Google Scholar', 'Elicit', 'Notion AI'] },
-  { group: 'SCRIPT & IDEA', color: 'bg-emerald-600', tools: ['Gemini 4 Argon', 'Claude', 'ChatGPT', 'MindMeister', 'Miro'] },
-  { group: 'DESIGN', color: 'bg-lime-600', tools: ['Canva AI', 'Beautiful.ai', 'Gamma', 'Lucidchart', 'Figma'] },
-  { group: 'VISUAL', color: 'bg-blue-600', tools: ['Gemini Nano Banana 2.1', 'Midjourney', 'DALL-E 3', 'Leonardo AI', 'Canva AI'] },
-  { group: 'VIDEO', color: 'bg-purple-600', tools: ['Gemini Omni 1.1 Flash', 'HeyGen (AI Avatar)', 'Pictory AI', 'Runway', 'CapCut'] },
-  { group: 'AUDIO', color: 'bg-amber-600', tools: ['Gemini 3.8 Flash TTS', 'ElevenLabs', 'Play.ht', 'Adobe Podcast', 'Auphonic'] },
-  { group: 'ANALYTICS', color: 'bg-teal-600', tools: ['YouTube Analytics', 'Facebook Insights', 'Google Analytics', 'Looker Studio'] },
+  {
+    group: '01 RESEARCH',
+    accent: 'border-sky-200 bg-sky-50/50 text-sky-900',
+    tools: ['ChatGPT', 'Perplexity', 'Google Scholar', 'Elicit', 'Consensus', 'Notion AI'],
+  },
+  {
+    group: '02 SCRIPT & IDEA',
+    accent: 'border-emerald-200 bg-emerald-50/50 text-emerald-900',
+    tools: ['ChatGPT', 'Claude', 'Gemini', 'Notion AI', 'MindMeister'],
+  },
+  {
+    group: '03 DESIGN',
+    accent: 'border-lime-200 bg-lime-50/50 text-lime-900',
+    tools: ['Canva AI', 'Beautiful.ai', 'Gamma', 'Lucidchart'],
+  },
+  {
+    group: '04 VISUAL',
+    accent: 'border-blue-200 bg-blue-50/50 text-blue-900',
+    tools: ['Gemini Image', 'OpenAI Image', 'Midjourney', 'Leonardo AI', 'Canva AI'],
+  },
+  {
+    group: '05 VIDEO',
+    accent: 'border-purple-200 bg-purple-50/50 text-purple-900',
+    tools: ['Google Veo', 'Pictory AI', 'HeyGen (AI Avatar)', 'Runway', 'CapCut AI'],
+  },
+  {
+    group: '06 AUDIO',
+    accent: 'border-amber-200 bg-amber-50/50 text-amber-900',
+    tools: ['ElevenLabs', 'Gemini TTS', 'Play.ht', 'Adobe Podcast', 'Soundraw'],
+  },
+  {
+    group: '08 ANALYTICS',
+    accent: 'border-teal-200 bg-teal-50/50 text-teal-900',
+    tools: ['YouTube Analytics', 'Facebook Insights', 'Google Analytics', 'Sheets AI'],
+  },
 ];
+
+function embedMediaIntoMarkdown(
+  markdown: string,
+  mediaType: 'image' | 'video',
+  fileUrl: string,
+  caption: string
+): string {
+  const cleanUrl = fileUrl.trim();
+  if (!cleanUrl) return markdown;
+  if (markdown.includes(cleanUrl)) return markdown;
+  const safeCaption = (caption || (mediaType === 'video' ? 'วิดีโอประกอบเนื้อหา' : 'ภาพประกอบเนื้อหา'))
+    .replace(/[\[\]\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 95);
+  const tag =
+    mediaType === 'video'
+      ? `\n\n![วิดีโอ: ${safeCaption}](${cleanUrl})\n\n`
+      : `\n\n![${safeCaption}](${cleanUrl})\n\n`;
+
+  const trimmed = markdown.trim();
+  if (!trimmed) return tag.trim();
+
+  // Insert naturally after the first paragraph or heading block for clean editorial layout
+  const paragraphs = trimmed.split(/\n{2,}/);
+  if (paragraphs.length >= 2) {
+    const insertIdx = mediaType === 'image' ? 1 : Math.min(2, paragraphs.length);
+    const before = paragraphs.slice(0, insertIdx).join('\n\n');
+    const after = paragraphs.slice(insertIdx).join('\n\n');
+    return `${before}${tag}${after}`;
+  }
+  return `${trimmed}${tag}`;
+}
 
 export const AiCommandCenter: React.FC<Props> = ({
   workflows,
@@ -103,21 +202,41 @@ export const AiCommandCenter: React.FC<Props> = ({
   const [activeAgentTab, setActiveAgentTab] = useState<string>('overview');
   const [blueprintModalOpen, setBlueprintModalOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showAgentDetails, setShowAgentDetails] = useState(false);
+  const [showMediaVault, setShowMediaVault] = useState(false);
 
-  // Dispatch Form
+  // Shared AI Media Library (from Chat, Media Studio, and Workflows)
+  const [sharedAssets, setSharedAssets] = useState<AiMediaAsset[]>([]);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const notify = useCallback((msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => {
+      setToastMsg((prev) => (prev === msg ? null : prev));
+    }, 3400);
+  }, []);
+
+  const loadSharedMedia = useCallback(async () => {
+    try {
+      const list = await api.getMediaAssets();
+      setSharedAssets(list);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSharedMedia();
+  }, [loadSharedMedia]);
+
+  // Dispatch Form aligned with Blueprint 1 (Input Source) & Blueprint 2 (4 Revenue Engines)
   const [topic, setTopic] = useState('');
   const [inputSource, setInputSource] = useState(INPUT_SOURCES[0].label);
   const [category, setCategory] = useState<CategoryId>('ai-tech');
   const [targetAudience, setTargetAudience] = useState('ครู / บุคลากรทางการศึกษา');
-  const [businessPillar, setBusinessPillar] = useState(
-    '1. VIEWS | ยอดวิว (YouTube • TikTok • Facebook)'
-  );
-  const [flowMode, setFlowMode] = useState<'full_8agent' | 'core_3agent'>(
-    'full_8agent'
-  );
+  const [businessPillar, setBusinessPillar] = useState(REVENUE_ENGINES[0].id);
+  const [flowMode] = useState<'full_8agent' | 'core_3agent'>('full_8agent');
   const [llmProvider, setLlmProvider] = useState<LlmProviderId>('auto');
-  const [autoGenerateCoverImage, setAutoGenerateCoverImage] = useState(false);
+  const [autoGenerateCoverImage, setAutoGenerateCoverImage] = useState(true);
 
   // Execution & Real Media Generation states
   const [running, setRunning] = useState(false);
@@ -150,9 +269,12 @@ export const AiCommandCenter: React.FC<Props> = ({
       .catch(() => {});
   }, []);
 
-  // Human Approval & Inline Edit States
+  // Human Approval, Selected Media & Inline Edit States
   const [editTitle, setEditTitle] = useState('');
   const [editArticle, setEditArticle] = useState('');
+  const [selectedCoverUrl, setSelectedCoverUrl] = useState<string>('');
+  const [selectedVideoUrl, setSelectedVideoUrl] = useState<string>('');
+  const [selectedAudioUrl, setSelectedAudioUrl] = useState<string>('');
   const [isEditingScript, setIsEditingScript] = useState(false);
   const [checklist, setChecklist] = useState({
     isAccurate: true,
@@ -177,6 +299,13 @@ export const AiCommandCenter: React.FC<Props> = ({
       setSelectedId(activeWf.id);
       setEditTitle(activeWf.scriptOutput?.selectedTitle || activeWf.topic);
       setEditArticle(activeWf.scriptOutput?.fullArticleMarkdown || '');
+      setSelectedCoverUrl(
+        activeWf.visualOutput?.generatedRealImageUrl ||
+          activeWf.visualOutput?.generatedSvgDataUrl ||
+          ''
+      );
+      setSelectedVideoUrl(activeWf.videoOutput?.generatedVideoUrl || '');
+      setSelectedAudioUrl(activeWf.audioOutput?.generatedAudioUrl || '');
       setChecklist({
         isAccurate: activeWf.humanApproval?.isAccurate ?? true,
         isAppropriate: activeWf.humanApproval?.isAppropriate ?? true,
@@ -186,6 +315,45 @@ export const AiCommandCenter: React.FC<Props> = ({
       setIsEditingScript(false);
     }
   }, [activeWf?.id, activeWf?.updatedAt]);
+
+  const persistArticleAndMediaToWorkflow = async (
+    wf: AiWorkflow,
+    nextTitle: string,
+    nextArticle: string,
+    opts?: { coverUrl?: string; videoUrl?: string; audioUrl?: string }
+  ) => {
+    await api.updateWorkflow(wf.id, {
+      scriptOutput: {
+        ...wf.scriptOutput,
+        selectedTitle: nextTitle,
+        fullArticleMarkdown: nextArticle,
+      },
+      ...(opts?.coverUrl
+        ? {
+            visualOutput: {
+              ...wf.visualOutput,
+              generatedRealImageUrl: opts.coverUrl,
+            },
+          }
+        : {}),
+      ...(opts?.videoUrl
+        ? {
+            videoOutput: {
+              ...wf.videoOutput,
+              generatedVideoUrl: opts.videoUrl,
+            },
+          }
+        : {}),
+      ...(opts?.audioUrl
+        ? {
+            audioOutput: {
+              ...wf.audioOutput,
+              generatedAudioUrl: opts.audioUrl,
+            },
+          }
+        : {}),
+    });
+  };
 
   const handleDispatchCeo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,7 +365,7 @@ export const AiCommandCenter: React.FC<Props> = ({
       setStepIdx((prev) =>
         prev < AGENT_PIPELINE_STEPS.length - 1 ? prev + 1 : prev
       );
-    }, 450);
+    }, 500);
 
     try {
       const created = await api.runWorkflow({
@@ -210,10 +378,28 @@ export const AiCommandCenter: React.FC<Props> = ({
         provider: llmProvider,
         autoGenerateCoverImage,
       });
-      await onRefreshAll();
+
+      // If a real cover image was automatically created during workflow dispatch, embed it into content too
+      if (created.visualOutput?.generatedRealImageUrl) {
+        const mergedMd = embedMediaIntoMarkdown(
+          created.scriptOutput?.fullArticleMarkdown || '',
+          'image',
+          created.visualOutput.generatedRealImageUrl,
+          created.scriptOutput?.selectedTitle || created.topic
+        );
+        await persistArticleAndMediaToWorkflow(
+          created,
+          created.scriptOutput?.selectedTitle || created.topic,
+          mergedMd,
+          { coverUrl: created.visualOutput.generatedRealImageUrl }
+        );
+      }
+
+      await Promise.all([onRefreshAll(), loadSharedMedia()]);
       setSelectedId(created.id);
       setActiveAgentTab('overview');
       setTopic('');
+      notify('AGENT CEO และทีม 01–08 สร้างแคมเปญพร้อมประกอบสื่อเสร็จสมบูรณ์');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -225,7 +411,7 @@ export const AiCommandCenter: React.FC<Props> = ({
   const handleRequestRevision = async () => {
     if (!activeWf) return;
     if (!revisionNote.trim()) {
-      setErrorMsg('กรุณาระบุประเด็นที่ต้องการให้ทีม AI ปรับปรุงแก้ไขในช่องข้อเสนอแนะ');
+      setErrorMsg('กรุณาระบุประเด็นที่ต้องการให้ทีม AI ปรับปรุงแก้ไข');
       return;
     }
     setRevising(true);
@@ -239,6 +425,7 @@ export const AiCommandCenter: React.FC<Props> = ({
       setRevisionNote('');
       await onRefreshAll();
       setSelectedId(updated.id);
+      notify('ทีม AI ปรับปรุงเนื้อหาตามคำสั่งเรียบร้อยแล้ว');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -263,16 +450,22 @@ export const AiCommandCenter: React.FC<Props> = ({
         customTitle: editTitle,
         customContent: editArticle,
         coverImageChoice:
+          selectedCoverUrl ||
           activeWf.visualOutput?.generatedRealImageUrl ||
           activeWf.visualOutput?.generatedSvgDataUrl,
+        videoUrlChoice:
+          selectedVideoUrl || activeWf.videoOutput?.generatedVideoUrl || undefined,
+        audioUrlChoice:
+          selectedAudioUrl || activeWf.audioOutput?.generatedAudioUrl || undefined,
         isFeatured: publishAsFeatured,
         reviewerNote:
           revisionNote.trim() ||
-          'อนุมัติผ่าน Human Approval และเผยแพร่สู่ Website & Omnichannel เรียบร้อยแล้ว',
+          'อนุมัติผ่าน 07 Quality Check & CEO Approval เผยแพร่พร้อมสื่อภาพ/วิดีโอเรียบร้อยแล้ว',
         channelsToPublish: ALL_CHANNELS,
       });
       await onRefreshAll();
       setSelectedId(res.workflow.id);
+      notify('เผยแพร่ Content พร้อมรูปภาพและวิดีโอขึ้นหน้าเว็บไซต์สำเร็จ');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -280,17 +473,38 @@ export const AiCommandCenter: React.FC<Props> = ({
     }
   };
 
-  const handleGenerateRealVisual = async (promptText: string) => {
+  const handleGenerateRealVisual = async (promptText?: string, insertInline = true) => {
     if (!activeWf) return;
     setMediaBusy('image');
     setErrorMsg(null);
     try {
-      await api.generateRealImage({
-        prompt: promptText,
+      const finalPrompt =
+        promptText ||
+        activeWf.visualOutput?.imagePrompts?.[0]?.prompt ||
+        `Editorial educational visual for Komkrit Thailand: ${activeWf.topic}, modern clean composition, 16:9`;
+      const asset = await api.generateRealImage({
+        prompt: finalPrompt,
         aspectRatio: '16:9',
         workflowId: activeWf.id,
+        thaiSummary: editTitle || activeWf.topic,
+        reviewStatus: 'approved',
       });
-      await onRefreshAll();
+      setSelectedCoverUrl(asset.fileUrl);
+      let nextMd = editArticle;
+      if (insertInline) {
+        nextMd = embedMediaIntoMarkdown(
+          editArticle,
+          'image',
+          asset.fileUrl,
+          editTitle || activeWf.topic
+        );
+        setEditArticle(nextMd);
+        await persistArticleAndMediaToWorkflow(activeWf, editTitle, nextMd, {
+          coverUrl: asset.fileUrl,
+        });
+      }
+      await Promise.all([onRefreshAll(), loadSharedMedia()]);
+      notify('04 Visual Agent สร้างภาพจริง ตั้งเป็นรูปปก และแทรกในเนื้อหา Content แล้ว');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -298,7 +512,7 @@ export const AiCommandCenter: React.FC<Props> = ({
     }
   };
 
-  const handleGenerateRealVideo = async () => {
+  const handleGenerateRealVideo = async (insertInline = true) => {
     if (!activeWf) return;
     setMediaBusy('video');
     setErrorMsg(null);
@@ -309,7 +523,7 @@ export const AiCommandCenter: React.FC<Props> = ({
             `Scene ${idx + 1} (${s.time}): ${s.visual}. Thai narration: "${s.dialogue}".`
         )
         .join(' ');
-      await api.generateRealVideo({
+      const asset = await api.generateRealVideo({
         prompt:
           scenePrompt ||
           `Cinematic educational video for Komkrit Thailand about ${activeWf.topic}`,
@@ -317,10 +531,28 @@ export const AiCommandCenter: React.FC<Props> = ({
         aspectRatio: videoAspectChoice,
         durationSec: 8,
         resolution: '720p',
-        firstFrameUrl: activeWf.visualOutput?.generatedRealImageUrl || undefined,
+        firstFrameUrl:
+          selectedCoverUrl.startsWith('http') || selectedCoverUrl.startsWith('/uploads')
+            ? selectedCoverUrl
+            : activeWf.visualOutput?.generatedRealImageUrl || undefined,
         workflowId: activeWf.id,
+        thaiSummary: editTitle || activeWf.topic,
       });
-      await onRefreshAll();
+      setSelectedVideoUrl(asset.fileUrl);
+      if (insertInline) {
+        const nextMd = embedMediaIntoMarkdown(
+          editArticle,
+          'video',
+          asset.fileUrl,
+          editTitle || activeWf.topic
+        );
+        setEditArticle(nextMd);
+        await persistArticleAndMediaToWorkflow(activeWf, editTitle, nextMd, {
+          videoUrl: asset.fileUrl,
+        });
+      }
+      await Promise.all([onRefreshAll(), loadSharedMedia()]);
+      notify('05 Video Agent เรนเดอร์วิดีโอ .MP4 และฝังเข้าสู่เนื้อหา Content เรียบร้อยแล้ว');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -337,17 +569,61 @@ export const AiCommandCenter: React.FC<Props> = ({
         activeWf.audioOutput?.narrationScriptWithCues ||
         activeWf.scriptOutput?.videoScript ||
         activeWf.topic;
-      await api.generateRealAudio({
+      const res = await api.generateRealAudio({
         text: scriptText.replace(/\[[^\]]*\]/g, ''),
         style: activeWf.audioOutput?.voiceTone,
         workflowId: activeWf.id,
       });
+      setSelectedAudioUrl(res.fileUrl);
       await onRefreshAll();
+      notify('06 Audio Agent สร้างไฟล์เสียงพากย์แนบเข้ากับ Content เรียบร้อยแล้ว');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
       setMediaBusy(null);
     }
+  };
+
+  const handleAttachSharedAsset = async (
+    asset: AiMediaAsset,
+    mode: 'primary' | 'inline' | 'both'
+  ) => {
+    if (!activeWf) return;
+    const isVideo = asset.mediaType === 'video';
+    const nextCover = !isVideo && (mode === 'primary' || mode === 'both')
+      ? asset.fileUrl
+      : selectedCoverUrl;
+    const nextVideo = isVideo && (mode === 'primary' || mode === 'both')
+      ? asset.fileUrl
+      : selectedVideoUrl;
+
+    let nextMd = editArticle;
+    if (mode === 'inline' || mode === 'both') {
+      nextMd = embedMediaIntoMarkdown(
+        editArticle,
+        isVideo ? 'video' : 'image',
+        asset.fileUrl,
+        asset.thaiSummary || editTitle || activeWf.topic
+      );
+      setEditArticle(nextMd);
+    }
+    if (!isVideo && (mode === 'primary' || mode === 'both')) {
+      setSelectedCoverUrl(asset.fileUrl);
+    }
+    if (isVideo && (mode === 'primary' || mode === 'both')) {
+      setSelectedVideoUrl(asset.fileUrl);
+    }
+
+    await persistArticleAndMediaToWorkflow(activeWf, editTitle, nextMd, {
+      coverUrl: nextCover || undefined,
+      videoUrl: nextVideo || undefined,
+    });
+    await onRefreshAll();
+    notify(
+      isVideo
+        ? 'นำวิดีโอ AI จากคลังร่วมเข้าสู่ Content เรียบร้อยแล้ว'
+        : 'นำรูปภาพ AI จากคลังร่วมเข้าสู่ Content เรียบร้อยแล้ว'
+    );
   };
 
   const handleSaveInlineEdit = async () => {
@@ -365,6 +641,7 @@ export const AiCommandCenter: React.FC<Props> = ({
     });
     setIsEditingScript(false);
     await onRefreshAll();
+    notify('บันทึกเนื้อหาที่แก้ไขเรียบร้อยแล้ว');
   };
 
   const handleDeleteWorkflow = async (id: number) => {
@@ -395,175 +672,316 @@ export const AiCommandCenter: React.FC<Props> = ({
     setTimeout(() => setCopiedKey(null), 1800);
   };
 
-  const agentTabs = [
-    { id: 'overview', label: 'ตรวจ & โพสต์ขึ้นเว็บ', icon: <UserCheck className="w-3.5 h-3.5" /> },
-    { id: 'script', label: 'บทความ & สคริปต์', icon: <Lightbulb className="w-3.5 h-3.5" /> },
-    { id: 'visual', label: 'รูปภาพปก AI', icon: <ImageIcon className="w-3.5 h-3.5" /> },
-    { id: 'video', label: 'วิดีโอ AI', icon: <Film className="w-3.5 h-3.5" /> },
-    { id: 'audio', label: 'เสียงพากย์', icon: <Mic className="w-3.5 h-3.5" /> },
-    { id: 'omnichannel', label: 'แชร์ 8 ช่องทาง', icon: <Share2 className="w-3.5 h-3.5" /> },
-    { id: 'research', label: 'ข้อมูลอ้างอิง', icon: <Search className="w-3.5 h-3.5" /> },
-    { id: 'design', label: 'โครงสไลด์', icon: <Palette className="w-3.5 h-3.5" /> },
-    { id: 'qa_analytics', label: 'คะแนนคุณภาพ', icon: <BarChart3 className="w-3.5 h-3.5" /> },
+  // Interactive 01-08 Agent Flow Nodes (Matches Image 1 Architecture)
+  const flowNodes = [
+    {
+      code: '01',
+      id: 'research',
+      title: 'Research',
+      role: 'นักวิจัยอัจฉริยะ',
+      done: Boolean(activeWf?.researchOutput?.deepInsights?.length),
+      icon: <Search className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '02',
+      id: 'script',
+      title: 'Idea & Script',
+      role: 'นักคิดและเขียนบท',
+      done: Boolean(activeWf?.scriptOutput?.fullArticleMarkdown),
+      icon: <Lightbulb className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '03',
+      id: 'design',
+      title: 'Content Design',
+      role: 'นักออกแบบเนื้อหา',
+      done: Boolean(activeWf?.designOutput?.slideDeckOutline?.length),
+      icon: <Palette className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '04',
+      id: 'visual',
+      title: 'Visual Creator',
+      role: 'นักสร้างสื่อภาพ',
+      done: Boolean(selectedCoverUrl || activeWf?.visualOutput?.generatedRealImageUrl),
+      icon: <ImageIcon className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '05',
+      id: 'video',
+      title: 'Video Prod.',
+      role: 'นักสร้างวิดีโอ',
+      done: Boolean(selectedVideoUrl || activeWf?.videoOutput?.generatedVideoUrl),
+      icon: <Film className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '06',
+      id: 'audio',
+      title: 'Audio Prod.',
+      role: 'นักสร้างเสียง',
+      done: Boolean(selectedAudioUrl || activeWf?.audioOutput?.generatedAudioUrl),
+      icon: <Mic className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '07',
+      id: 'overview',
+      title: 'Quality Check',
+      role: 'ตรวจ & ประกอบ Content',
+      done: activeWf?.status === 'published' || Boolean(activeWf?.qaOutput?.overallScore),
+      icon: <ShieldCheck className="w-3.5 h-3.5" />,
+    },
+    {
+      code: '08',
+      id: 'qa_analytics',
+      title: 'Analytics',
+      role: 'วิเคราะห์และพัฒนา',
+      done: Boolean(activeWf?.analyticsOutput?.predictedReach),
+      icon: <BarChart3 className="w-3.5 h-3.5" />,
+    },
+    {
+      code: 'PUB',
+      id: 'omnichannel',
+      title: 'Publish',
+      role: 'กระจาย 8 ช่องทาง',
+      done: activeWf?.status === 'published',
+      icon: <Share2 className="w-3.5 h-3.5" />,
+    },
   ];
 
   return (
-    <div className="space-y-5">
-      {/* CLEAN, MINIMAL AI CREATION CARD */}
-      <div className="rounded-2xl bg-white p-5 sm:p-6 shadow-2xs border border-slate-200">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <h2 className="text-base sm:text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-[#f59e0b]" />
-              สร้างบทความและคอนเทนต์ใหม่ด้วย AI
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              พิมพ์หัวข้อที่ต้องการสร้าง แล้วกดปุ่มเดียว AI จะร่างบทความ สคริปต์ และแคปชันให้พร้อมตรวจก่อนโพสต์
-            </p>
+    <div className="space-y-6">
+      {toastMsg && (
+        <div className="fixed bottom-5 right-5 z-50 rounded-xl bg-[#0a101d] text-white border border-amber-300/40 px-4 py-3 text-xs font-semibold shadow-xl flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* EXECUTIVE AGENT CEO (COMMAND CENTER) — MINIMAL LUXURY CARD            */}
+      {/* ===================================================================== */}
+      <div className="rounded-2xl bg-white border border-slate-200/80 shadow-2xs overflow-hidden">
+        {/* Top Obsidian CEO Banner */}
+        <div className="bg-gradient-to-r from-[#0a101d] via-[#101b30] to-[#162644] text-white px-5 sm:px-7 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <img
+              src="/images/avatar-komkrit.png"
+              alt="AGENT CEO"
+              className="h-12 w-12 rounded-full object-cover ring-1 ring-amber-300/60 shrink-0"
+            />
+            <div>
+              <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-amber-300">
+                <Crown className="w-3.5 h-3.5" />
+                AGENT CEO (COMMAND CENTER) • KOMKID BY KOMKRIT
+              </div>
+              <h2 className="text-base sm:text-lg font-bold tracking-tight mt-0.5">
+                สั่งงาน วางแผน ติดตาม ตรวจสอบ และประกอบสื่อลง Content ผ่าน CEO คนเดียว
+              </h2>
+              <p className="text-xs text-slate-300/80 mt-0.5">
+                เชื่อมโยง 01 Research → 02 Script → 03 Design → 04 Visual → 05 Video → 06 Audio → 07 QA ↔ 08 Analytics
+              </p>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowAdvanced((v) => !v)}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
-          >
-            {showAdvanced ? 'ซ่อนตัวเลือกเพิ่มเติม ▲' : '⚙️ ตัวเลือกเพิ่มเติม ▼'}
-          </button>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onGoToKnowledgeBase}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.12] transition cursor-pointer"
+            >
+              <Database className="w-3.5 h-3.5 text-amber-300" />
+              Knowledge Base ({kbCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setBlueprintModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-300/20 transition cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              ดูผัง Flow ต้นฉบับ
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleDispatchCeo} className="space-y-3">
+        {/* CEO Dispatch Body */}
+        <form onSubmit={handleDispatchCeo} className="p-5 sm:p-6 space-y-4">
+          {/* 4 Revenue Engines Selector (Blueprint 2: KOM KID 4 ธุรกิจหลัก) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                เลือกเป้าหมายธุรกิจหลัก (4 Revenue Engines — AI Co-work)
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-900 transition cursor-pointer"
+              >
+                {showAdvanced ? 'ซ่อนตั้งค่าเชิงลึก ▲' : 'ตั้งค่าค่าย AI & กลุ่มเป้าหมาย ▼'}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {REVENUE_ENGINES.map((eng) => {
+                const active = businessPillar === eng.id;
+                return (
+                  <button
+                    key={eng.id}
+                    type="button"
+                    onClick={() => {
+                      setBusinessPillar(eng.id);
+                      setCategory(eng.defaultCategory);
+                    }}
+                    className={`rounded-xl border px-3.5 py-2.5 text-left transition cursor-pointer flex items-start gap-2.5 ${
+                      active
+                        ? 'border-[#0a101d] bg-slate-900/[0.03] ring-1 ring-[#0a101d]/10'
+                        : 'border-slate-200/80 bg-white hover:bg-slate-50/70'
+                    }`}
+                  >
+                    <span className="mt-0.5 shrink-0">{eng.icon}</span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-900 truncate">
+                        {eng.short}
+                      </div>
+                      <div className="text-[10.5px] text-slate-500 truncate">
+                        {eng.sub}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Input / Idea Source Pills (Blueprint 1 Left Column) */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-slate-400 mr-1">
+              Input / แหล่งไอเดีย:
+            </span>
+            {INPUT_SOURCES.map((src) => {
+              const selected = inputSource === src.label;
+              return (
+                <button
+                  key={src.id}
+                  type="button"
+                  onClick={() => setInputSource(src.label)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-medium transition cursor-pointer ${
+                    selected
+                      ? 'bg-[#0a101d] text-amber-300 font-semibold'
+                      : 'bg-slate-100/90 text-slate-600 hover:bg-slate-200/70'
+                  }`}
+                >
+                  {src.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Main Command Input */}
           <div className="flex flex-col sm:flex-row gap-2.5">
             <input
               type="text"
               required
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="พิมพ์หัวข้อที่ต้องการ เช่น แนวทางใช้ AI ช่วยครูไทยลดภาระงานเอกสาร..."
-              className="flex-1 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm font-medium text-[#0d2546] placeholder:text-slate-400 focus:border-[#0d2546] focus:bg-white focus:outline-none transition"
+              placeholder="สั่งงาน AGENT CEO เช่น วิเคราะห์แนวทางใช้ AI ลดงานเอกสารครูไทย พร้อมสร้างภาพปกประกอบบทความ..."
+              className="flex-1 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-[#0a101d] focus:bg-white focus:outline-none transition"
             />
             <button
               type="submit"
               disabled={running}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0d2546] px-6 py-3 text-sm font-bold text-white hover:bg-[#163a6b] transition cursor-pointer disabled:opacity-60 shrink-0"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0a101d] px-6 py-3 text-sm font-semibold text-amber-300 hover:bg-slate-800 transition cursor-pointer disabled:opacity-60 shrink-0 shadow-xs"
             >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              {running ? 'กำลังสร้าง...' : 'สร้างคอนเทนต์'}
+              <Sparkles className="w-4 h-4" />
+              {running ? 'ทีม Agent กำลังทำงาน...' : 'สั่งงาน AGENT CEO'}
             </button>
           </div>
 
-          {/* Subtle Quick Topic Ideas */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-400 mr-1">ไอเดียตัวอย่าง:</span>
-            {QUICK_PROMPTS.map((qp, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setTopic(qp)}
-                className="rounded-full bg-slate-100 hover:bg-amber-100 hover:text-amber-950 px-3 py-1 text-[11px] font-medium text-slate-600 transition cursor-pointer truncate max-w-[240px]"
-              >
-                {qp}
-              </button>
-            ))}
+          {/* Subtle Quick Topic Starters & Auto-Cover Toggle */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-400">โจทย์แนะนำ:</span>
+              {QUICK_PROMPTS.map((qp, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setTopic(qp)}
+                  className="rounded-full border border-slate-200/80 bg-white hover:border-amber-400 hover:bg-amber-50/40 px-2.5 py-1 text-[11px] text-slate-600 transition cursor-pointer truncate max-w-[230px]"
+                >
+                  {qp}
+                </button>
+              ))}
+            </div>
+
+            <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={autoGenerateCoverImage}
+                onChange={(e) => setAutoGenerateCoverImage(e.target.checked)}
+                className="accent-[#0a101d] rounded"
+              />
+              สั่ง 04 Visual วาดรูปปก & แทรกในบทความอัตโนมัติ
+            </label>
           </div>
 
-          {/* Collapsible Advanced Options (Hidden by default to eliminate clutter!) */}
+          {/* Collapsible Deep Settings */}
           {showAdvanced && (
-            <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-4 space-y-3 mt-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div>
-                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    หมวดหมู่บทความ
-                  </span>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as CategoryId)}
-                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
-                  >
-                    {CATEGORIES.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nameTh}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    กลุ่มผู้อ่านเป้าหมาย
-                  </span>
-                  <select
-                    value={targetAudience}
-                    onChange={(e) => setTargetAudience(e.target.value)}
-                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
-                  >
-                    <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
-                    <option value="นักเรียน / นักศึกษา">นักเรียน / นักศึกษา</option>
-                    <option value="ผู้ปกครอง">ผู้ปกครอง</option>
-                    <option value="ผู้บริหารสถานศึกษา & ผู้สนใจทั่วไป">
-                      ผู้บริหารสถานศึกษา & ผู้สนใจทั่วไป
+            <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  หมวดหมู่เนื้อหาเว็บไซต์
+                </span>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as CategoryId)}
+                  className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nameTh}
                     </option>
-                  </select>
-                </div>
-
-                <div>
-                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    เลือกโมเดล AI (Real API)
-                  </span>
-                  <select
-                    value={llmProvider}
-                    onChange={(e) => setLlmProvider(e.target.value as LlmProviderId)}
-                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none"
-                  >
-                    <option value="auto">อัตโนมัติ (ตาม API Key ที่ตั้งไว้)</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="claude">Anthropic Claude</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="openai">OpenAI ChatGPT</option>
-                    <option value="openai_compatible">Custom OpenAI Server</option>
-                  </select>
-                </div>
-
-                <div>
-                  <span className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    แหล่งที่มาของประเด็น
-                  </span>
-                  <select
-                    value={inputSource}
-                    onChange={(e) => setInputSource(e.target.value)}
-                    className="w-full rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none"
-                  >
-                    {INPUT_SOURCES.map((s) => (
-                      <option key={s.id} value={s.label}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  ))}
+                </select>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoGenerateCoverImage}
-                    onChange={(e) => setAutoGenerateCoverImage(e.target.checked)}
-                    className="accent-[#0d2546]"
-                  />
-                  สร้างรูปภาพปก AI จริงพร้อมกันอัตโนมัติ
-                </label>
-
-                <button
-                  type="button"
-                  onClick={() => setBlueprintModalOpen(true)}
-                  className="text-xs font-semibold text-slate-500 hover:text-[#0d2546] underline cursor-pointer"
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  กลุ่มผู้เรียน / ผู้อ่านเป้าหมาย
+                </span>
+                <select
+                  value={targetAudience}
+                  onChange={(e) => setTargetAudience(e.target.value)}
+                  className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none"
                 >
-                  ดูผังสถาปัตยกรรมระบบ AI
-                </button>
+                  <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
+                  <option value="นักเรียน / นักศึกษา">นักเรียน / นักศึกษา</option>
+                  <option value="ผู้ปกครอง">ผู้ปกครอง</option>
+                  <option value="ผู้บริหารสถานศึกษา & พันธมิตรโรงเรียน">
+                    ผู้บริหารสถานศึกษา & พันธมิตรโรงเรียน
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  ค่าย AI หลักของ CEO (Real Live API)
+                </span>
+                <select
+                  value={llmProvider}
+                  onChange={(e) => setLlmProvider(e.target.value as LlmProviderId)}
+                  className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none"
+                >
+                  <option value="auto">อัตโนมัติ (ตาม API Vault ที่เชื่อมต่อ)</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai">OpenAI ChatGPT</option>
+                  <option value="claude">Anthropic Claude</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai_compatible">Custom OpenAI Server</option>
+                </select>
               </div>
             </div>
           )}
 
           {errorMsg && (
-            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800 flex flex-wrap items-center justify-between gap-2">
+            <div className="rounded-xl bg-rose-50/90 border border-rose-200 px-4 py-3 text-xs text-rose-800 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>{errorMsg}</span>
@@ -572,24 +990,24 @@ export const AiCommandCenter: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={onOpenSettings}
-                  className="inline-flex items-center gap-1 rounded-lg bg-[#0d2546] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#163a6b] cursor-pointer shrink-0"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a101d] px-3 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer shrink-0"
                 >
-                  <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Keys
+                  <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Vault
                 </button>
               )}
             </div>
           )}
 
           {running && (
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3.5 flex items-center gap-3">
-              <RefreshCw className="w-5 h-5 text-amber-600 animate-spin shrink-0" />
+            <div className="rounded-xl bg-[#0a101d] text-white p-4 flex items-center gap-3.5">
+              <RefreshCw className="w-4 h-4 text-amber-300 animate-spin shrink-0" />
               <div className="flex-1">
-                <div className="text-xs font-bold text-amber-950">
+                <div className="text-xs font-semibold text-amber-200">
                   {AGENT_PIPELINE_STEPS[stepIdx]}
                 </div>
-                <div className="mt-1.5 h-1.5 w-full rounded-full bg-amber-200/70 overflow-hidden">
+                <div className="mt-2 h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
                   <div
-                    className="h-full bg-[#0d2546] transition-all duration-300"
+                    className="h-full bg-amber-300 transition-all duration-300"
                     style={{
                       width: `${((stepIdx + 1) / AGENT_PIPELINE_STEPS.length) * 100}%`,
                     }}
@@ -601,17 +1019,85 @@ export const AiCommandCenter: React.FC<Props> = ({
         </form>
       </div>
 
-      {/* WORKFLOW CAMPAIGN SELECTOR + ACTIVE MULTI-AGENT WORKSPACE */}
+      {/* ===================================================================== */}
+      {/* INTERACTIVE 01–08 MULTI-AGENT FLOW PIPELINE BAR (MATCHES IMAGE 1)     */}
+      {/* ===================================================================== */}
+      {activeWf && (
+        <div className="rounded-2xl bg-white border border-slate-200/80 p-4 shadow-2xs">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                AI CONTENT CREATION FLOW (คลิกสลับดูผลงานแต่ละ Agent ได้ทันที)
+              </span>
+            </div>
+            <span className="text-[11px] font-medium text-slate-500">
+              Engine: <strong className="text-slate-800">{activeWf.engineUsed}</strong>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2">
+            {flowNodes.map((node) => {
+              const isSelected = activeAgentTab === node.id;
+              return (
+                <button
+                  key={node.id}
+                  type="button"
+                  onClick={() => setActiveAgentTab(node.id)}
+                  className={`group relative rounded-xl border p-2.5 text-left transition cursor-pointer flex flex-col justify-between min-h-[72px] ${
+                    isSelected
+                      ? 'bg-[#0a101d] border-[#0a101d] text-white shadow-xs'
+                      : 'bg-slate-50/60 border-slate-200/80 text-slate-800 hover:bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span
+                      className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${
+                        isSelected
+                          ? 'bg-amber-300 text-[#0a101d]'
+                          : 'bg-slate-200/80 text-slate-700'
+                      }`}
+                    >
+                      {node.code}
+                    </span>
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        node.done ? 'bg-emerald-500' : 'bg-slate-300'
+                      }`}
+                      title={node.done ? 'พร้อมใช้งาน' : 'รอดำเนินการ'}
+                    />
+                  </div>
+                  <div className="mt-2">
+                    <div className="text-[11.5px] font-bold leading-tight truncate">
+                      {node.title}
+                    </div>
+                    <div
+                      className={`text-[10px] truncate mt-0.5 ${
+                        isSelected ? 'text-slate-300' : 'text-slate-500'
+                      }`}
+                    >
+                      {node.role}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* CAMPAIGN LIST (LEFT) + COLLABORATIVE AGENT WORKSPACE (RIGHT)          */}
+      {/* ===================================================================== */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Left List of Campaigns */}
-        <div className="xl:col-span-3 rounded-2xl bg-white border border-slate-200/80 p-4 shadow-2xs space-y-2.5">
+        <div className="xl:col-span-3 rounded-2xl bg-white border border-slate-200/80 p-4 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-extrabold text-[#0d2546]">
-              แคมเปญ AI Content ({workflows.length})
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              แคมเปญ AI ({workflows.length})
             </h3>
           </div>
 
-          <div className="space-y-2 max-h-[540px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
             {workflows.map((wf) => {
               const active = wf.id === activeWf?.id;
               return (
@@ -620,21 +1106,19 @@ export const AiCommandCenter: React.FC<Props> = ({
                   onClick={() => setSelectedId(wf.id)}
                   className={`rounded-xl border p-3 cursor-pointer transition ${
                     active
-                      ? 'border-[#f59e0b] bg-amber-50/60 shadow-2xs'
-                      : 'border-slate-200/70 bg-white hover:bg-slate-50'
+                      ? 'border-[#0a101d] bg-slate-900/[0.03] shadow-2xs'
+                      : 'border-slate-200/70 bg-white hover:bg-slate-50/80'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-1 mb-1">
+                  <div className="flex items-center justify-between gap-1 mb-1.5">
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         wf.status === 'published'
-                          ? 'bg-emerald-100 text-emerald-900'
-                          : 'bg-amber-100 text-amber-900'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/80'
+                          : 'bg-amber-50 text-amber-900 border border-amber-200/80'
                       }`}
                     >
-                      {wf.status === 'published'
-                        ? '✓ อนุมัติ & เผยแพร่แล้ว'
-                        : '⏳ รอ Human Approval'}
+                      {wf.status === 'published' ? '✓ เผยแพร่แล้ว' : 'รอตรวจอนุมัติ'}
                     </span>
                     <button
                       onClick={(e) => {
@@ -647,11 +1131,11 @@ export const AiCommandCenter: React.FC<Props> = ({
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="text-xs font-bold text-[#0d2546] line-clamp-2">
+                  <div className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">
                     {wf.scriptOutput?.selectedTitle || wf.topic}
                   </div>
-                  <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-slate-400">
-                    <span>QA: {wf.qaOutput?.overallScore || 96}/100</span>
+                  <div className="mt-2 flex items-center justify-between text-[10.5px] text-slate-400">
+                    <span>QA {wf.qaOutput?.overallScore || 96}/100</span>
                     <span>{formatThaiDate(wf.createdAt)}</span>
                   </div>
                 </div>
@@ -660,65 +1144,44 @@ export const AiCommandCenter: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Right Detailed Multi-Agent Inspection & Human Approval Workspace */}
-        <div className="xl:col-span-9 space-y-4">
+        {/* Right Detailed Multi-Agent Workspace */}
+        <div className="xl:col-span-9 space-y-5">
           {!activeWf ? (
-            <div className="rounded-2xl bg-white p-12 text-center border border-slate-200">
+            <div className="rounded-2xl bg-white p-12 text-center border border-slate-200/80">
               <p className="text-sm text-slate-500">
-                ยังไม่มีแคมเปญ พิมพ์โจทย์ด้านบนเพื่อสั่งงาน CEO Agent ได้เลยครับ
+                ยังไม่มีแคมเปญ พิมพ์โจทย์ด้านบนเพื่อสั่งงาน AGENT CEO ได้เลยครับ
               </p>
             </div>
           ) : (
             <>
-              {/* Clean Plain-Thai Action & Tool Tabs */}
-              <div className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-2xl p-2.5 border border-slate-200/80 shadow-2xs">
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-                  {agentTabs.slice(0, 6).map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setActiveAgentTab(t.id)}
-                      className={`inline-flex items-center gap-1.5 shrink-0 rounded-xl px-3.5 py-2.5 text-sm font-bold transition cursor-pointer ${
-                        activeAgentTab === t.id
-                          ? 'bg-[#0d2546] text-white shadow-2xs'
-                          : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {t.icon}
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAgentDetails((v) => !v)}
-                  className="text-xs font-bold text-slate-500 hover:text-[#0d2546] px-2.5 py-1.5 cursor-pointer"
-                >
-                  {showAgentDetails ? 'ซ่อนข้อมูลเชิงลึก ▲' : 'ดูรายละเอียดทีม AI ▼'}
-                </button>
-              </div>
-
-              {/* TAB: OVERVIEW — ELDER-FRIENDLY 1-CLICK REVIEW & PUBLISH FIRST */}
+              {/* =============================================================== */}
+              {/* TAB 07 / OVERVIEW: UNIFIED CONTENT + IMAGE + VIDEO + PUBLISH    */}
+              {/* =============================================================== */}
               {activeAgentTab === 'overview' && (
-                <div className="space-y-4">
-                  {/* SIMPLE 1-CLICK PUBLISH ACTION BAR RIGHT AT TOP */}
-                  <div className="rounded-2xl bg-white border-2 border-emerald-500/40 p-5 shadow-xs space-y-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div>
-                        <span className="inline-block rounded-lg bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-900 mb-1.5">
-                          AI เขียนเนื้อหาเสร็จเรียบร้อยแล้ว (คะแนนตรวจคุณภาพ {activeWf.qaOutput?.overallScore || 97}/100)
-                        </span>
-                        <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
+                <div className="space-y-5">
+                  {/* Executive Approval & Unified Media Co-work Card */}
+                  <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 shadow-2xs space-y-5">
+                    <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 pb-4 border-b border-slate-100">
+                      <div className="space-y-1">
+                        <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                          <ShieldCheck className="w-4 h-4" />
+                          07 Quality Check • คะแนนคุณภาพ {activeWf.qaOutput?.overallScore || 97}/100
+                        </div>
+                        <h3 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
                           {editTitle}
                         </h3>
+                        <p className="text-xs text-slate-500">
+                          เป้าหมาย CEO: {activeWf.ceoOutput?.goal}
+                        </p>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                         <button
                           type="button"
                           onClick={() => setIsEditingScript((v) => !v)}
-                          className="rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-sm font-bold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
                         >
-                          {isEditingScript ? 'ปิดช่องแก้ไข' : '✏️ แก้ไขข้อความ'}
+                          {isEditingScript ? 'ดูตัวอย่างบทความ' : 'แก้ไขเนื้อหาเอง'}
                         </button>
 
                         {activeWf.status === 'published' &&
@@ -729,234 +1192,350 @@ export const AiCommandCenter: React.FC<Props> = ({
                                 activeWf.humanApproval.publishedPostId!
                               )
                             }
-                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer shadow-sm"
+                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-emerald-700 transition cursor-pointer shadow-xs"
                           >
-                            <ExternalLink className="w-5 h-5" />
-                            ลงหน้าเว็บแล้ว! กดเปิดอ่าน
+                            <ExternalLink className="w-4 h-4" />
+                            เผยแพร่แล้ว • เปิดดูบนเว็บจริง
                           </button>
                         ) : (
                           <button
                             onClick={handleApproveAndPublish}
                             disabled={publishing}
-                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-xl bg-[#0a101d] px-5 py-2.5 text-xs sm:text-sm font-bold text-amber-300 hover:bg-slate-800 transition cursor-pointer shadow-xs disabled:opacity-50"
                           >
-                            <CheckCircle2 className="w-5 h-5" />
+                            <CheckCircle2 className="w-4 h-4" />
                             {publishing
-                              ? 'กำลังลงหน้าเว็บ...'
-                              : '✅ นำบทความนี้ลงหน้าเว็บทันที'}
+                              ? 'กำลังเผยแพร่...'
+                              : 'อนุมัติ & เผยแพร่ขึ้นเว็บไซต์ทันที'}
                           </button>
                         )}
                       </div>
                     </div>
 
-                    {/* Simple Ask-AI-to-Revise bar */}
-                    <div className="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-100">
-                      <input
-                        type="text"
-                        value={revisionNote}
-                        onChange={(e) => setRevisionNote(e.target.value)}
-                        placeholder="อยากให้ AI แก้ตรงไหนเพิ่มเติม พิมพ์บอกที่นี่ได้ครับ เช่น ขอภาษาที่อ่านง่ายขึ้น..."
-                        className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
-                      />
-                      <button
-                        onClick={handleRequestRevision}
-                        disabled={revising}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-100 px-4 py-2.5 text-sm font-extrabold text-amber-950 hover:bg-amber-200 cursor-pointer disabled:opacity-50 shrink-0"
-                      >
-                        <RefreshCw
-                          className={`w-4 h-4 ${revising ? 'animate-spin' : ''}`}
+                    {/* UNIFIED MEDIA CO-WORK BAR: GENERATE OR INSERT IMAGE / VIDEO / AUDIO DIRECTLY INTO CONTENT */}
+                    <div className="rounded-xl bg-slate-50/90 border border-slate-200/80 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-slate-900">
+                            สั่งทีม Agent สร้างสื่อประกอบและแทรกลงใน Content นี้โดยตรง (ไม่ต้องแยกทำคนละหน้า)
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            รูปภาพและวิดีโอที่สร้างหรือเลือก จะถูกตั้งเป็นปก/วิดีโอหลัก และแทรกอยู่ในเนื้อหาบทความอัตโนมัติ
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={mediaBusy !== null}
+                          onClick={() => handleGenerateRealVisual(undefined, true)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-800 hover:border-slate-400 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                        >
+                          {mediaBusy === 'image' ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                          ) : (
+                            <ImageIcon className="w-3.5 h-3.5 text-sky-600" />
+                          )}
+                          {mediaBusy === 'image'
+                            ? '04 Visual กำลังวาดรูป...'
+                            : 'สั่ง 04 Visual วาดรูปใส่ Content'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={mediaBusy !== null}
+                          onClick={() => handleGenerateRealVideo(true)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-800 hover:border-slate-400 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                        >
+                          {mediaBusy === 'video' ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-600" />
+                          ) : (
+                            <Film className="w-3.5 h-3.5 text-purple-600" />
+                          )}
+                          {mediaBusy === 'video'
+                            ? '05 Video กำลังสร้างคลิป MP4...'
+                            : 'สั่ง 05 Video สร้างคลิปใส่ Content'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={mediaBusy !== null}
+                          onClick={handleGenerateRealAudio}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-800 hover:border-slate-400 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                        >
+                          {mediaBusy === 'audio' ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                          ) : (
+                            <Mic className="w-3.5 h-3.5 text-amber-600" />
+                          )}
+                          {mediaBusy === 'audio'
+                            ? '06 Audio กำลังพากย์เสียง...'
+                            : 'สั่ง 06 Audio สร้างเสียงพากย์'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            loadSharedMedia();
+                            setShowMediaVault((v) => !v);
+                          }}
+                          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
+                            showMediaVault
+                              ? 'bg-[#0a101d] text-amber-300'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                          เลือกจากคลังรูป & วิดีโอ AI ร่วม ({sharedAssets.length})
+                        </button>
+                      </div>
+
+                      {/* Shared AI Media Vault Picker */}
+                      {showMediaVault && (
+                        <div className="pt-3 border-t border-slate-200/80 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700">
+                              คลังสื่อกลางจาก AI Chat & สตูดิโอภาพ/วิดีโอ — คลิกเพื่อนำมาใส่ในบทความนี้ทันที
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowMediaVault(false)}
+                              className="text-xs text-slate-400 hover:text-slate-700 cursor-pointer"
+                            >
+                              ปิดคลังสื่อ ✕
+                            </button>
+                          </div>
+
+                          {sharedAssets.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-3">
+                              ยังไม่มีรูปหรือวิดีโอในคลังกลาง กดปุ่มสั่ง 04 Visual หรือ 05 Video ด้านบนได้เลยครับ
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                              {sharedAssets.slice(0, 16).map((asset) => (
+                                <div
+                                  key={asset.id}
+                                  className="rounded-xl bg-white border border-slate-200/90 overflow-hidden flex flex-col justify-between"
+                                >
+                                  <div className="aspect-video bg-slate-950 relative overflow-hidden">
+                                    {asset.mediaType === 'video' ? (
+                                      <video
+                                        src={asset.fileUrl}
+                                        muted
+                                        playsInline
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <img
+                                        src={asset.fileUrl}
+                                        alt={asset.thaiSummary || 'AI Media'}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    )}
+                                    <span className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[9.5px] font-bold text-white uppercase">
+                                      {asset.mediaType}
+                                    </span>
+                                  </div>
+                                  <div className="p-2 space-y-1.5">
+                                    <div className="text-[10.5px] text-slate-600 truncate">
+                                      {asset.thaiSummary || asset.prompt}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleAttachSharedAsset(asset, 'both')
+                                        }
+                                        className="rounded-lg bg-[#0a101d] px-2 py-1 text-[10px] font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer"
+                                      >
+                                        {asset.mediaType === 'video'
+                                          ? 'ใช้วิดีโอ + แทรก'
+                                          : 'ตั้งปก + แทรก'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleAttachSharedAsset(asset, 'inline')
+                                        }
+                                        className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                      >
+                                        + แทรกในเนื้อหา
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Revision & QA Check Row */}
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 pt-1">
+                      <div className="lg:col-span-8 flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={revisionNote}
+                          onChange={(e) => setRevisionNote(e.target.value)}
+                          placeholder="สั่ง CEO ปรับแก้เนื้อหาเพิ่มเติม เช่น ขอเพิ่มกรณีศึกษาโรงเรียนไทย หรือปรับภาษาให้กระชับขึ้น..."
+                          className="flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-800 focus:border-[#0a101d] focus:outline-none"
                         />
-                        {revising ? 'AI กำลังแก้ให้...' : 'สั่ง AI แก้ตามนี้'}
-                      </button>
+                        <button
+                          onClick={handleRequestRevision}
+                          disabled={revising}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100 cursor-pointer disabled:opacity-50 shrink-0"
+                        >
+                          <RefreshCw
+                            className={`w-3.5 h-3.5 ${revising ? 'animate-spin' : ''}`}
+                          />
+                          {revising ? 'กำลังปรับปรุง...' : 'สั่ง AI ปรับแก้'}
+                        </button>
+                      </div>
+
+                      <div className="lg:col-span-4 flex items-center justify-end gap-4">
+                        <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={publishAsFeatured}
+                            onChange={(e) => setPublishAsFeatured(e.target.checked)}
+                            className="accent-[#0a101d] rounded"
+                          />
+                          ปักหมุดเป็นบทความเด่นหน้าแรก
+                        </label>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Optional Collapsible 3-Column Agent Details */}
-                  {showAgentDetails && (
-                    <div className="space-y-4">
-                      {/* CEO Summary Strip */}
-                      <div className="rounded-2xl bg-white border border-slate-200/80 p-4 sm:p-5 shadow-2xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                          <span className="text-xs font-extrabold text-[#0d2546] flex items-center gap-1.5">
-                            <Bot className="w-4 h-4 text-[#f59e0b]" />
-                            แผนกลยุทธ์จาก CEO AGENT • ({activeWf.engineUsed})
+                  {/* Unified Content + Media Preview / Editor Card */}
+                  <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 shadow-2xs">
+                    {isEditingScript ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-500">
+                            โหมดแก้ไขหัวข้อและเนื้อหา Markdown (รองรับรูป `![คำอธิบาย](url)` และวิดีโอ `![วิดีโอ: คำอธิบาย](url)`)
                           </span>
-                          <span className="text-[11px] font-semibold text-slate-500">
-                            แหล่งไอเดีย: {activeWf.inputSource}
-                          </span>
-                        </div>
-                        <p className="text-sm font-bold text-[#0d2546]">
-                          เป้าหมาย: {activeWf.ceoOutput?.goal}
-                        </p>
-                        <p className="text-xs text-slate-600 mt-1">
-                          กลยุทธ์: {activeWf.ceoOutput?.strategy}
-                        </p>
-                      </div>
-
-                      {/* 3-COLUMN MULTI-AGENT ECOSYSTEM */}
-                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                        <div className="lg:col-span-4 rounded-2xl bg-gradient-to-b from-sky-50/90 to-white border border-sky-200 p-4 flex flex-col justify-between">
-                          <div>
-                            <div className="flex items-center gap-2.5 mb-3">
-                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white shadow-xs">
-                                <Lightbulb className="w-5 h-5" />
-                              </div>
-                              <div>
-                                <h4 className="font-extrabold text-sm text-[#0d2546]">
-                                  ฝ่ายค้นคว้าและเขียนเนื้อหา
-                                </h4>
-                                <p className="text-[11px] text-slate-500">
-                                  เชื่อมฐานความรู้ {activeWf.researchOutput?.kbSourcesUsed?.length || 3} รายการ
-                                </p>
-                              </div>
-                            </div>
-                            <p className="text-xs text-slate-600">
-                              {activeWf.researchOutput?.trendAnalysis}
-                            </p>
-                          </div>
                           <button
-                            onClick={() => setActiveAgentTab('research')}
-                            className="mt-3 w-full rounded-xl bg-sky-700 py-2 text-xs font-extrabold text-white hover:bg-sky-800 transition cursor-pointer"
+                            onClick={handleSaveInlineEdit}
+                            className="rounded-xl bg-[#0a101d] px-4 py-2 text-xs font-semibold text-amber-300 cursor-pointer"
                           >
-                            ดูข้อมูลอ้างอิง →
+                            บันทึกการแก้ไข
                           </button>
                         </div>
-
-                        <div className="lg:col-span-4 rounded-2xl bg-white border border-slate-200 p-4 space-y-2">
-                          <div className="text-sm font-extrabold text-[#0d2546]">
-                            รายการตรวจสอบก่อนลงเว็บ
-                          </div>
-                          {[
-                            { key: 'isAccurate', label: 'ข้อมูลถูกต้อง' },
-                            { key: 'isAppropriate', label: 'ถ้อยคำสุภาพเหมาะสม' },
-                            { key: 'isOnBrand', label: 'ตรงกับแนวทาง คมคิด by KOMKRIT' },
-                            { key: 'isReady', label: 'พร้อมเผยแพร่' },
-                          ].map((item) => (
-                            <label
-                              key={item.key}
-                              className="flex items-center gap-2.5 rounded-lg bg-slate-50 px-3 py-2 text-xs font-bold text-[#0d2546] cursor-pointer"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={(checklist as any)[item.key]}
-                                onChange={(e) =>
-                                  setChecklist({
-                                    ...checklist,
-                                    [item.key]: e.target.checked,
-                                  })
-                                }
-                                className="h-4 w-4 accent-emerald-600"
-                              />
-                              <span>{item.label}</span>
-                            </label>
-                          ))}
-                          <label className="flex items-center gap-2 pt-1 text-xs font-bold text-amber-900 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={publishAsFeatured}
-                              onChange={(e) => setPublishAsFeatured(e.target.checked)}
-                              className="accent-[#f59e0b]"
-                            />
-                            ตั้งเป็นข่าวเด่นหน้าแรกด้วย
-                          </label>
-                        </div>
-
-                        <div className="lg:col-span-4 rounded-2xl bg-gradient-to-b from-emerald-50/90 to-white border border-emerald-200 p-4 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-extrabold text-[#0d2546]">
-                              ผลตรวจคุณภาพเนื้อหา
-                            </span>
-                            <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-extrabold text-white">
-                              {activeWf.qaOutput?.overallScore || 97}/100
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-600">
-                            {activeWf.qaOutput?.factCheckNote}
-                          </p>
-                          <p className="text-xs text-slate-600">
-                            {activeWf.qaOutput?.languageNote}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Quick Article Preview & Inline Editor right below */}
-                  <div className="rounded-2xl bg-white border border-slate-200/80 p-5 shadow-2xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
-                      <div>
-                        <span className="text-[11px] font-extrabold text-[#d97706]">
-                          ร่างบทความพร้อมเผยแพร่ขึ้นเว็บไซต์ (Website / Blog Draft)
-                        </span>
-                        <h3 className="text-lg font-extrabold text-[#0d2546]">
-                          {editTitle}
-                        </h3>
-                      </div>
-                      <button
-                        onClick={() => setIsEditingScript((v) => !v)}
-                        className="rounded-xl bg-slate-100 px-3.5 py-1.5 text-xs font-bold text-[#0d2546] hover:bg-slate-200 cursor-pointer"
-                      >
-                        {isEditingScript ? 'ซ่อนโหมดแก้ไขข้อความ' : '✏️ แก้ไขข้อความด้วยตนเอง'}
-                      </button>
-                    </div>
-
-                    {isEditingScript ? (
-                      <div className="mt-4 space-y-3">
                         <input
                           type="text"
                           value={editTitle}
                           onChange={(e) => setEditTitle(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-bold"
+                          className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-[#0a101d] focus:outline-none"
                         />
                         <textarea
-                          rows={10}
+                          rows={12}
                           value={editArticle}
                           onChange={(e) => setEditArticle(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-body"
+                          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-body text-slate-800 focus:border-[#0a101d] focus:outline-none"
                         />
-                        <button
-                          onClick={handleSaveInlineEdit}
-                          className="rounded-xl bg-[#0d2546] px-4 py-2 text-xs font-bold text-white cursor-pointer"
-                        >
-                          บันทึกข้อความที่แก้ไข
-                        </button>
                       </div>
                     ) : (
-                      <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-5">
-                        <div className="lg:col-span-5 space-y-2.5">
-                          {(activeWf.visualOutput?.generatedRealImageUrl ||
-                            activeWf.visualOutput?.generatedSvgDataUrl) && (
-                            <img
-                              src={
-                                activeWf.visualOutput?.generatedRealImageUrl ||
-                                activeWf.visualOutput?.generatedSvgDataUrl
-                              }
-                              alt="AI Cover Visual"
-                              className="w-full rounded-xl border border-slate-200 shadow-xs"
-                            />
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <div className="lg:col-span-5 space-y-3">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                            สื่อหลักที่แนบกับ Content นี้
+                          </div>
+                          {selectedCoverUrl && (
+                            <div className="space-y-1.5">
+                              <img
+                                src={selectedCoverUrl}
+                                alt="AI Cover Visual"
+                                className="w-full rounded-xl border border-slate-200/90 shadow-2xs"
+                              />
+                              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                <span>
+                                  {activeWf.visualOutput?.generatedRealImageUrl
+                                    ? '✓ รูปปก AI จริง'
+                                    : 'กราฟิกโครงสร้างหัวข้อ'}
+                                </span>
+                                {!editArticle.includes(selectedCoverUrl) && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const nextMd = embedMediaIntoMarkdown(
+                                        editArticle,
+                                        'image',
+                                        selectedCoverUrl,
+                                        editTitle
+                                      );
+                                      setEditArticle(nextMd);
+                                      await persistArticleAndMediaToWorkflow(
+                                        activeWf,
+                                        editTitle,
+                                        nextMd
+                                      );
+                                      notify('แทรกรูปปกลงในเนื้อหาบทความแล้ว');
+                                    }}
+                                    className="font-semibold text-sky-700 hover:underline cursor-pointer"
+                                  >
+                                    + แทรกรูปนี้ลงในเนื้อหา
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           )}
-                          {activeWf.videoOutput?.generatedVideoUrl && (
-                            <video
-                              controls
-                              src={activeWf.videoOutput.generatedVideoUrl}
-                              className="w-full rounded-xl border border-purple-200 bg-black aspect-video"
-                            />
+
+                          {selectedVideoUrl && (
+                            <div className="space-y-1.5">
+                              <video
+                                controls
+                                playsInline
+                                src={selectedVideoUrl}
+                                className="w-full rounded-xl border border-slate-200 bg-black aspect-video"
+                              />
+                              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                <span>✓ วิดีโอ AI .MP4 แนบในบทความ</span>
+                                {!editArticle.includes(selectedVideoUrl) && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const nextMd = embedMediaIntoMarkdown(
+                                        editArticle,
+                                        'video',
+                                        selectedVideoUrl,
+                                        editTitle
+                                      );
+                                      setEditArticle(nextMd);
+                                      await persistArticleAndMediaToWorkflow(
+                                        activeWf,
+                                        editTitle,
+                                        nextMd
+                                      );
+                                      notify('แทรกวิดีโอลงในเนื้อหาบทความแล้ว');
+                                    }}
+                                    className="font-semibold text-purple-700 hover:underline cursor-pointer"
+                                  >
+                                    + แทรกวิดีโอลงในเนื้อหา
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           )}
-                          {activeWf.audioOutput?.generatedAudioUrl && (
-                            <audio
-                              controls
-                              src={activeWf.audioOutput.generatedAudioUrl}
-                              className="w-full"
-                            />
+
+                          {selectedAudioUrl && (
+                            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-1.5">
+                              <div className="text-[11px] font-semibold text-slate-700">
+                                ✓ เสียงพากย์ AI แนบในบทความ
+                              </div>
+                              <audio controls src={selectedAudioUrl} className="w-full" />
+                            </div>
                           )}
-                          <p className="text-[11px] text-slate-500">
-                            {activeWf.visualOutput?.generatedRealImageUrl
-                              ? '✓ ภาพปกสร้างด้วย AI จริง (Gemini Nano Banana 2.1 / DALL-E 3)'
-                              : 'กราฟิกโครงสร้างหัวข้อจาก 04 Visual Agent (สามารถกดสร้างภาพจริง/วิดีโอจริง/เสียงจริง ในแท็บ 04-06)'}
-                          </p>
                         </div>
-                        <div className="lg:col-span-7 max-h-[340px] overflow-y-auto pr-2">
-                          {renderRichMarkdown(editArticle)}
+
+                        <div className="lg:col-span-7 space-y-2">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                            ตัวอย่างเนื้อหาจริงที่จะแสดงบนเว็บไซต์ (รวมภาพและวิดีโอแทรกในบทความ)
+                          </div>
+                          <div className="max-h-[520px] overflow-y-auto pr-2 rounded-xl border border-slate-100 bg-slate-50/40 p-4">
+                            {renderRichMarkdown(editArticle)}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -964,42 +1543,44 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: 01 RESEARCH AGENT */}
+              {/* TAB 01: RESEARCH AGENT */}
               {activeAgentTab === 'research' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
-                  <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
-                    <Search className="w-5 h-5 text-sky-600" />
-                    01 RESEARCH AGENT (นักวิจัยอัจฉริยะ)
-                  </h3>
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-4 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <Search className="w-5 h-5 text-sky-600" />
+                      01 Research Agent • นักวิจัยอัจฉริยะ
+                    </h3>
+                    <span className="text-xs text-slate-500">
+                      แหล่งไอเดีย: {activeWf.inputSource}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded-xl bg-sky-50/70 p-4 border border-sky-100">
-                      <h4 className="font-bold text-sm text-[#0d2546] mb-2">
-                        ข้อมูลเชิงลึกสำคัญ (Deep Insights)
+                    <div className="rounded-xl bg-slate-50/80 p-4 border border-slate-200/80">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 mb-2.5">
+                        ประเด็นสำคัญ & Insight ที่ค้นพบ
                       </h4>
-                      <ul className="space-y-2 text-xs text-slate-700 font-body">
+                      <ul className="space-y-2 text-xs text-slate-700 leading-relaxed">
                         {(activeWf.researchOutput?.deepInsights || []).map((item, i) => (
                           <li key={i} className="flex gap-2">
-                            <span className="font-bold text-sky-700">•</span>
+                            <span className="font-bold text-sky-600">•</span>
                             <span>{item}</span>
                           </li>
                         ))}
                       </ul>
                     </div>
-                    <div className="rounded-xl bg-amber-50/70 p-4 border border-amber-100">
-                      <h4 className="font-bold text-sm text-[#0d2546] mb-2">
-                        การวิเคราะห์แนวโน้ม & ฐานความรู้ที่ใช้อ้างอิง
+                    <div className="rounded-xl bg-slate-50/80 p-4 border border-slate-200/80 space-y-3">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500">
+                        การวิเคราะห์แนวโน้ม & แหล่งข้อมูลอ้างอิง
                       </h4>
-                      <p className="text-xs text-slate-700 font-body mb-3">
+                      <p className="text-xs text-slate-700 leading-relaxed">
                         {activeWf.researchOutput?.trendAnalysis}
                       </p>
-                      <div className="text-[11px] font-bold text-[#0d2546] mb-1">
-                        รายการฐานความรู้ (Knowledge Base) ที่ดึงมาใช้งาน:
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5 pt-1">
                         {(activeWf.researchOutput?.kbSourcesUsed || []).map((kb, i) => (
                           <span
                             key={i}
-                            className="rounded-full bg-white border border-amber-200 px-2.5 py-0.5 text-[11px] font-semibold text-amber-950"
+                            className="rounded-full bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700"
                           >
                             📚 {kb}
                           </span>
@@ -1010,56 +1591,56 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: 02 IDEA & SCRIPT AGENT */}
+              {/* TAB 02: IDEA & SCRIPT AGENT */}
               {activeAgentTab === 'script' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-5">
-                  <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-5 shadow-2xs">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <Lightbulb className="w-5 h-5 text-amber-500" />
-                    02 IDEA & SCRIPT AGENT (นักคิดและเขียนบท)
+                    02 Idea & Script Agent • นักคิดและเขียนบท
                   </h3>
 
                   <div>
-                    <div className="text-xs font-extrabold text-slate-600 mb-2">
-                      ไอเดียพาดหัว 3 มุมมอง (คลิกเพื่อเลือกใช้เป็นชื่อบทความหลัก):
+                    <div className="text-xs font-semibold text-slate-500 mb-2">
+                      พาดหัวแนะนำ 3 มุมมอง (คลิกเพื่อใช้เป็นหัวข้อหลักของ Content):
                     </div>
                     <div className="space-y-1.5">
                       {(activeWf.scriptOutput?.titleSuggestions || []).map((t, i) => (
                         <button
                           key={i}
                           onClick={() => setEditTitle(t)}
-                          className={`w-full text-left rounded-xl border px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+                          className={`w-full text-left rounded-xl border px-3.5 py-2.5 text-xs font-semibold transition cursor-pointer ${
                             editTitle === t
-                              ? 'border-[#f59e0b] bg-amber-50 text-[#0d2546]'
-                              : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                              ? 'border-[#0a101d] bg-slate-900/[0.04] text-slate-900'
+                              : 'border-slate-200/80 hover:bg-slate-50 text-slate-700'
                           }`}
                         >
-                          ทางเลือกที่ {i + 1}: {t}
+                          {i + 1}. {t}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <div className="rounded-xl bg-emerald-50/60 border border-emerald-100 p-4">
-                    <div className="text-xs font-extrabold text-emerald-950 mb-1.5">
-                      จุดประสงค์การเรียนรู้ของผู้ชม/ผู้อ่าน (Learning Objectives):
+                  <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-4">
+                    <div className="text-xs font-bold text-slate-800 mb-1.5">
+                      จุดประสงค์การเรียนรู้ (Learning Objectives):
                     </div>
-                    <ul className="space-y-1 text-xs text-slate-700">
+                    <ul className="space-y-1 text-xs text-slate-600">
                       {(activeWf.scriptOutput?.learningObjectives || []).map((lo, i) => (
                         <li key={i}>✓ {lo}</li>
                       ))}
                     </ul>
                   </div>
 
-                  <div className="rounded-xl bg-slate-900 text-slate-100 p-4">
+                  <div className="rounded-xl bg-[#0a101d] text-slate-100 p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-extrabold text-amber-300">
-                        🎬 สคริปต์บทพูดวิดีโอสั้น (Video / Reels / TikTok Script)
+                      <span className="text-xs font-semibold text-amber-300">
+                        สคริปต์บทพูดวิดีโอสั้น (Video / Reels / TikTok Script)
                       </span>
                       <button
                         onClick={() =>
                           copyText('vscript', activeWf.scriptOutput?.videoScript || '')
                         }
-                        className="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1 text-[11px] font-bold hover:bg-white/20 cursor-pointer"
+                        className="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1 text-[11px] font-semibold hover:bg-white/20 cursor-pointer"
                       >
                         {copiedKey === 'vscript' ? (
                           <Check className="w-3 h-3 text-emerald-400" />
@@ -1076,21 +1657,20 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: 03 CONTENT DESIGN AGENT */}
+              {/* TAB 03: CONTENT DESIGN AGENT */}
               {activeAgentTab === 'design' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-5">
-                  <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
-                    <Palette className="w-5 h-5 text-lime-600" />
-                    03 CONTENT DESIGN AGENT (นักออกแบบเนื้อหา & แผนผังความคิด)
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-5 shadow-2xs">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Palette className="w-5 h-5 text-emerald-600" />
+                    03 Content Design Agent • โครงสร้างเนื้อหา & สไลด์
                   </h3>
 
-                  {/* Visual Mind Map */}
-                  <div className="rounded-2xl bg-[#f8fafd] border border-slate-200 p-5">
-                    <div className="text-xs font-extrabold text-[#0d2546] mb-3">
-                      แผนผังความคิด (Mind Map Structure):
+                  <div className="rounded-xl bg-slate-50/70 border border-slate-200/80 p-5">
+                    <div className="text-xs font-bold text-slate-600 mb-3">
+                      แผนผังความคิด (Mind Map Structure)
                     </div>
                     <div className="flex flex-col items-center">
-                      <div className="rounded-full bg-[#0d2546] px-6 py-2.5 text-sm font-extrabold text-[#fbbf24] shadow-sm">
+                      <div className="rounded-full bg-[#0a101d] px-6 py-2 text-xs sm:text-sm font-bold text-amber-300">
                         {activeWf.designOutput?.mindMapNodes?.center || activeWf.topic}
                       </div>
                       <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
@@ -1098,12 +1678,12 @@ export const AiCommandCenter: React.FC<Props> = ({
                           (b, idx) => (
                             <div
                               key={idx}
-                              className="rounded-xl bg-white border border-amber-200 p-3.5 shadow-2xs"
+                              className="rounded-xl bg-white border border-slate-200/80 p-3.5"
                             >
-                              <div className="font-extrabold text-xs text-[#d97706] mb-1.5">
-                                กิ่งที่ {idx + 1}: {b.title}
+                              <div className="font-bold text-xs text-slate-900 mb-1.5">
+                                {idx + 1}. {b.title}
                               </div>
-                              <ul className="space-y-1 text-xs text-slate-700">
+                              <ul className="space-y-1 text-xs text-slate-600">
                                 {(b.items || []).map((it, j) => (
                                   <li key={j}>• {it}</li>
                                 ))}
@@ -1115,21 +1695,20 @@ export const AiCommandCenter: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {/* Slide Deck Outline */}
                   <div>
-                    <div className="text-xs font-extrabold text-[#0d2546] mb-2">
-                      โครงร่างสไลด์นำเสนอ / Carousel (Slide Deck Outline):
+                    <div className="text-xs font-bold text-slate-600 mb-2">
+                      โครงร่างสไลด์ / Infographic Carousel
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       {(activeWf.designOutput?.slideDeckOutline || []).map((s, i) => (
                         <div
                           key={i}
-                          className="rounded-xl border border-slate-200 p-3.5 bg-gradient-to-br from-white to-slate-50"
+                          className="rounded-xl border border-slate-200/80 p-3.5 bg-white"
                         >
-                          <span className="rounded-md bg-[#0d2546] px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                          <span className="rounded bg-[#0a101d] px-2 py-0.5 text-[10px] font-bold text-amber-300">
                             SLIDE {s.slide}
                           </span>
-                          <div className="mt-2 font-bold text-xs text-[#0d2546]">
+                          <div className="mt-2 font-bold text-xs text-slate-900">
                             {s.title}
                           </div>
                           <div className="mt-1 text-[11px] text-slate-500">
@@ -1142,44 +1721,40 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: 04 VISUAL CREATOR AGENT */}
+              {/* TAB 04: VISUAL CREATOR AGENT */}
               {activeAgentTab === 'visual' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
-                      <ImageIcon className="w-5 h-5 text-blue-600" />
-                      04 VISUAL CREATOR AGENT (สร้างภาพจริงด้วย Nano Banana 2.1 / DALL-E 3)
-                    </h3>
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-5 shadow-2xs">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-sky-600" />
+                        04 Visual Creator Agent • สร้างภาพประกอบและแทรกใน Content
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        เมื่อสร้างภาพเสร็จ ระบบจะตั้งเป็นภาพปกและฝังลงในเนื้อหาบทความให้อัตโนมัติ
+                      </p>
+                    </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         disabled={mediaBusy === 'image'}
-                        onClick={() =>
-                          handleGenerateRealVisual(
-                            activeWf.visualOutput?.imagePrompts?.[0]?.prompt ||
-                              `Modern educational illustration for Komkrit Thailand: ${activeWf.topic}, clean cinematic 16:9`
-                          )
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-sky-600 px-3.5 py-2 text-xs font-extrabold text-white hover:brightness-105 cursor-pointer disabled:opacity-50"
+                        onClick={() => handleGenerateRealVisual(undefined, true)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                       >
                         {mediaBusy === 'image' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <Sparkles className="w-3.5 h-3.5" />
                         )}
                         {mediaBusy === 'image'
-                          ? 'กำลังเรนเดอร์ภาพจริง...'
-                          : 'สร้างภาพปกจริง .PNG (Nano Banana 2.1 / DALL-E)'}
+                          ? 'กำลังวาดภาพจริง...'
+                          : 'สร้างภาพจริง & แทรกเข้า Content'}
                       </button>
-                      {(activeWf.visualOutput?.generatedRealImageUrl ||
-                        activeWf.visualOutput?.generatedSvgDataUrl) && (
+                      {selectedCoverUrl && (
                         <a
-                          href={
-                            activeWf.visualOutput?.generatedRealImageUrl ||
-                            activeWf.visualOutput?.generatedSvgDataUrl
-                          }
+                          href={selectedCoverUrl}
                           download
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#193d6e]"
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           <Download className="w-3.5 h-3.5" /> ดาวน์โหลดภาพ
                         </a>
@@ -1187,45 +1762,32 @@ export const AiCommandCenter: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {activeWf.visualOutput?.generatedRealImageUrl ? (
+                  {selectedCoverUrl && (
                     <div className="space-y-2">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-0.5 text-[11px] font-extrabold text-emerald-900">
-                        ✓ ภาพจริงจาก AI Image API ({activeWf.visualOutput.generatedRealImageUrl})
-                      </span>
-                      <div className="overflow-hidden rounded-2xl border-2 border-emerald-300 shadow-sm max-w-2xl">
+                      <div className="overflow-hidden rounded-xl border border-slate-200 max-w-2xl">
                         <img
-                          src={activeWf.visualOutput.generatedRealImageUrl}
-                          alt="Real AI Generated Visual"
+                          src={selectedCoverUrl}
+                          alt="Generated Visual"
                           className="w-full"
                         />
                       </div>
                     </div>
-                  ) : (
-                    activeWf.visualOutput?.generatedSvgDataUrl && (
-                      <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-sm max-w-2xl">
-                        <img
-                          src={activeWf.visualOutput.generatedSvgDataUrl}
-                          alt="Infographic Layout"
-                          className="w-full"
-                        />
-                      </div>
-                    )
                   )}
 
                   <div className="space-y-2.5">
-                    <div className="text-xs font-extrabold text-[#0d2546]">
-                      ชุดคำสั่ง AI Image Generation Prompts (กด "สร้างภาพจริง" จาก Prompt ที่ต้องการได้ทันที):
+                    <div className="text-xs font-bold text-slate-700">
+                      ชุดคำสั่ง Image Prompts เฉพาะหัวข้อนี้ (กดสั่งวาดแทรกเข้าบทความได้ทุกรายการ):
                     </div>
                     {(activeWf.visualOutput?.imagePrompts || []).map((ip, idx) => (
                       <div
                         key={idx}
-                        className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 flex flex-col sm:flex-row sm:items-start justify-between gap-3"
+                        className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-3.5 flex flex-col sm:flex-row sm:items-start justify-between gap-3"
                       >
                         <div>
-                          <span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10.5px] font-extrabold text-blue-900">
+                          <span className="rounded bg-slate-200/80 px-2 py-0.5 text-[10.5px] font-bold text-slate-800">
                             {ip.platform}
                           </span>
-                          <p className="mt-1.5 text-xs text-slate-700 font-mono">
+                          <p className="mt-1.5 text-xs text-slate-600 font-mono">
                             {ip.prompt}
                           </p>
                         </div>
@@ -1233,14 +1795,14 @@ export const AiCommandCenter: React.FC<Props> = ({
                           <button
                             type="button"
                             disabled={mediaBusy === 'image'}
-                            onClick={() => handleGenerateRealVisual(ip.prompt)}
-                            className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-extrabold text-white hover:bg-blue-700 cursor-pointer disabled:opacity-50"
+                            onClick={() => handleGenerateRealVisual(ip.prompt, true)}
+                            className="rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                           >
-                            สร้างภาพจริง
+                            วาด & แทรกเข้า Content
                           </button>
                           <button
                             onClick={() => copyText(`img-${idx}`, ip.prompt)}
-                            className="rounded-lg bg-white border border-slate-200 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                            className="rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
                           >
                             {copiedKey === `img-${idx}` ? 'คัดลอกแล้ว' : 'คัดลอก'}
                           </button>
@@ -1251,41 +1813,41 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: 05 VIDEO PRODUCTION AGENT */}
+              {/* TAB 05: VIDEO PRODUCTION AGENT */}
               {activeAgentTab === 'video' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-4 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
-                      <Film className="w-5 h-5 text-purple-600" />
-                      05 VIDEO PRODUCTION AGENT (Google Veo 3.1 / Gemini Omni 1.1 Flash)
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-bold text-purple-900">
-                        ความยาวแผน: {activeWf.videoOutput?.duration}
-                      </span>
-                      {onOpenFlowStudio && (
-                        <button
-                          type="button"
-                          onClick={onOpenFlowStudio}
-                          className="inline-flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-sky-700 cursor-pointer"
-                        >
-                          <Clapperboard className="w-3.5 h-3.5" /> เปิด Google Flow Multi-Scene Studio
-                        </button>
-                      )}
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <Film className="w-5 h-5 text-purple-600" />
+                        05 Video Production Agent • สร้างวิดีโอและฝังลง Content
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        เรนเดอร์ไฟล์วิดีโอ .MP4 จาก Storyboard ด้วยโมเดลวิดีโอที่ดึงสดจาก API แล้วแนบเข้าบทความทันที
+                      </p>
                     </div>
+                    {onOpenFlowStudio && (
+                      <button
+                        type="button"
+                        onClick={onOpenFlowStudio}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      >
+                        <Clapperboard className="w-3.5 h-3.5 text-purple-600" />
+                        เปิด Multi-Scene Studio
+                      </button>
+                    )}
                   </div>
 
-                  {/* Real Video Renderer Bar */}
-                  <div className="rounded-xl bg-purple-50/80 border border-purple-200 p-4 space-y-3">
+                  <div className="rounded-xl bg-slate-50/90 border border-slate-200/80 p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <select
                           value={videoEngineChoice}
                           onChange={(e) => setVideoEngineChoice(e.target.value)}
-                          className="rounded-xl border border-purple-200 bg-white px-3 py-1.5 text-xs font-bold text-[#0d2546]"
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
                         >
                           <option value="">
-                            ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API ที่เชื่อมต่อ)
+                            อัตโนมัติ (ใช้โมเดลวิดีโอล่าสุดจาก Live API)
                           </option>
                           {liveVideoModels.map((m) => (
                             <option key={m.id} value={m.id}>
@@ -1296,80 +1858,76 @@ export const AiCommandCenter: React.FC<Props> = ({
                         <select
                           value={videoAspectChoice}
                           onChange={(e) => setVideoAspectChoice(e.target.value as any)}
-                          className="rounded-xl border border-purple-200 bg-white px-3 py-1.5 text-xs font-bold text-[#0d2546]"
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
                         >
-                          <option value="16:9">16:9 (YouTube / Facebook / Website)</option>
-                          <option value="9:16">9:16 (TikTok / Reels / Shorts)</option>
+                          <option value="16:9">16:9 แนวนอน (Website / YouTube)</option>
+                          <option value="9:16">9:16 แนวตั้ง (TikTok / Reels)</option>
                         </select>
                       </div>
 
                       <button
                         type="button"
                         disabled={mediaBusy === 'video'}
-                        onClick={handleGenerateRealVideo}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 px-4 py-2 text-xs font-extrabold text-white hover:brightness-110 cursor-pointer disabled:opacity-50"
+                        onClick={() => handleGenerateRealVideo(true)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                       >
                         {mediaBusy === 'video' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Film className="w-3.5 h-3.5 text-amber-300" />
+                          <Film className="w-3.5 h-3.5" />
                         )}
                         {mediaBusy === 'video'
-                          ? 'กำลังเรนเดอร์วิดีโอ .MP4 จริง (ใช้เวลา 30-90 วินาที)...'
-                          : 'เรนเดอร์วิดีโอ .MP4 จริงจาก Storyboard นี้'}
+                          ? 'กำลังเรนเดอร์ .MP4 (30–90 วินาที)...'
+                          : 'สร้างวิดีโอ .MP4 & แทรกเข้า Content'}
                       </button>
                     </div>
 
-                    {activeWf.videoOutput?.generatedVideoUrl && (
+                    {selectedVideoUrl && (
                       <div className="pt-2 space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-extrabold text-emerald-800">
-                            ✓ เรนเดอร์ไฟล์วิดีโอ .MP4 จริงสำเร็จ ({activeWf.videoOutput.generatedVideoModel || 'Google Video AI'})
+                          <span className="text-xs font-semibold text-emerald-700">
+                            ✓ วิดีโอ .MP4 แนบและฝังใน Content เรียบร้อยแล้ว
                           </span>
                           <a
-                            href={activeWf.videoOutput.generatedVideoUrl}
+                            href={selectedVideoUrl}
                             download
-                            className="inline-flex items-center gap-1 rounded-lg bg-[#0d2546] px-3 py-1 text-xs font-bold text-white"
+                            className="inline-flex items-center gap-1 rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-white"
                           >
                             <Download className="w-3.5 h-3.5" /> ดาวน์โหลด .MP4
                           </a>
                         </div>
                         <video
                           controls
-                          src={activeWf.videoOutput.generatedVideoUrl}
-                          className="w-full max-w-2xl rounded-xl border border-purple-300 bg-black aspect-video"
+                          playsInline
+                          src={selectedVideoUrl}
+                          className="w-full max-w-2xl rounded-xl border border-slate-200 bg-black aspect-video"
                         />
                       </div>
                     )}
                   </div>
 
-                  <p className="text-xs text-slate-600">
-                    <strong>รูปแบบผู้ดำเนินรายการ:</strong>{' '}
-                    {activeWf.videoOutput?.avatarStyle}
-                  </p>
-
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto rounded-xl border border-slate-200/80">
                     <table className="w-full text-left border-collapse text-xs">
                       <thead>
-                        <tr className="bg-[#0d2546] text-white">
-                          <th className="p-3 rounded-tl-xl">ช่วงเวลา</th>
-                          <th className="p-3">ภาพหลัก / มุมกล้อง</th>
-                          <th className="p-3">บทพูด (Dialogue)</th>
-                          <th className="p-3">ซับไตเติลหน้าจอ</th>
-                          <th className="p-3 rounded-tr-xl">B-Roll ประกอบ</th>
+                        <tr className="bg-slate-900 text-white">
+                          <th className="p-3">เวลา</th>
+                          <th className="p-3">มุมกล้อง / ภาพ</th>
+                          <th className="p-3">บทพูด</th>
+                          <th className="p-3">ซับไตเติล</th>
+                          <th className="p-3">B-Roll</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200 border border-slate-200">
+                      <tbody className="divide-y divide-slate-200/80">
                         {(activeWf.videoOutput?.scenes || []).map((sc, i) => (
-                          <tr key={i} className="hover:bg-slate-50">
-                            <td className="p-3 font-bold text-purple-800 whitespace-nowrap">
+                          <tr key={i} className="hover:bg-slate-50/70">
+                            <td className="p-3 font-semibold text-slate-900 whitespace-nowrap">
                               {sc.time}
                             </td>
-                            <td className="p-3 text-slate-700">{sc.visual}</td>
-                            <td className="p-3 font-medium text-[#0d2546]">
+                            <td className="p-3 text-slate-600">{sc.visual}</td>
+                            <td className="p-3 font-medium text-slate-900">
                               “{sc.dialogue}”
                             </td>
-                            <td className="p-3 text-amber-800 font-semibold">
+                            <td className="p-3 text-amber-800 font-medium">
                               {sc.subtitle}
                             </td>
                             <td className="p-3 text-slate-500">{sc.bRoll}</td>
@@ -1381,20 +1939,20 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: 06 AUDIO PRODUCTION AGENT */}
+              {/* TAB 06: AUDIO PRODUCTION AGENT */}
               {activeAgentTab === 'audio' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-4 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                       <Mic className="w-5 h-5 text-amber-600" />
-                      06 AUDIO PRODUCTION AGENT (Gemini 3.8 Flash TTS / ElevenLabs)
+                      06 Audio Production Agent • เสียงพากย์ AI แนบบทความ
                     </h3>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         disabled={mediaBusy === 'audio'}
                         onClick={handleGenerateRealAudio}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2 text-xs font-extrabold text-white hover:brightness-105 cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#0a101d] px-4 py-2 text-xs font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                       >
                         {mediaBusy === 'audio' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1402,8 +1960,8 @@ export const AiCommandCenter: React.FC<Props> = ({
                           <Mic className="w-3.5 h-3.5" />
                         )}
                         {mediaBusy === 'audio'
-                          ? 'กำลังสังเคราะห์ไฟล์เสียงจริง...'
-                          : 'สร้างไฟล์เสียงพากย์จริง (.WAV / .MP3)'}
+                          ? 'กำลังสังเคราะห์เสียง...'
+                          : 'สร้างไฟล์เสียงพากย์แนบ Content'}
                       </button>
                       <button
                         onClick={() =>
@@ -1411,99 +1969,97 @@ export const AiCommandCenter: React.FC<Props> = ({
                             activeWf.audioOutput?.narrationScriptWithCues || ''
                           )
                         }
-                        className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-extrabold text-white transition cursor-pointer ${
-                          speaking ? 'bg-rose-600' : 'bg-[#0d2546] hover:bg-[#193d6e]'
+                        className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
+                          speaking
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
                         {speaking ? (
                           <Square className="w-3.5 h-3.5" />
                         ) : (
-                          <Volume2 className="w-4 h-4 text-amber-300" />
+                          <Volume2 className="w-3.5 h-3.5" />
                         )}
-                        {speaking ? 'หยุดฟัง' : 'พรีวิวเสียงเบราว์เซอร์'}
+                        {speaking ? 'หยุดฟัง' : 'ทดลองฟังเสียงอ่าน'}
                       </button>
                     </div>
                   </div>
 
-                  {activeWf.audioOutput?.generatedAudioUrl && (
-                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 space-y-2">
+                  {selectedAudioUrl && (
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-extrabold text-emerald-900">
-                          ✓ ไฟล์เสียงพากย์จริงจาก AI TTS ({activeWf.audioOutput.generatedAudioModel || 'Gemini 3.8 Flash TTS'})
+                        <span className="text-xs font-semibold text-emerald-700">
+                          ✓ ไฟล์เสียงพากย์พร้อมแนบกับ Content
                         </span>
                         <a
-                          href={activeWf.audioOutput.generatedAudioUrl}
+                          href={selectedAudioUrl}
                           download
-                          className="inline-flex items-center gap-1 rounded-lg bg-[#0d2546] px-3 py-1 text-xs font-bold text-white"
+                          className="inline-flex items-center gap-1 rounded-lg bg-[#0a101d] px-3 py-1 text-xs font-semibold text-white"
                         >
-                          <Download className="w-3.5 h-3.5" /> ดาวน์โหลดไฟล์เสียง
+                          <Download className="w-3.5 h-3.5" /> ดาวน์โหลดเสียง
                         </a>
                       </div>
-                      <audio
-                        controls
-                        src={activeWf.audioOutput.generatedAudioUrl}
-                        className="w-full"
-                      />
+                      <audio controls src={selectedAudioUrl} className="w-full" />
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="rounded-xl bg-amber-50 p-3.5 border border-amber-200/70">
-                      <div className="font-bold text-amber-950">โทนเสียงพากย์ (Voice Direction)</div>
-                      <p className="mt-1 text-slate-700">{activeWf.audioOutput?.voiceTone}</p>
+                    <div className="rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/80">
+                      <div className="font-bold text-slate-800">โทนเสียงพากย์</div>
+                      <p className="mt-1 text-slate-600">{activeWf.audioOutput?.voiceTone}</p>
                     </div>
-                    <div className="rounded-xl bg-slate-50 p-3.5 border border-slate-200">
-                      <div className="font-bold text-[#0d2546]">ดนตรีประกอบ (BGM & Sound Effects)</div>
-                      <p className="mt-1 text-slate-700">{activeWf.audioOutput?.bgmStyle}</p>
+                    <div className="rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/80">
+                      <div className="font-bold text-slate-800">ดนตรีประกอบ & Sound Effect</div>
+                      <p className="mt-1 text-slate-600">{activeWf.audioOutput?.bgmStyle}</p>
                     </div>
                   </div>
 
-                  <div className="rounded-xl bg-[#0b1f3a] text-white p-4">
-                    <div className="text-xs font-bold text-amber-300 mb-2">
-                      บทพากย์พร้อมจุดเน้นจังหวะเสียง (Voiceover Script with Vocal Cues):
+                  <div className="rounded-xl bg-[#0a101d] text-white p-4">
+                    <div className="text-xs font-semibold text-amber-300 mb-2">
+                      บทพากย์พร้อมจุดเน้นจังหวะเสียง:
                     </div>
-                    <p className="text-sm font-body leading-relaxed text-slate-100">
+                    <p className="text-sm font-body leading-relaxed text-slate-200">
                       {activeWf.audioOutput?.narrationScriptWithCues}
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* TAB: 07 QA & 08 ANALYTICS */}
+              {/* TAB 08: ANALYTICS & IMPROVEMENT AGENT */}
               {activeAgentTab === 'qa_analytics' && (
-                <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-5">
-                  <h3 className="text-lg font-extrabold text-[#0d2546] flex items-center gap-2">
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-5 shadow-2xs">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
                     <BarChart3 className="w-5 h-5 text-teal-600" />
-                    07 QUALITY CHECK & 08 ANALYTICS IMPROVEMENT AGENT
+                    08 Analytics & Improvement Agent • วิเคราะห์ผลและพัฒนาต่อเนื่อง
                   </h3>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="rounded-xl bg-teal-50 border border-teal-200 p-4">
-                      <div className="text-[11px] font-bold text-teal-800">คาดการณ์การเข้าถึง (Reach)</div>
-                      <div className="mt-1 text-base font-extrabold text-[#0d2546]">
+                    <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-4">
+                      <div className="text-[11px] font-semibold text-slate-500">คาดการณ์การเข้าถึง</div>
+                      <div className="mt-1 text-base font-bold text-slate-900">
                         {activeWf.analyticsOutput?.predictedReach}
                       </div>
                     </div>
-                    <div className="rounded-xl bg-sky-50 border border-sky-200 p-4">
-                      <div className="text-[11px] font-bold text-sky-800">คาดการณ์ Engagement</div>
-                      <div className="mt-1 text-sm font-extrabold text-[#0d2546]">
+                    <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-4">
+                      <div className="text-[11px] font-semibold text-slate-500">คาดการณ์การมีส่วนร่วม</div>
+                      <div className="mt-1 text-sm font-bold text-slate-900">
                         {activeWf.analyticsOutput?.predictedEngagement}
                       </div>
                     </div>
-                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                      <div className="text-[11px] font-bold text-amber-900">ความตรงกลุ่มผู้เรียน</div>
-                      <div className="mt-1 text-sm font-extrabold text-[#0d2546]">
+                    <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-4">
+                      <div className="text-[11px] font-semibold text-slate-500">ความตรงกลุ่มผู้เรียน</div>
+                      <div className="mt-1 text-sm font-bold text-slate-900">
                         {activeWf.analyticsOutput?.targetLearnerFit}
                       </div>
                     </div>
                   </div>
 
-                  <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-2">
-                    <div className="text-xs font-extrabold text-[#0d2546]">
-                      ข้อเสนอแนะเพื่อเพิ่มประสิทธิภาพคอนเทนต์ (Optimization & A/B Testing):
+                  <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-4 space-y-2">
+                    <div className="text-xs font-bold text-slate-800">
+                      แนวทางปรับปรุงและต่อยอดคอนเทนต์ถัดไป:
                     </div>
                     {(activeWf.analyticsOutput?.optimizationTips || []).map((tip, i) => (
-                      <div key={i} className="text-xs text-slate-700">
+                      <div key={i} className="text-xs text-slate-600">
                         • {tip}
                       </div>
                     ))}
@@ -1511,85 +2067,75 @@ export const AiCommandCenter: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* TAB: PUBLISH & DISTRIBUTE 8 CHANNELS (Red Highlighted Box in Image 1!) */}
+              {/* TAB PUBLISH & DISTRIBUTE: 8 CHANNELS */}
               {activeAgentTab === 'omnichannel' && (
-                <div className="rounded-2xl bg-white border-2 border-rose-500/80 p-5 space-y-4 shadow-xs">
+                <div className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-4 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <span className="rounded-full bg-rose-600 px-3 py-0.5 text-[10.5px] font-extrabold text-white">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600">
                         PUBLISH & DISTRIBUTE • เผยแพร่สู่ทุกช่องทาง
                       </span>
-                      <h3 className="mt-1 text-lg font-extrabold text-[#0d2546]">
-                        ชุดคอนเทนต์พร้อมโพสต์ครบ 8 แพลตฟอร์มอัตโนมัติ
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
+                        ชุดข้อความพร้อมกระจายสู่ Website, Social และ Newsletter ครบ 8 ช่องทาง
                       </h3>
                     </div>
                     {activeWf.status !== 'published' && (
                       <button
                         onClick={handleApproveAndPublish}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer"
                       >
-                        <Send className="w-3.5 h-3.5" /> อนุมัติ & เผยแพร่ทุกช่องทางทันที
+                        <Send className="w-3.5 h-3.5" /> อนุมัติ & เผยแพร่ทุกช่องทาง
                       </button>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                     {[
                       {
                         name: 'YouTube',
-                        badge: 'bg-red-600',
                         content: `${activeWf.omnichannelOutput?.youtube?.title}\n\n${activeWf.omnichannelOutput?.youtube?.description}`,
                       },
                       {
                         name: 'Facebook',
-                        badge: 'bg-[#1877f2]',
                         content: `${activeWf.omnichannelOutput?.facebook?.post}\n\n💬 ${activeWf.omnichannelOutput?.facebook?.engagementQuestion}`,
                       },
                       {
                         name: 'TikTok',
-                        badge: 'bg-slate-900',
                         content: `Hook: ${activeWf.omnichannelOutput?.tiktok?.hook}\n${activeWf.omnichannelOutput?.tiktok?.caption}\n${(activeWf.omnichannelOutput?.tiktok?.hashtags || []).join(' ')}`,
                       },
                       {
                         name: 'LINE OA',
-                        badge: 'bg-[#06c755]',
                         content: `${activeWf.omnichannelOutput?.lineOa?.headline}\n${activeWf.omnichannelOutput?.lineOa?.broadcastMessage}`,
                       },
                       {
                         name: 'X (Twitter)',
-                        badge: 'bg-black',
                         content: (activeWf.omnichannelOutput?.xTwitter?.thread || []).join('\n\n'),
                       },
                       {
                         name: 'Instagram',
-                        badge: 'bg-gradient-to-r from-pink-500 to-amber-500',
                         content: `${(activeWf.omnichannelOutput?.instagram?.carouselSlides || []).join('\n')}\n\n${activeWf.omnichannelOutput?.instagram?.caption}`,
                       },
                       {
                         name: 'Website / Blog',
-                        badge: 'bg-[#0d2546]',
                         content: `Slug: /${activeWf.omnichannelOutput?.websiteBlog?.slug}\nSEO Meta: ${activeWf.omnichannelOutput?.websiteBlog?.seoMeta}`,
                       },
                       {
                         name: 'Email / Newsletter',
-                        badge: 'bg-sky-700',
                         content: `Subject: ${activeWf.omnichannelOutput?.emailNewsletter?.subject}\n\n${activeWf.omnichannelOutput?.emailNewsletter?.bodyIntro}`,
                       },
                     ].map((ch) => (
                       <div
                         key={ch.name}
-                        className="rounded-xl border border-slate-200 p-3.5 bg-slate-50/70 flex flex-col justify-between"
+                        className="rounded-xl border border-slate-200/80 p-4 bg-slate-50/60 flex flex-col justify-between"
                       >
                         <div>
                           <div className="flex items-center justify-between gap-2 mb-2">
-                            <span
-                              className={`rounded-full px-3 py-0.5 text-xs font-extrabold text-white ${ch.badge}`}
-                            >
+                            <span className="text-xs font-bold text-slate-900">
                               {ch.name}
                             </span>
                             <button
                               onClick={() => copyText(ch.name, ch.content)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
                             >
                               {copiedKey === ch.name ? (
                                 <Check className="w-3 h-3 text-emerald-600" />
@@ -1599,7 +2145,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                               {copiedKey === ch.name ? 'คัดลอกแล้ว' : 'คัดลอก'}
                             </button>
                           </div>
-                          <pre className="whitespace-pre-wrap text-xs text-slate-700 font-body leading-relaxed">
+                          <pre className="whitespace-pre-wrap text-xs text-slate-600 font-body leading-relaxed">
                             {ch.content}
                           </pre>
                         </div>
@@ -1611,7 +2157,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                                   activeWf.humanApproval.publishedPostId!
                                 )
                               }
-                              className="mt-2 inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700 hover:underline cursor-pointer"
+                              className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline cursor-pointer"
                             >
                               <Eye className="w-3.5 h-3.5" /> เปิดดูโพสต์จริงบนเว็บไซต์ →
                             </button>
@@ -1626,23 +2172,25 @@ export const AiCommandCenter: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* AI TOOLS ECOSYSTEM MATRIX (Exact match to Bottom Bar of Image 1!) */}
+      {/* ===================================================================== */}
+      {/* AI TOOLS ECOSYSTEM MATRIX (REFINED MINIMAL LUXURY BAR)                */}
+      {/* ===================================================================== */}
       <div className="rounded-2xl bg-white border border-slate-200/80 p-5 shadow-2xs">
-        <div className="text-xs font-extrabold text-[#0d2546] mb-3">
-          AI TOOLS ECOSYSTEM (ชุดเครื่องมือ AI มาตรฐานที่เชื่อมโยงในแต่ละ AGENT ของ คมคิด by KOMKRIT)
+        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">
+          AI TOOLS ECOSYSTEM • เครื่องมือ AI ที่ทำงานร่วมกันในแต่ละ Agent ของ KOMKID BY KOMKRIT
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
           {AI_TOOLS_ECOSYSTEM.map((col) => (
             <div
               key={col.group}
-              className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50/50"
+              className="rounded-xl border border-slate-200/80 overflow-hidden bg-white"
             >
               <div
-                className={`${col.color} px-2.5 py-1.5 text-center text-[10.5px] font-extrabold text-white`}
+                className={`px-2.5 py-1.5 text-[10px] font-extrabold border-b ${col.accent}`}
               >
                 {col.group}
               </div>
-              <ul className="p-2.5 space-y-1 text-[11px] text-slate-700">
+              <ul className="p-2.5 space-y-1 text-[11px] text-slate-600">
                 {col.tools.map((tool) => (
                   <li key={tool} className="truncate">
                     • {tool}
@@ -1654,7 +2202,9 @@ export const AiCommandCenter: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* BLUEPRINT REFERENCE MODAL */}
+      {/* ===================================================================== */}
+      {/* BLUEPRINT REFERENCE MODAL (SHOWS BOTH UPLOADED ARCHITECTURE DIAGRAMS) */}
+      {/* ===================================================================== */}
       {blueprintModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-xs p-4 overflow-y-auto"
@@ -1665,9 +2215,14 @@ export const AiCommandCenter: React.FC<Props> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-lg font-extrabold text-[#0d2546]">
-                แผนผังสถาปัตยกรรมต้นฉบับ AI Content Ecosystem & 5-Pillar Model
-              </h3>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-amber-600">
+                  KOMKID ARCHITECTURE BLUEPRINTS
+                </div>
+                <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                  ผังสถาปัตยกรรมต้นฉบับ AGENT CEO (01–08) & AI Co-work 4 ธุรกิจหลัก
+                </h3>
+              </div>
               <button
                 onClick={() => setBlueprintModalOpen(false)}
                 className="p-1.5 rounded-full hover:bg-slate-100 cursor-pointer"
@@ -1675,38 +2230,26 @@ export const AiCommandCenter: React.FC<Props> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-4">
-              <div>
-                <div className="text-xs font-extrabold text-[#0d2546] mb-1.5">
-                  1. AI Content Creation Flow (8 Specialized Agents + Omnichannel)
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <div className="text-xs font-bold text-slate-700">
+                  1. AI Content Creation Flow — AGENT CEO & 01–08 Specialized Agents
                 </div>
                 <img
                   src="/images/blueprint-8agent-flow.jpg"
-                  alt="8-Agent Flow"
+                  alt="AI Content Creation Flow"
                   className="w-full rounded-xl border border-slate-200"
                 />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs font-extrabold text-[#0d2546] mb-1.5">
-                    2. Multi-Agent Content Ecosystem (CEO • Content • QA • Human Approval • KB)
-                  </div>
-                  <img
-                    src="/images/blueprint-multiagent-ecosystem.jpg"
-                    alt="Multi-Agent Ecosystem"
-                    className="w-full rounded-xl border border-slate-200"
-                  />
+              <div className="space-y-1.5">
+                <div className="text-xs font-bold text-slate-700">
+                  2. KOM KID by Komkrit — AI Co-work & 4 Revenue Engines
                 </div>
-                <div>
-                  <div className="text-xs font-extrabold text-[#0d2546] mb-1.5">
-                    3. KOMKID 5-Pillar Business Model (Content → Audience → Trust)
-                  </div>
-                  <img
-                    src="/images/blueprint-5pillar.jpg"
-                    alt="5-Pillar Business Model"
-                    className="w-full rounded-xl border border-slate-200"
-                  />
-                </div>
+                <img
+                  src="/images/blueprint-komkid-cowork.jpg"
+                  alt="KOM KID AI Co-work"
+                  className="w-full rounded-xl border border-slate-200"
+                />
               </div>
             </div>
           </div>

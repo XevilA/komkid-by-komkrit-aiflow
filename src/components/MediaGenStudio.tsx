@@ -315,8 +315,17 @@ export const MediaGenStudio: React.FC<Props> = ({
     if (asset.reviewStatus === 'pending_review') {
       await api.reviewMediaAsset(asset.id, 'approved').catch(() => {});
     }
+    const caption = (suggestedTitle || asset.thaiSummary || 'สื่อประกอบเนื้อหา').replace(
+      /[\[\]]/g,
+      ''
+    );
+    const inlineMarkdown =
+      asset.mediaType === 'video'
+        ? `![วิดีโอ: ${caption}](${asset.fileUrl})\n\n`
+        : `![${caption}](${asset.fileUrl})\n\n`;
     onOpenInPostEditor({
       title: suggestedTitle || asset.thaiSummary || '',
+      content: inlineMarkdown,
       coverImage:
         asset.mediaType === 'image' ? asset.fileUrl : '/images/thumb-ai-edu.jpg',
       videoUrl: asset.mediaType === 'video' ? asset.fileUrl : '',
@@ -338,11 +347,22 @@ export const MediaGenStudio: React.FC<Props> = ({
           `เขียนข่าวและบทความให้ความรู้ประกอบสื่อหัวข้อ: ${asset.prompt}`,
         contentFormat: 'news',
       });
+      const caption = (asset.thaiSummary || draft.title || 'สื่อประกอบเนื้อหา').replace(
+        /[\[\]]/g,
+        ''
+      );
+      const mediaTag =
+        asset.mediaType === 'video'
+          ? `![วิดีโอ: ${caption}](${asset.fileUrl})`
+          : `![${caption}](${asset.fileUrl})`;
+      const enrichedContent = draft.content.includes(asset.fileUrl)
+        ? draft.content
+        : `${draft.content.trim()}\n\n${mediaTag}`;
       onOpenInPostEditor({
         title: draft.title,
         subtitle: draft.subtitle,
         excerpt: draft.excerpt,
-        content: draft.content,
+        content: enrichedContent,
         category: draft.category,
         contentType: asset.mediaType === 'video' ? 'video' : draft.contentType,
         coverImage:
@@ -487,7 +507,7 @@ export const MediaGenStudio: React.FC<Props> = ({
       {/* ===================================================================== */}
       <div ref={recheckRef}>
         {activeRecheckAsset && (
-          <div className="rounded-3xl border-4 border-emerald-500 bg-white p-5 sm:p-7 shadow-lg space-y-5">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-7 shadow-sm space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-1 text-xs font-extrabold text-emerald-900">

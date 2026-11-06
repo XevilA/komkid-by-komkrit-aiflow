@@ -322,6 +322,7 @@ export const api = {
     imageSize?: '1K' | '2K';
     workflowId?: number | null;
     thaiSummary?: string;
+    reviewStatus?: 'approved' | 'pending_review';
   }) =>
     request<AiMediaAsset>('/api/ai/image/generate', {
       method: 'POST',
@@ -458,6 +459,8 @@ export const api = {
       customTitle?: string;
       customContent?: string;
       coverImageChoice?: string;
+      videoUrlChoice?: string;
+      audioUrlChoice?: string;
       isFeatured?: boolean;
       reviewerNote?: string;
       channelsToPublish?: string[];

@@ -23,6 +23,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Maximize2,
+  Crown,
+  GraduationCap,
+  ShoppingBag,
+  Handshake,
+  ArrowUpRight,
 } from 'lucide-react';
 import {
   Post,
@@ -104,6 +109,7 @@ export const AdminLayout: React.FC<Props> = ({
   const [mediaHandoff, setMediaHandoff] = useState<MediaAgentHandoff | null>(null);
   const [prefillNewPost, setPrefillNewPost] = useState<Partial<Post> | null>(null);
   const [aiStatus, setAiStatus] = useState<AiEngineSettings | null>(null);
+  const [blueprintOpen, setBlueprintOpen] = useState(false);
 
   const toggleDesktopMenu = useCallback((next?: boolean) => {
     setDesktopMenuCollapsed((prev) => {
@@ -185,38 +191,39 @@ export const AdminLayout: React.FC<Props> = ({
     }
   };
 
-  // 5 LARGE, PLAIN-THAI MENUS (Elder-friendly, dedicated AI Chat + Image/VDO Gen!)
+  // EXECUTIVE NAVIGATION ALIGNED WITH AGENT CEO (01-08) & AI CO-WORK BLUEPRINT
   const menuItems = [
     {
-      id: 'posts',
-      label: 'จัดการข่าวและบทความ',
-      sub: 'ลงข่าวใหม่ • แก้ไข • ลบข่าว',
-      icon: <FileText className="w-5 h-5" />,
-      badge: stats?.postsTotal ?? posts.length,
-    },
-    {
       id: 'ai-chat',
-      label: 'แชทคุยกับ AI (สั่งงาน)',
-      sub: 'คุยปกติ • เขียนข่าว • คิด Prompt',
-      icon: <Bot className="w-5 h-5" />,
-    },
-    {
-      id: 'media-gen',
-      label: 'สร้างรูปภาพ & วิดีโอ AI',
-      sub: 'สร้างภาพ • คลิป VDO • ดูตัวอย่าง',
-      icon: <ImageIcon className="w-5 h-5" />,
+      label: 'AI Co-work & Chat',
+      sub: 'สั่งงานผ่าน CEO • เขียน + รูป + VDO',
+      icon: <Bot className="w-4 h-4" />,
     },
     {
       id: 'ai-command',
-      label: 'ให้ทีม AI เขียนบทความชุดใหญ่',
-      sub: 'วิเคราะห์ลึก • แชร์หลายช่องทาง',
-      icon: <Sparkles className="w-5 h-5" />,
+      label: 'Agent CEO Flow (01–08)',
+      sub: '8 Agents อัจฉริยะ • ตรวจ & กระจายสื่อ',
+      icon: <Crown className="w-4 h-4" />,
+      badge: workflows.length || undefined,
+    },
+    {
+      id: 'posts',
+      label: 'จัดการคอนเทนต์เว็บไซต์',
+      sub: 'บทความ • ข่าว • วิดีโอ • คอร์สเรียน',
+      icon: <FileText className="w-4 h-4" />,
+      badge: stats?.postsTotal ?? posts.length,
+    },
+    {
+      id: 'media-gen',
+      label: 'สตูดิโอภาพ & วิดีโอ AI',
+      sub: 'Visual 04 • Video 05 • Google Flow',
+      icon: <ImageIcon className="w-4 h-4" />,
     },
     {
       id: 'settings',
-      label: 'ข้อความติดต่อ & ตั้งค่า',
-      sub: 'ดูคนติดต่อ • คีย์ AI • รหัสผ่าน',
-      icon: <Settings className="w-5 h-5" />,
+      label: 'ชุมชน • ช่องทาง • ตั้งค่า',
+      sub: 'CRM & Feedback • โซเชียล • API Vault',
+      icon: <Settings className="w-4 h-4" />,
       badge: stats?.unreadContacts || undefined,
     },
   ];
@@ -224,66 +231,109 @@ export const AdminLayout: React.FC<Props> = ({
   const settingsTabs: { id: SettingsSubTab; label: string; icon: React.ReactNode }[] = [
     {
       id: 'inbox',
-      label: 'ข้อความจากผู้ชม & สมาชิก',
+      label: 'Audience Feedback & CRM',
       icon: <MessageSquare className="w-4 h-4" />,
     },
     {
       id: 'api_keys',
-      label: 'รหัสผ่าน & เชื่อมต่อคีย์ AI',
+      label: 'API Vault & รหัสผ่าน',
       icon: <KeyRound className="w-4 h-4" />,
     },
     {
       id: 'channels',
-      label: 'ตั้งค่าแชร์โซเชียล',
+      label: 'Publish & Distribute (โซเชียล)',
       icon: <Share2 className="w-4 h-4" />,
     },
     {
       id: 'knowledge',
-      label: 'คลังข้อมูลสอน AI',
+      label: 'Knowledge Base (01 Research)',
       icon: <Database className="w-4 h-4" />,
     },
     {
       id: 'pillars',
-      label: 'แผนเป้าหมาย 5 ด้าน',
+      label: '4 ธุรกิจหลัก & โมเดลรายได้',
       icon: <Layers className="w-4 h-4" />,
     },
   ];
 
+  const revenueEngines = [
+    {
+      id: 'content',
+      title: '1. Content Creation',
+      desc: 'บทความ • วิดีโอ • Infographic',
+      metric: `${stats?.postsTotal ?? posts.length} ชิ้นงาน`,
+      icon: <Clapperboard className="w-4 h-4 text-sky-600" />,
+      onClick: () => setActiveMenu('ai-command'),
+    },
+    {
+      id: 'sponsor',
+      title: '2. School Sponsorship',
+      desc: 'เครือข่ายโรงเรียน & พันธมิตร',
+      metric: 'CRM & Proposal',
+      icon: <Handshake className="w-4 h-4 text-emerald-600" />,
+      onClick: () => openSettingsSection('pillars'),
+    },
+    {
+      id: 'courses',
+      title: '3. Online Courses',
+      desc: 'หลักสูตรพัฒนาทักษะอนาคต',
+      metric: `${posts.filter((p) => p.contentType === 'course').length} หลักสูตร`,
+      icon: <GraduationCap className="w-4 h-4 text-amber-600" />,
+      onClick: () => setActiveMenu('posts'),
+    },
+    {
+      id: 'marketplace',
+      title: '4. Marketplace',
+      desc: 'สื่อการเรียนรู้ & Affiliate',
+      metric: 'Omnichannel',
+      icon: <ShoppingBag className="w-4 h-4 text-purple-600" />,
+      onClick: () => openSettingsSection('channels'),
+    },
+  ];
+
   const isAiChatActive = activeMenu === 'ai-chat';
+  const activeMenuItem =
+    menuItems.find((m) => m.id === activeMenu) || menuItems[2];
 
   return (
     <div
       className={`${
         isAiChatActive ? 'h-screen overflow-hidden' : 'min-h-screen'
-      } flex bg-[#f4f7fb]`}
+      } flex bg-[#f6f7f9] text-slate-900 antialiased`}
     >
       {/* Mobile Sidebar Backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-2xs lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Large, Clear Left Tab Menu (Collapsible on Desktop & Mobile) */}
+      {/* =================================================================== */}
+      {/* MINIMAL-LUXURY EXECUTIVE SIDEBAR                                    */}
+      {/* =================================================================== */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#0b1f3a] text-white flex flex-col justify-between transition-transform duration-200 ${
+        className={`fixed inset-y-0 left-0 z-50 w-[272px] bg-[#0a101d] text-slate-200 border-r border-white/[0.07] flex flex-col justify-between transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } ${desktopMenuCollapsed ? 'lg:hidden' : 'lg:static lg:translate-x-0'}`}
       >
         <div>
-          <div className="p-5 border-b border-white/10 flex items-center justify-between gap-2">
+          {/* Executive Brand Header */}
+          <div className="px-5 py-5 border-b border-white/[0.07] flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
-              <img
-                src="/images/avatar-komkrit.png"
-                alt="Komkrit"
-                className="h-11 w-11 rounded-full border-2 border-amber-400 shrink-0"
-              />
+              <div className="relative shrink-0">
+                <img
+                  src="/images/avatar-komkrit.png"
+                  alt="Komkrit"
+                  className="h-10 w-10 rounded-full ring-1 ring-amber-300/60 object-cover"
+                />
+                <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0a101d]" />
+              </div>
               <div className="min-w-0">
-                <div className="font-extrabold text-base leading-tight truncate">
-                  ระบบจัดการเว็บไซต์
+                <div className="text-[11px] uppercase tracking-[0.16em] text-amber-300/90 font-semibold truncate">
+                  KOMKID AI CO-WORK
                 </div>
-                <div className="text-xs text-amber-300 font-bold mt-0.5 truncate">
+                <div className="font-bold text-sm text-white tracking-tight truncate mt-0.5">
                   คมคิด by KOMKRIT
                 </div>
               </div>
@@ -292,154 +342,201 @@ export const AdminLayout: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => toggleDesktopMenu(true)}
-                title="พับปิดเมนูแท็บด้านซ้าย"
-                className="hidden lg:inline-flex items-center justify-center p-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                title="ซ่อนแถบเมนู"
+                className="hidden lg:inline-flex items-center justify-center p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] transition cursor-pointer"
               >
-                <PanelLeftClose className="w-5 h-5" />
+                <PanelLeftClose className="w-4 h-4" />
               </button>
               <button
                 type="button"
                 onClick={() => setSidebarOpen(false)}
-                className="lg:hidden p-1.5 text-slate-300"
+                className="lg:hidden p-1.5 text-slate-400 hover:text-white"
               >
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5" />
               </button>
             </div>
           </div>
 
-          <nav className="p-3.5 space-y-2">
-            {menuItems.map((m) => {
-              const active = activeMenu === m.id;
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => {
-                    setActiveMenu(m.id);
-                    setSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between rounded-2xl px-4 py-3.5 text-left transition cursor-pointer ${
-                    active
-                      ? 'bg-[#f59e0b] text-[#0b1f3a] shadow-sm'
-                      : 'text-slate-100 hover:bg-white/10'
-                  }`}
-                >
-                  <span className="flex items-center gap-3">
-                    <span className="shrink-0">{m.icon}</span>
-                    <span>
-                      <span className="block text-sm sm:text-base font-extrabold leading-snug">
-                        {m.label}
-                      </span>
+          {/* Refined Navigation List */}
+          <div className="px-3 pt-4 pb-2">
+            <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Command & Production
+            </div>
+            <nav className="space-y-1">
+              {menuItems.map((m) => {
+                const active =
+                  activeMenu === m.id ||
+                  (activeMenu === 'dashboard' && m.id === 'posts');
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setActiveMenu(m.id);
+                      setSidebarOpen(false);
+                    }}
+                    className={`group relative w-full flex items-center justify-between rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+                      active
+                        ? 'bg-white/[0.09] text-white ring-1 ring-amber-300/25 shadow-xs'
+                        : 'text-slate-300/85 hover:bg-white/[0.04] hover:text-white'
+                    }`}
+                  >
+                    {active && (
+                      <span className="absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-r bg-amber-300" />
+                    )}
+                    <span className="flex items-center gap-3 min-w-0">
                       <span
-                        className={`block text-xs mt-0.5 ${
-                          active ? 'text-[#0b1f3a]/80 font-semibold' : 'text-slate-400'
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 transition ${
+                          active
+                            ? 'bg-amber-300/15 text-amber-300'
+                            : 'bg-white/[0.04] text-slate-400 group-hover:text-slate-200'
                         }`}
                       >
-                        {m.sub}
+                        {m.icon}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[13.5px] font-semibold leading-snug truncate">
+                          {m.label}
+                        </span>
+                        <span
+                          className={`block text-[11px] mt-0.5 truncate ${
+                            active ? 'text-slate-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {m.sub}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  {typeof m.badge === 'number' && m.badge > 0 && (
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-xs font-extrabold ${
-                        active
-                          ? 'bg-[#0b1f3a] text-amber-300'
-                          : 'bg-white/15 text-white'
-                      }`}
-                    >
-                      {m.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
+                    {typeof m.badge === 'number' && m.badge > 0 && (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          active
+                            ? 'bg-amber-300/20 text-amber-200'
+                            : 'bg-white/[0.07] text-slate-300'
+                        }`}
+                      >
+                        {m.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Architecture Flow Reference Trigger */}
+          <div className="px-4 pt-3">
+            <button
+              type="button"
+              onClick={() => setBlueprintOpen(true)}
+              className="w-full rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.05] to-transparent p-3 text-left hover:border-amber-300/30 transition cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-xs font-semibold text-amber-200">
+                <span>ผังสถาปัตยกรรม AI Flow</span>
+                <ArrowUpRight className="w-3.5 h-3.5 opacity-75" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                Agent CEO (01–08) & AI Co-work 4 ธุรกิจหลัก
+              </p>
+            </button>
+          </div>
         </div>
 
-        <div className="p-4 border-t border-white/10 space-y-2">
+        {/* Bottom Sidebar Footer */}
+        <div className="p-3.5 border-t border-white/[0.07] space-y-1.5">
           <button
             onClick={onOpenPublicWebsite}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-extrabold text-[#0b1f3a] hover:bg-amber-300 transition cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-[#0a101d] px-3.5 py-2.5 text-xs font-bold hover:bg-amber-200 transition cursor-pointer"
           >
-            <Globe className="w-4 h-4" />
-            เปิดดูหน้าเว็บจริง
+            <Globe className="w-3.5 h-3.5" />
+            เปิดดูหน้าเว็บไซต์จริง
           </button>
           <button
             onClick={onLogout}
-            className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-rose-300 hover:bg-rose-500/15 transition cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 transition cursor-pointer"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3.5 h-3.5" />
             ออกจากระบบ
           </button>
         </div>
       </aside>
 
-      {/* Main Content Area */}
+      {/* =================================================================== */}
+      {/* MAIN EXECUTIVE WORKSPACE                                            */}
+      {/* =================================================================== */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        {/* Clean Large-Font Top Bar */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 h-16 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        {/* Frosted Minimal Executive Header */}
+        <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/75 px-4 sm:px-7 h-15 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d2546] text-white text-sm font-bold cursor-pointer shrink-0"
+              className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0a101d] text-white text-xs font-semibold cursor-pointer shrink-0"
             >
-              <Menu className="w-5 h-5" />
+              <Menu className="w-4 h-4" />
               เมนู
             </button>
             {desktopMenuCollapsed && (
               <button
                 type="button"
                 onClick={() => toggleDesktopMenu(false)}
-                title="เปิดแสดงเมนูแท็บด้านซ้าย"
-                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d2546] text-white text-xs sm:text-sm font-extrabold hover:bg-[#163a6b] transition cursor-pointer shrink-0"
+                title="เปิดแสดงแถบเมนู"
+                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition cursor-pointer shrink-0"
               >
-                <PanelLeftOpen className="w-4 h-4 text-amber-300" />
+                <PanelLeftOpen className="w-3.5 h-3.5 text-slate-500" />
                 เปิดเมนูแท็บ
               </button>
             )}
-            <h1 className="text-base sm:text-lg font-extrabold text-[#0d2546] truncate">
-              {menuItems.find((m) => m.id === activeMenu)?.label || 'จัดการข่าวและบทความ'}
-            </h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="hidden sm:inline text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                KOMKID STUDIO
+              </span>
+              <span className="hidden sm:inline text-slate-300">/</span>
+              <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">
+                {activeMenuItem.label}
+              </h1>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {isAiChatActive && (
               <button
                 type="button"
                 onClick={() => toggleChatFullScreen(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-extrabold text-amber-300 hover:bg-[#163a6b] transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-full bg-[#0a101d] px-3.5 py-1.5 text-xs font-semibold text-amber-200 hover:bg-slate-800 transition cursor-pointer"
               >
-                <Maximize2 className="w-4 h-4" />
-                <span className="hidden sm:inline">เต็มจอ 100%</span>
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">เต็มจอ</span>
               </button>
             )}
             {aiStatus && (
               <button
                 type="button"
                 onClick={() => openSettingsSection('api_keys')}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-extrabold transition cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
                   connectedProvidersCount > 0
-                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-900 hover:bg-emerald-100'
-                    : 'bg-amber-400 text-[#0b1f3a] hover:brightness-105 shadow-xs'
+                    ? 'bg-emerald-50 border border-emerald-200/80 text-emerald-800 hover:bg-emerald-100/70'
+                    : 'bg-amber-100 border border-amber-300 text-amber-950 hover:bg-amber-200/70'
                 }`}
               >
-                <KeyRound className="w-4 h-4 shrink-0" />
+                <KeyRound className="w-3.5 h-3.5 shrink-0" />
                 {connectedProvidersCount > 0
-                  ? `เชื่อมต่อ AI จริงแล้ว (${connectedProvidersCount} ค่าย)`
-                  : 'เชื่อมต่อคีย์ AI จริง'}
+                  ? `API Vault • ${connectedProvidersCount} ค่าย`
+                  : 'เชื่อมต่อ API Key'}
               </button>
             )}
             <button
-              onClick={onOpenPublicWebsite}
-              className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+              onClick={() => setBlueprintOpen(true)}
+              className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
             >
-              <Globe className="w-4 h-4" /> <span className="hidden sm:inline">ดูหน้าเว็บจริง</span>
+              <Layers className="w-3.5 h-3.5 text-amber-600" />
+              ผัง AI Flow
             </button>
             <button
-              onClick={onLogout}
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3.5 py-2 text-sm font-bold text-slate-700 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
+              onClick={onOpenPublicWebsite}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
-              <LogOut className="w-4 h-4" /> ออกจากระบบ
+              <Globe className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">หน้าเว็บจริง</span>
             </button>
           </div>
         </header>
@@ -448,115 +545,132 @@ export const AdminLayout: React.FC<Props> = ({
           className={
             isAiChatActive
               ? 'flex-1 flex flex-col min-h-0 w-full overflow-hidden'
-              : 'flex-1 p-4 sm:p-6 max-w-[1240px] w-full mx-auto space-y-5'
+              : 'flex-1 p-4 sm:p-7 max-w-[1320px] w-full mx-auto space-y-6'
           }
         >
-          {/* Guided 1-Click Callout Banner if AI Keys haven't been saved yet */}
+          {/* Subtle Executive API Key Callout if zero keys connected */}
           {aiStatus &&
             connectedProvidersCount === 0 &&
             (activeMenu === 'media-gen' || activeMenu === 'ai-command') && (
-              <div className="rounded-2xl bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+              <div className="rounded-2xl bg-white border border-amber-200/90 p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+                <div className="flex items-start gap-3.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-700 shrink-0">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
                   <div>
-                    <div className="text-sm sm:text-base font-extrabold text-[#0d2546]">
-                      เริ่มใช้งาน AI จริง: กรุณาใส่ API Key เพียงครั้งเดียวก่อนสั่งงานครับ
+                    <div className="text-sm font-bold text-slate-900">
+                      เชื่อมต่อ API Key เพียงครั้งเดียวเพื่อเปิดระบบ Real Multi-Agent
                     </div>
-                    <p className="text-xs sm:text-sm text-slate-700 mt-0.5">
-                      ระบบนี้ปิดโหมดจำลอง (Zero Mockup) 100% — แนะนำใส่คีย์{' '}
-                      <strong>Google Gemini (AI Studio)</strong> เพียงตัวเดียว ใช้ได้ทั้งแชท, เขียนข่าว, สร้างภาพ และสร้างคลิปวิดีโอทันทีครับ
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      คีย์ถูกเข้ารหัสด้วย AES-256-GCM อัตโนมัติ แนะนำใส่คีย์ Google Gemini หรือ OpenAI เพื่อสั่งงานทั้งแชท บทความ รูปภาพ และวิดีโอ
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => openSettingsSection('api_keys')}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0d2546] px-5 py-3 text-sm font-extrabold text-amber-300 hover:bg-[#163a6b] cursor-pointer shrink-0"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-amber-200 hover:bg-slate-800 cursor-pointer shrink-0"
                 >
-                  <KeyRound className="w-4 h-4" /> ไปหน้าใส่คีย์ AI & ทดสอบทันที
+                  <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Vault
                 </button>
               </div>
             )}
-          {/* 1. NEWS & ARTICLES CRUD (DEFAULT HOME SCREEN!) */}
+
+          {/* 1. CONTENT MANAGEMENT + EXECUTIVE OVERVIEW */}
           {(activeMenu === 'posts' || activeMenu === 'dashboard') && (
             <>
-              {/* Clean 3-Box Summary Strip at Top */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div className="rounded-2xl bg-white border border-slate-200 px-5 py-4 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-bold text-slate-500">ข่าวและบทความทั้งหมด</div>
-                    <div className="text-2xl font-extrabold text-[#0d2546] mt-0.5">
-                      {stats?.postsTotal ?? posts.length} เรื่อง
+              {/* Executive KPI + AI Co-work Hero Banner */}
+              <div className="rounded-2xl bg-gradient-to-r from-[#0a101d] via-[#101c33] to-[#162747] text-white p-5 sm:p-6 shadow-sm border border-slate-900/10">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                  <div className="space-y-1.5">
+                    <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-amber-300">
+                      <Crown className="w-3.5 h-3.5" />
+                      CEO / KOM KID AI MANAGER • ศูนย์กลางบริหารงานด้วย AI
                     </div>
+                    <h2 className="text-lg sm:text-xl font-bold tracking-tight">
+                      คิดต่างอย่างสร้างสรรค์ — สั่งงานทีม AI Agent สร้างสื่อการศึกษาครบวงจร
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-300/85 max-w-2xl">
+                      เชื่อมโยง Agent นักวิจัย นักเขียน นักสร้างภาพ นักสร้างวิดีโอ และผู้ตรวจคุณภาพเข้าสู่เนื้อหาเว็บไซต์และโซเชียลในที่เดียว
+                    </p>
                   </div>
-                  <FileText className="w-8 h-8 text-[#0d2546]/20" />
+
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setActiveMenu('ai-chat')}
+                      className="inline-flex items-center gap-2 rounded-xl bg-amber-300 px-4 py-2.5 text-xs sm:text-sm font-bold text-[#0a101d] hover:bg-amber-200 transition cursor-pointer"
+                    >
+                      <Bot className="w-4 h-4" />
+                      เปิด AI Co-work Chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveMenu('ai-command')}
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/[0.07] px-4 py-2.5 text-xs sm:text-sm font-semibold text-white hover:bg-white/[0.14] transition cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      สั่งงาน Agent CEO (01–08)
+                    </button>
+                  </div>
                 </div>
 
-                <div className="rounded-2xl bg-white border border-slate-200 px-5 py-4 flex items-center justify-between">
+                {/* Minimal KPI Row */}
+                <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-white/10">
                   <div>
-                    <div className="text-sm font-bold text-slate-500">ยอดคนเข้ามาอ่านรวม</div>
-                    <div className="text-2xl font-extrabold text-[#0d2546] mt-0.5">
-                      {formatViews(stats?.totalViews ?? 0)} ครั้ง
+                    <div className="text-[11px] text-slate-400">คอนเทนต์บนเว็บไซต์</div>
+                    <div className="text-lg sm:text-2xl font-bold text-white mt-0.5">
+                      {stats?.postsTotal ?? posts.length}{' '}
+                      <span className="text-xs font-normal text-slate-400">เรื่อง</span>
                     </div>
                   </div>
-                  <Eye className="w-8 h-8 text-sky-600/25" />
-                </div>
-
-                <div
-                  onClick={() => openSettingsSection('inbox')}
-                  className="rounded-2xl bg-white border border-slate-200 px-5 py-4 flex items-center justify-between cursor-pointer hover:border-amber-400 transition"
-                >
                   <div>
-                    <div className="text-sm font-bold text-slate-500">ผู้ติดตาม & คนติดต่อ</div>
-                    <div className="text-2xl font-extrabold text-[#0d2546] mt-0.5">
-                      {(stats?.totalSubscribers ?? 0) + (stats?.unreadContacts ?? 0)} คน
+                    <div className="text-[11px] text-slate-400">ยอดการเข้าชมสะสม</div>
+                    <div className="text-lg sm:text-2xl font-bold text-white mt-0.5">
+                      {formatViews(stats?.totalViews ?? 0)}{' '}
+                      <span className="text-xs font-normal text-slate-400">ครั้ง</span>
                     </div>
                   </div>
-                  <Users className="w-8 h-8 text-emerald-600/25" />
+                  <div
+                    onClick={() => openSettingsSection('inbox')}
+                    className="cursor-pointer group"
+                  >
+                    <div className="text-[11px] text-slate-400 group-hover:text-amber-300 transition">
+                      ชุมชนผู้ติดตาม & ข้อความ
+                    </div>
+                    <div className="text-lg sm:text-2xl font-bold text-white mt-0.5 flex items-center gap-1.5">
+                      {(stats?.totalSubscribers ?? 0) + (stats?.unreadContacts ?? 0)}{' '}
+                      <span className="text-xs font-normal text-slate-400">รายการ</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Quick 2-Button AI Shortcuts right on Home */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => setActiveMenu('ai-chat')}
-                  className="flex items-center justify-between rounded-2xl bg-[#0d2546] px-5 py-4 text-left text-white hover:bg-[#163a6b] transition cursor-pointer shadow-xs"
-                >
-                  <div className="flex items-center gap-3.5">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-400 text-[#0d2546] shrink-0">
-                      <Bot className="w-6 h-6" />
+              {/* 4 Revenue Engines Strip (From Blueprint 2: KOM KID by Komkrit) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {revenueEngines.map((eng) => (
+                  <button
+                    key={eng.id}
+                    type="button"
+                    onClick={eng.onClick}
+                    className="group rounded-2xl bg-white border border-slate-200/80 p-4 text-left hover:border-slate-300 hover:shadow-xs transition cursor-pointer flex flex-col justify-between gap-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 border border-slate-100">
+                        {eng.icon}
+                      </span>
+                      <span className="text-[11px] font-semibold text-slate-500 bg-slate-100/80 rounded-full px-2.5 py-0.5">
+                        {eng.metric}
+                      </span>
                     </div>
                     <div>
-                      <div className="text-base font-extrabold">
-                        แชทคุยกับ AI (ปรึกษา & สั่งเขียนข่าว)
+                      <div className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#0d2546]">
+                        {eng.title}
                       </div>
-                      <div className="text-xs sm:text-sm text-amber-200">
-                        คุยว่าจะทำอะไร → ให้ AI เขียนข่าว หรือเขียน Full Prompt ส่งให้ Agent
-                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">{eng.desc}</div>
                     </div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveMenu('media-gen')}
-                  className="flex items-center justify-between rounded-2xl bg-white border-2 border-amber-400 px-5 py-4 text-left text-[#0d2546] hover:bg-amber-50 transition cursor-pointer shadow-xs"
-                >
-                  <div className="flex items-center gap-3.5">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0d2546] text-amber-300 shrink-0">
-                      <Clapperboard className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="text-base font-extrabold">
-                        สร้างรูปภาพ & วิดีโอ AI (ดูตัวอย่างก่อนใช้)
-                      </div>
-                      <div className="text-xs sm:text-sm text-slate-600">
-                        สั่ง Agent สร้างรูป/คลิป VDO จริง • ชอบเก็บไว้ หรือไม่ชอบกดลบทิ้งได้ทันที
-                      </div>
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                ))}
               </div>
 
               <PostCrudManager
@@ -575,7 +689,7 @@ export const AdminLayout: React.FC<Props> = ({
             </>
           )}
 
-          {/* 2. DEDICATED NORMAL AI CHAT + PROMPT EVALUATOR + NEWS WRITER */}
+          {/* 2. AI CO-WORK & UNIFIED CHAT STUDIO */}
           {activeMenu === 'ai-chat' && (
             <AiChatStudio
               initialAiSettings={aiStatus}
@@ -611,7 +725,7 @@ export const AdminLayout: React.FC<Props> = ({
             />
           )}
 
-          {/* 3. DEDICATED IMAGE & VIDEO GENERATOR WITH RECHECK PREVIEW */}
+          {/* 3. VISUAL 04 & VIDEO 05 STUDIO */}
           {(activeMenu === 'media-gen' || activeMenu === 'flow-chat') && (
             <MediaGenStudio
               incomingHandoff={mediaHandoff}
@@ -627,7 +741,7 @@ export const AdminLayout: React.FC<Props> = ({
             />
           )}
 
-          {/* 4. MULTI-AGENT AI ARTICLE WORKFLOW */}
+          {/* 4. AGENT CEO (01-08) COMMAND CENTER */}
           {activeMenu === 'ai-command' && (
             <AiCommandCenter
               workflows={workflows}
@@ -640,18 +754,18 @@ export const AdminLayout: React.FC<Props> = ({
             />
           )}
 
-          {/* 4. MESSAGES & SETTINGS */}
+          {/* 5. COMMUNITY, OMNICHANNEL & ENCRYPTED SETTINGS */}
           {activeMenu === 'settings' && (
             <div className="space-y-5">
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar bg-white rounded-2xl p-2 border border-slate-200">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar bg-white rounded-2xl p-1.5 border border-slate-200/80 shadow-2xs">
                 {settingsTabs.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => setSettingsTab(t.id)}
-                    className={`inline-flex items-center gap-2 shrink-0 rounded-xl px-4 py-2.5 text-sm font-extrabold transition cursor-pointer ${
+                    className={`inline-flex items-center gap-2 shrink-0 rounded-xl px-4 py-2 text-xs sm:text-sm font-semibold transition cursor-pointer ${
                       settingsTab === t.id
-                        ? 'bg-[#0d2546] text-white'
-                        : 'text-slate-600 hover:bg-slate-100'
+                        ? 'bg-[#0a101d] text-white shadow-2xs'
+                        : 'text-slate-600 hover:bg-slate-100/80'
                     }`}
                   >
                     {t.icon}
@@ -671,25 +785,25 @@ export const AdminLayout: React.FC<Props> = ({
                 <div className="space-y-5">
                   <form
                     onSubmit={handleChangePassword}
-                    className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6 space-y-4"
+                    className="rounded-2xl bg-white border border-slate-200/80 p-5 sm:p-6 space-y-4 shadow-2xs"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0d2546] text-amber-400">
-                        <Lock className="w-5 h-5" />
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0a101d] text-amber-300">
+                        <Lock className="w-4 h-4" />
                       </div>
                       <div>
-                        <h3 className="text-base font-extrabold text-[#0d2546]">
-                          เปลี่ยนรหัสผ่านเข้าหน้าผู้ดูแลระบบ
+                        <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                          เปลี่ยนรหัสผ่านผู้ดูแลระบบ
                         </h3>
-                        <p className="text-sm text-slate-500">
-                          ใช้สำหรับล็อกอินเข้าหน้า <code className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">/admin</code>
+                        <p className="text-xs text-slate-500">
+                          บัญชีสำหรับเข้าใช้งานหน้า <code className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">/admin</code>
                         </p>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                       <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-1">
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
                           ชื่อผู้ใช้
                         </label>
                         <input
@@ -697,25 +811,25 @@ export const AdminLayout: React.FC<Props> = ({
                           required
                           value={newUsername}
                           onChange={(e) => setNewUsername(e.target.value)}
-                          className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
+                          className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm focus:border-slate-900 focus:outline-none"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-1">
-                          รหัสผ่านเดิม
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          รหัสผ่านปัจจุบัน
                         </label>
                         <input
                           type="password"
                           required
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          placeholder="กรอกรหัสผ่านปัจจุบัน"
-                          className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
+                          placeholder="กรอกรหัสผ่านเดิม"
+                          className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm focus:border-slate-900 focus:outline-none"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-1">
-                          รหัสผ่านใหม่ (6 ตัวขึ้นไป)
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          รหัสผ่านใหม่ (อย่างน้อย 6 ตัว)
                         </label>
                         <input
                           type="password"
@@ -724,7 +838,7 @@ export const AdminLayout: React.FC<Props> = ({
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder="ตั้งรหัสผ่านใหม่"
-                          className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
+                          className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm focus:border-slate-900 focus:outline-none"
                         />
                       </div>
                     </div>
@@ -733,7 +847,7 @@ export const AdminLayout: React.FC<Props> = ({
                       <div>
                         {pwdMsg && (
                           <span
-                            className={`inline-flex items-center gap-1.5 text-sm font-bold ${
+                            className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
                               pwdMsg.type === 'ok'
                                 ? 'text-emerald-700'
                                 : 'text-rose-600'
@@ -749,9 +863,9 @@ export const AdminLayout: React.FC<Props> = ({
                       <button
                         type="submit"
                         disabled={pwdSaving}
-                        className="rounded-xl bg-[#0d2546] px-5 py-2.5 text-sm font-extrabold text-white hover:bg-[#163a6b] cursor-pointer disabled:opacity-50"
+                        className="rounded-xl bg-[#0a101d] px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                       >
-                        {pwdSaving ? 'กำลังบันทึก...' : 'บันทึกรหัสผ่านใหม่'}
+                        {pwdSaving ? 'กำลังบันทึก...' : 'อัปเดตรหัสผ่าน'}
                       </button>
                     </div>
                   </form>
@@ -779,7 +893,7 @@ export const AdminLayout: React.FC<Props> = ({
                       inputSource: 'ข้อมูลจากผู้ติดตาม (สังคมออนไลน์ / สื่อ)',
                       category: 'education',
                       targetAudience: role,
-                      businessPillar: '5. COMMUNITY | ชุมชน',
+                      businessPillar: '1. Content Creation | ผลิตสื่อ & ยอดวิว',
                       flowMode: 'full_8agent',
                     });
                     await onRefreshAll();
@@ -802,6 +916,59 @@ export const AdminLayout: React.FC<Props> = ({
           )}
         </main>
       </div>
+
+      {/* ARCHITECTURE BLUEPRINT VIEWER MODAL (Shows Both Uploaded Flow Diagrams!) */}
+      {blueprintOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-xs p-4 overflow-y-auto"
+          onClick={() => setBlueprintOpen(false)}
+        >
+          <div
+            className="my-auto w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-5 sm:p-7 shadow-2xl space-y-6 border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-600">
+                  KOMKID BY KOMKRIT ARCHITECTURE
+                </div>
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
+                  แผนผัง AI Content Creation Flow (01–08) & AI Co-work 4 ธุรกิจหลัก
+                </h3>
+              </div>
+              <button
+                onClick={() => setBlueprintOpen(false)}
+                className="p-2 rounded-full hover:bg-slate-100 text-slate-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-slate-700">
+                  1. AI Content Creation Flow — สั่งงาน วางแผน ติดตาม ผ่าน AGENT CEO (01–08)
+                </div>
+                <img
+                  src="/images/blueprint-8agent-flow.jpg"
+                  alt="AI Content Creation Flow"
+                  className="w-full rounded-xl border border-slate-200"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-slate-700">
+                  2. KOM KID AI Co-work — 4 ธุรกิจหลัก (Revenue Engines) & 3 ระบบสนับสนุนหลัก
+                </div>
+                <img
+                  src="/images/blueprint-komkid-cowork.jpg"
+                  alt="KOM KID AI Co-work"
+                  className="w-full rounded-xl border border-slate-200"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

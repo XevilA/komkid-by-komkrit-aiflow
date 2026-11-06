@@ -9,6 +9,7 @@ import {
   Upload,
   Sparkles,
   Image as ImageIcon,
+  Film,
   CheckCircle2,
   ArrowLeft,
   AlertTriangle,
@@ -21,6 +22,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import {
+  AiMediaAsset,
   Post,
   CategoryId,
   ContentType,
@@ -28,6 +30,7 @@ import {
   CATEGORIES,
 } from '../types';
 import { api, formatThaiDate, formatViews } from '../api';
+import { renderRichMarkdown } from './ArticleReaderModal';
 
 interface Props {
   posts: Post[];
@@ -72,6 +75,8 @@ export const PostCrudManager: React.FC<Props> = ({
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showExtraFields, setShowExtraFields] = useState(false);
+  const [previewContentRich, setPreviewContentRich] = useState(false);
+  const [aiMediaAssets, setAiMediaAssets] = useState<AiMediaAsset[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -98,6 +103,23 @@ export const PostCrudManager: React.FC<Props> = ({
     isFeatured: false,
   });
 
+  const loadSharedAiMedia = async () => {
+    try {
+      const items = await api.getMediaAssets();
+      setAiMediaAssets(
+        items.filter((m) => m.mediaType === 'image' || m.mediaType === 'video')
+      );
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (editorOpen) {
+      loadSharedAiMedia();
+    }
+  }, [editorOpen]);
+
   useEffect(() => {
     if (initialEditPost) {
       openEdit(initialEditPost);
@@ -105,6 +127,7 @@ export const PostCrudManager: React.FC<Props> = ({
     } else if (prefillNewPost) {
       setEditingId(null);
       setErrorMsg(null);
+      setPreviewContentRich(false);
       setShowExtraFields(Boolean(prefillNewPost.videoUrl || prefillNewPost.subtitle));
       setForm({
         title: prefillNewPost.title || '',
@@ -146,6 +169,7 @@ export const PostCrudManager: React.FC<Props> = ({
     setEditingId(null);
     setErrorMsg(null);
     setShowExtraFields(false);
+    setPreviewContentRich(false);
     setForm({
       title: '',
       subtitle: '',
@@ -168,6 +192,7 @@ export const PostCrudManager: React.FC<Props> = ({
   const openEdit = (p: Post) => {
     setEditingId(p.id);
     setErrorMsg(null);
+    setPreviewContentRich(false);
     setShowExtraFields(Boolean(p.videoUrl || p.subtitle));
     setForm({
       title: p.title,
@@ -188,6 +213,33 @@ export const PostCrudManager: React.FC<Props> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const insertMediaIntoContent = (asset: AiMediaAsset) => {
+    const cleanLabel = (asset.thaiSummary || form.title || 'สื่อประกอบเนื้อหา')
+      .replace(/[\[\]\n]/g, ' ')
+      .trim();
+    const mdTag =
+      asset.mediaType === 'video'
+        ? `![วิดีโอ: ${cleanLabel}](${asset.fileUrl})`
+        : `![${cleanLabel}](${asset.fileUrl})`;
+    setForm((prev) => ({
+      ...prev,
+      content: prev.content.trim()
+        ? `${prev.content.trim()}\n\n${mdTag}\n\n`
+        : `${mdTag}\n\n`,
+      coverImage:
+        asset.mediaType === 'image' && prev.coverImage === '/images/thumb-ai-edu.jpg'
+          ? asset.fileUrl
+          : prev.coverImage,
+      videoUrl:
+        asset.mediaType === 'video' && !prev.videoUrl ? asset.fileUrl : prev.videoUrl,
+    }));
+    showToast(
+      asset.mediaType === 'video'
+        ? 'แทรกวิดีโอ AI เข้าไปในเนื้อหาบทความเรียบร้อยแล้ว!'
+        : 'แทรกรูปภาพ AI เข้าไปในเนื้อหาบทความเรียบร้อยแล้ว!'
+    );
+  };
+
   const savePostWithStatus = async (targetStatus: PostStatus) => {
     if (!form.title.trim()) {
       setErrorMsg('กรุณาพิมพ์ "หัวข้อข่าว / ชื่อเรื่อง" ก่อนกดบันทึกครับ');
@@ -201,7 +253,11 @@ export const PostCrudManager: React.FC<Props> = ({
     setSaving(true);
     setErrorMsg(null);
     try {
-      const cleanPlain = form.content.replace(/[#>*_`]/g, '').replace(/\s+/g, ' ').trim();
+      const cleanPlain = form.content
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+        .replace(/[#>*_`]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       const payload: Partial<Post> = {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
@@ -314,6 +370,7 @@ export const PostCrudManager: React.FC<Props> = ({
       if (res.coverImage) {
         setForm((prev) => ({ ...prev, coverImage: res.coverImage }));
       }
+      await loadSharedAiMedia();
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -395,6 +452,13 @@ export const PostCrudManager: React.FC<Props> = ({
   if (editorOpen) {
     return (
       <div className="max-w-4xl mx-auto space-y-5">
+        {successMsg && (
+          <div className="rounded-2xl bg-emerald-600 text-white px-5 py-3.5 shadow-md flex items-center gap-3 text-sm sm:text-base font-extrabold">
+            <CheckCircle2 className="w-5 h-5 text-amber-300 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
         {/* Back button + Clear Heading */}
         <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs">
           <div>
@@ -539,11 +603,11 @@ export const PostCrudManager: React.FC<Props> = ({
             </label>
           </div>
 
-          {/* STEP 3: COVER PHOTO */}
-          <div className="space-y-3 rounded-2xl bg-slate-50 border border-slate-200 p-5">
+          {/* STEP 3: COVER PHOTO + SHARED AI AGENT MEDIA LIBRARY */}
+          <div className="space-y-4 rounded-2xl bg-slate-50 border border-slate-200 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <label className="text-base sm:text-lg font-extrabold text-[#0d2546]">
-                3. รูปภาพหน้าปกข่าว
+                3. รูปภาพหน้าปก & คลังรูป/วิดีโอจากทีม AI Agent
               </label>
               <div className="flex flex-wrap gap-2">
                 <label className="inline-flex items-center gap-2 rounded-xl bg-[#0d2546] px-5 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#193d6e] cursor-pointer shadow-xs">
@@ -602,52 +666,168 @@ export const PostCrudManager: React.FC<Props> = ({
                 </div>
               </div>
             </div>
+
+            {/* SHARED AI MEDIA PICKER (Put AI-generated images & videos directly into Content!) */}
+            {aiMediaAssets.length > 0 && (
+              <div className="pt-3 border-t border-slate-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-extrabold text-[#0d2546] flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    คลังรูปภาพ & วิดีโอที่ AI Agent สร้างไว้ ({aiMediaAssets.length} รายการ) — กดเลือกใส่ Content ได้ทันที:
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                  {aiMediaAssets.slice(0, 12).map((asset) => (
+                    <div
+                      key={asset.id}
+                      className="rounded-xl border border-slate-200 bg-white p-2.5 space-y-2 shadow-2xs"
+                    >
+                      <div className="relative aspect-video rounded-lg bg-slate-900 overflow-hidden">
+                        {asset.mediaType === 'video' ? (
+                          <video
+                            src={asset.fileUrl}
+                            className="h-full w-full object-cover"
+                            muted
+                            playsInline
+                          />
+                        ) : (
+                          <img
+                            src={asset.fileUrl}
+                            alt={asset.thaiSummary || 'AI Media'}
+                            className="h-full w-full object-cover"
+                          />
+                        )}
+                        <span
+                          className={`absolute top-1.5 left-1.5 rounded-md px-2 py-0.5 text-[10px] font-extrabold text-white ${
+                            asset.mediaType === 'video' ? 'bg-indigo-600' : 'bg-amber-600'
+                          }`}
+                        >
+                          {asset.mediaType === 'video' ? 'VDO' : 'รูป AI'}
+                        </span>
+                      </div>
+                      <div className="text-xs font-bold text-slate-700 line-clamp-1">
+                        {asset.thaiSummary || asset.prompt}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {asset.mediaType === 'image' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({ ...prev, coverImage: asset.fileUrl }));
+                              showToast('ตั้งรูป AI นี้เป็นรูปหน้าปกข่าวแล้ว!');
+                            }}
+                            className="flex-1 rounded-lg bg-[#0d2546] px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-[#193d6e] cursor-pointer"
+                          >
+                            ตั้งเป็นรูปปก
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                videoUrl: asset.fileUrl,
+                                contentType: 'video',
+                              }));
+                              showToast('แนบวิดีโอ AI เป็นวิดีโอหลักของข่าวนี้แล้ว!');
+                            }}
+                            className="flex-1 rounded-lg bg-indigo-600 px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-indigo-700 cursor-pointer"
+                          >
+                            ใช้เป็นวิดีโอหลัก
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => insertMediaIntoContent(asset)}
+                          className="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
+                        >
+                          + แทรกในเนื้อหา
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* VIDEO LINK (Shown automatically if contentType === 'video') */}
-          {form.contentType === 'video' && (
+          {/* VIDEO LINK (Shown when contentType === 'video' OR when videoUrl is attached) */}
+          {(form.contentType === 'video' || Boolean(form.videoUrl)) && (
             <div className="rounded-2xl bg-rose-50/70 border border-rose-200 p-5 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="text-base font-extrabold text-rose-950">
-                  🎬 ลิงก์คลิป YouTube หรืออัปโหลดไฟล์วิดีโอจากเครื่อง
+                <label className="text-base font-extrabold text-rose-950 flex items-center gap-1.5">
+                  <Film className="w-5 h-5 text-rose-600" />
+                  วิดีโอประกอบ Content นี้ (ลิงก์ YouTube / ไฟล์วิดีโอ AI)
                 </label>
-                <label className="inline-flex items-center gap-1.5 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800 cursor-pointer">
-                  <Upload className="w-4 h-4" />
-                  {uploadingVideo ? 'กำลังอัปโหลดวิดีโอ...' : 'เลือกไฟล์วิดีโอ (.MP4)'}
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleUploadVideoFile}
-                    className="hidden"
-                  />
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800 cursor-pointer">
+                    <Upload className="w-4 h-4" />
+                    {uploadingVideo ? 'กำลังอัปโหลดวิดีโอ...' : 'เลือกไฟล์วิดีโอ (.MP4)'}
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={handleUploadVideoFile}
+                      className="hidden"
+                    />
+                  </label>
+                  {form.videoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, videoUrl: '' })}
+                      className="rounded-xl bg-white border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 cursor-pointer"
+                    >
+                      เอาวิดีโอออก
+                    </button>
+                  )}
+                </div>
               </div>
               <input
                 type="text"
                 value={form.videoUrl}
                 onChange={(e) => setForm({ ...form, videoUrl: e.target.value })}
-                placeholder="วางลิงก์ YouTube เช่น https://www.youtube.com/watch?v=..."
+                placeholder="วางลิงก์ YouTube หรือเลือกวิดีโอจากคลัง AI ด้านบน..."
                 className="w-full rounded-xl border-2 border-rose-200 bg-white px-4 py-3 text-base focus:border-rose-500 focus:outline-none"
               />
             </div>
           )}
 
-          {/* STEP 4: MAIN CONTENT */}
+          {/* STEP 4: MAIN CONTENT + RICH INLINE MEDIA PREVIEW */}
           <div className="space-y-2.5">
-            <label className="block text-base sm:text-lg font-extrabold text-[#0d2546]">
-              4. เนื้อหาข่าว / รายละเอียดบทความ <span className="text-rose-600">*</span>
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-base sm:text-lg font-extrabold text-[#0d2546]">
+                4. เนื้อหาข่าว / รายละเอียดบทความ <span className="text-rose-600">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setPreviewContentRich((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#0d2546] bg-white px-3.5 py-1.5 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+              >
+                <Eye className="w-4 h-4" />
+                {previewContentRich
+                  ? 'กลับไปแก้ไขข้อความ'
+                  : 'ดูตัวอย่างหน้าอ่านจริง (พร้อมรูป/วิดีโอที่แทรก)'}
+              </button>
+            </div>
             <p className="text-sm text-slate-500">
-              พิมพ์ข้อความตามปกติได้เลยครับ กดขึ้นบรรทัดใหม่เพื่อแบ่งย่อหน้า ระบบจัดหน้าให้อัตโนมัติ
+              พิมพ์ข้อความตามปกติ หรือกดปุ่ม <strong>“+ แทรกในเนื้อหา”</strong> จากคลังรูป/วิดีโอ AI ด้านบนเพื่อวางภาพและคลิปแทรกในบทความได้เลยครับ
             </p>
-            <textarea
-              rows={12}
-              required
-              value={form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })}
-              placeholder="พิมพ์เนื้อหาข่าวหรือบทความที่นี่..."
-              className="w-full rounded-2xl border-2 border-slate-200 px-4 py-4 text-base sm:text-lg font-body leading-relaxed text-slate-800 focus:border-[#0d2546] focus:outline-none"
-            />
+            {previewContentRich ? (
+              <div className="rounded-2xl border-2 border-[#0d2546]/20 bg-[#fcfdff] p-5 sm:p-6 space-y-3">
+                <div className="text-xs font-extrabold text-amber-700">
+                  👁️ ตัวอย่างการแสดงผลจริงบนหน้าเว็บ:
+                </div>
+                <div>{renderRichMarkdown(form.content || '*(ยังไม่มีเนื้อหา)*')}</div>
+              </div>
+            ) : (
+              <textarea
+                rows={12}
+                required
+                value={form.content}
+                onChange={(e) => setForm({ ...form, content: e.target.value })}
+                placeholder="พิมพ์เนื้อหาข่าวหรือบทความที่นี่..."
+                className="w-full rounded-2xl border-2 border-slate-200 px-4 py-4 text-base sm:text-lg font-body leading-relaxed text-slate-800 focus:border-[#0d2546] focus:outline-none"
+              />
+            )}
           </div>
 
           {/* OPTIONAL EXTRA FIELDS (Tucked neatly away!) */}
@@ -679,7 +859,7 @@ export const PostCrudManager: React.FC<Props> = ({
                     className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
                   />
                 </div>
-                {form.contentType !== 'video' && (
+                {form.contentType !== 'video' && !form.videoUrl && (
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">
                       แนบลิงก์วิดีโอ YouTube (ถ้ามี)
