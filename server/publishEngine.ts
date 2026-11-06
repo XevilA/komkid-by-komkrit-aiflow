@@ -25,12 +25,23 @@ export interface DispatchChannelOutcome {
   createdPostId?: number | null;
 }
 
-function resolveLocalVideoPath(videoUrl?: string): string | null {
+async function resolveVideoBytes(videoUrl?: string): Promise<Buffer | null> {
   if (!videoUrl) return null;
   const clean = videoUrl.trim();
+  if (!clean) return null;
   if (clean.startsWith('/uploads/')) {
     const abs = path.join(UPLOADS_ROOT, clean.replace(/^\/uploads\//, ''));
-    if (fs.existsSync(abs)) return abs;
+    if (fs.existsSync(abs)) return fs.readFileSync(abs);
+  }
+  if (/^https?:\/\//i.test(clean)) {
+    try {
+      const resp = await fetch(clean);
+      if (resp.ok) {
+        return Buffer.from(await resp.arrayBuffer());
+      }
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -284,7 +295,7 @@ export async function dispatchSingleChannelReal(
   }
 
   // --------------------------------------------------------------------------
-  // 4. FACEBOOK PAGE (Real Meta Graph API v21.0)
+  // 4. FACEBOOK PAGE (Real Meta Graph API v21.0 — Feed, Photo & Video Support)
   // --------------------------------------------------------------------------
   if (input.channelKey === 'facebook') {
     if (!token || !targetId) {
@@ -299,13 +310,38 @@ export async function dispatchSingleChannelReal(
       };
     }
 
-    const fbResp = await fetch(`https://graph.facebook.com/v21.0/${targetId}/feed`, {
+    const fullMessage = `${input.title}\n\n${input.content}`;
+    const hasPublicVideo = /^https:\/\//i.test(input.videoUrl || '');
+    const hasPublicPhoto = /^https:\/\//i.test(input.coverImage || '');
+
+    const fbEndpoint = hasPublicVideo
+      ? `https://graph-video.facebook.com/v21.0/${targetId}/videos`
+      : hasPublicPhoto
+      ? `https://graph.facebook.com/v21.0/${targetId}/photos`
+      : `https://graph.facebook.com/v21.0/${targetId}/feed`;
+
+    const fbPayload = hasPublicVideo
+      ? {
+          file_url: input.videoUrl,
+          title: input.title,
+          description: fullMessage,
+          access_token: token,
+        }
+      : hasPublicPhoto
+      ? {
+          url: input.coverImage,
+          caption: fullMessage,
+          access_token: token,
+        }
+      : {
+          message: fullMessage,
+          access_token: token,
+        };
+
+    const fbResp = await fetch(fbEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: `${input.title}\n\n${input.content}`,
-        access_token: token,
-      }),
+      body: JSON.stringify(fbPayload),
     });
 
     const fbData = (await fbResp.json()) as any;
@@ -322,13 +358,14 @@ export async function dispatchSingleChannelReal(
       };
     }
 
+    const postIdOut = fbData?.post_id || fbData?.id;
     return {
       channelKey: 'facebook',
       channelName: chName,
       mode: 'live_api',
       status: 'published',
-      externalUrl: fbData?.id ? `https://facebook.com/${fbData.id}` : '',
-      responseNote: `โพสต์ขึ้น Facebook Page จริงสำเร็จ (Post ID: ${fbData?.id})`,
+      externalUrl: postIdOut ? `https://facebook.com/${postIdOut}` : '',
+      responseNote: `โพสต์ขึ้น Facebook Page จริงสำเร็จ (Post ID: ${postIdOut})`,
     };
   }
 
@@ -496,8 +533,8 @@ export async function dispatchSingleChannelReal(
       };
     }
 
-    const localVid = resolveLocalVideoPath(input.videoUrl);
-    if (!localVid) {
+    const videoBytes = await resolveVideoBytes(input.videoUrl);
+    if (!videoBytes || videoBytes.length === 0) {
       return {
         channelKey: 'youtube',
         channelName: chName,
@@ -508,8 +545,6 @@ export async function dispatchSingleChannelReal(
           'การอัปโหลดขึ้น YouTube Data API v3 ต้องแนบไฟล์วิดีโอ .mp4 จริง (สามารถสร้างวิดีโอจริงจาก Google Flow / Veo Studio แล้วเลือกแนบได้ทันที)',
       };
     }
-
-    const videoBytes = fs.readFileSync(localVid);
     const initResp = await fetch(
       'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
       {
@@ -564,7 +599,7 @@ export async function dispatchSingleChannelReal(
         'Content-Type': 'video/mp4',
         'Content-Length': String(videoBytes.length),
       },
-      body: videoBytes,
+      body: new Uint8Array(videoBytes),
     });
     const ytJson = (await putResp.json()) as any;
     if (!putResp.ok) {
@@ -606,8 +641,8 @@ export async function dispatchSingleChannelReal(
       };
     }
 
-    const localVid = resolveLocalVideoPath(input.videoUrl);
-    if (!localVid && !/^https:\/\//i.test(input.videoUrl)) {
+    const videoBytes = await resolveVideoBytes(input.videoUrl);
+    if (!videoBytes && !/^https:\/\//i.test(input.videoUrl)) {
       return {
         channelKey: 'tiktok',
         channelName: chName,
@@ -619,8 +654,7 @@ export async function dispatchSingleChannelReal(
       };
     }
 
-    if (localVid) {
-      const videoBytes = fs.readFileSync(localVid);
+    if (videoBytes && videoBytes.length > 0) {
       const initResp = await fetch(
         'https://open.tiktokapis.com/v2/post/publish/video/init/',
         {
@@ -665,7 +699,7 @@ export async function dispatchSingleChannelReal(
           'Content-Length': String(videoBytes.length),
           'Content-Range': `bytes 0-${videoBytes.length - 1}/${videoBytes.length}`,
         },
-        body: videoBytes,
+        body: new Uint8Array(videoBytes),
       });
 
       if (!putResp.ok) {

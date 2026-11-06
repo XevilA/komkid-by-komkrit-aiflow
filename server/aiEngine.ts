@@ -141,6 +141,14 @@ export function getActiveKnowledgeContext(topic: string) {
   return scored.slice(0, 6);
 }
 
+function sanitizeApiError(rawMsg: string, secret?: string): string {
+  let msg = String(rawMsg || 'เกิดข้อผิดพลาดในการเชื่อมต่อ API');
+  if (secret && secret.trim().length > 6) {
+    msg = msg.split(secret.trim()).join('***');
+  }
+  return msg;
+}
+
 // ============================================================================
 // CORE REAL MULTI-PROVIDER LLM EXECUTION (GEMINI, CLAUDE, DEEPSEEK, CHATGPT)
 // ============================================================================
@@ -161,50 +169,88 @@ export async function callRealLlm(params: {
 
   const startedAt = Date.now();
 
-  // 1. GOOGLE GEMINI (@google/genai Official Interactions API)
+  // 1. GOOGLE GEMINI (@google/genai v2.31.0 Official Interactions API + generateContent support)
   if (provider === 'gemini') {
     const apiKey = params.apiKeyOverride?.trim() || cfg.gemini.apiKey;
     if (!apiKey) {
       throw new Error(
-        'ยังไม่ได้ใส่ Google Gemini API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
+        'ยังไม่ได้ใส่ Google Gemini API Key — กรุณาไปที่ปุ่ม "เชื่อมต่อคีย์ AI" เพื่อวางคีย์และกดบันทึกก่อนใช้งานครับ'
       );
     }
     const model = params.model?.trim() || cfg.gemini.model || 'gemini-3.8-flash';
     const ai = new GoogleGenAI({ apiKey });
 
-    // Format multi-turn conversation input for Interactions API
-    const inputPayload =
-      params.messages.length === 1 && params.messages[0].role === 'user'
-        ? params.messages[0].content
-        : params.messages.map((m) => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            content: m.content,
-          }));
+    try {
+      const isLegacyGen2Model = /^gemini-(2\.|1\.)/i.test(model);
 
-    const createReq: Record<string, any> = {
-      model,
-      input: inputPayload,
-    };
-    if (params.systemInstruction) {
-      createReq.system_instruction = params.systemInstruction;
-    }
-    if (typeof params.temperature === 'number') {
-      createReq.generation_config = { temperature: params.temperature };
-    }
+      if (!isLegacyGen2Model) {
+        // Official @google/genai >= 2.0.0 Interactions API Steps Schema
+        const inputPayload =
+          params.messages.length === 1 && params.messages[0].role === 'user'
+            ? params.messages[0].content
+            : params.messages.map((m) => ({
+                type: m.role === 'assistant' ? 'model_output' : 'user_input',
+                content: [{ type: 'text', text: m.content }],
+              }));
 
-    const interaction = await ai.interactions.create(createReq as any);
-    const text = (interaction.output_text || '').trim();
-    if (!text) {
-      throw new Error(`Google Gemini (${model}) ตอบกลับเป็นค่าว่าง`);
-    }
+        const createReq: Record<string, any> = {
+          model,
+          input: inputPayload,
+        };
+        if (params.systemInstruction) {
+          createReq.system_instruction = params.systemInstruction;
+        }
+        if (params.jsonMode) {
+          createReq.response_format = {
+            type: 'text',
+            mime_type: 'application/json',
+          };
+        }
 
-    return {
-      text,
-      provider: 'gemini',
-      model,
-      engineLabel: `Google Gemini (${model})`,
-      latencyMs: Date.now() - startedAt,
-    };
+        const interaction = await ai.interactions.create(createReq as any);
+        const text = (interaction.output_text || '').trim();
+        if (!text) {
+          throw new Error(`Google Gemini (${model}) ตอบกลับเป็นค่าว่าง`);
+        }
+
+        return {
+          text,
+          provider: 'gemini',
+          model,
+          engineLabel: `Google Gemini (${model})`,
+          latencyMs: Date.now() - startedAt,
+        };
+      }
+
+      // Standard Gemini 2.5 Flash / Pro execution via Official @google/genai models.generateContent
+      const genResp = await ai.models.generateContent({
+        model,
+        contents: params.messages.map((m) => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        })),
+        config: {
+          ...(params.systemInstruction ? { systemInstruction: params.systemInstruction } : {}),
+          ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
+          ...(params.jsonMode ? { responseMimeType: 'application/json' } : {}),
+        },
+      });
+
+      const text = (genResp.text || '').trim();
+      if (!text) {
+        throw new Error(`Google Gemini (${model}) ตอบกลับเป็นค่าว่าง`);
+      }
+
+      return {
+        text,
+        provider: 'gemini',
+        model,
+        engineLabel: `Google Gemini (${model})`,
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch (err) {
+      throw new Error(sanitizeApiError((err as Error).message, apiKey));
+    }
   }
 
   // 2. ANTHROPIC CLAUDE (Official Messages API v1)

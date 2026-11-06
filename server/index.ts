@@ -1900,6 +1900,63 @@ app.post('/api/settings/test-provider', async (req, res) => {
   }
 });
 
+app.post('/api/settings/test-extra', async (req, res) => {
+  try {
+    const { service, apiKey } = req.body || {};
+    const cfg = getProviderConfigs();
+    const startedAt = Date.now();
+
+    if (service === 'elevenlabs') {
+      const key = String(apiKey || '').trim() || cfg.elevenlabs.apiKey;
+      if (!key) {
+        res.status(400).json({ error: 'กรุณาใส่ ElevenLabs API Key ก่อนทดสอบ' });
+        return;
+      }
+      const r = await fetch('https://api.elevenlabs.io/v1/user', {
+        headers: { 'xi-api-key': key },
+      });
+      if (!r.ok) {
+        res.status(400).json({ error: `ElevenLabs API ตอบกลับ HTTP ${r.status} (ตรวจสอบคีย์อีกครั้ง)` });
+        return;
+      }
+      const u = (await r.json()) as any;
+      res.json({
+        ok: true,
+        latencyMs: Date.now() - startedAt,
+        detail: `เชื่อมต่อ ElevenLabs สำเร็จ (โควต้าตัวอักษร: ${u?.subscription?.character_count ?? 0}/${u?.subscription?.character_limit ?? '?'})`,
+      });
+      return;
+    }
+
+    if (service === 'resend') {
+      const key = String(apiKey || '').trim() || cfg.resend.apiKey;
+      if (!key) {
+        res.status(400).json({ error: 'กรุณาใส่ Resend API Key (re_...) ก่อนทดสอบ' });
+        return;
+      }
+      const r = await fetch('https://api.resend.com/domains', {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!r.ok) {
+        res.status(400).json({ error: `Resend API ตอบกลับ HTTP ${r.status} (ตรวจสอบคีย์อีกครั้ง)` });
+        return;
+      }
+      const d = (await r.json()) as any;
+      const domainCount = Array.isArray(d?.data) ? d.data.length : 0;
+      res.json({
+        ok: true,
+        latencyMs: Date.now() - startedAt,
+        detail: `เชื่อมต่อ Resend Email API สำเร็จ (โดเมนยืนยันแล้ว ${domainCount} รายการ)`,
+      });
+      return;
+    }
+
+    res.status(400).json({ error: 'ไม่รู้จักบริการที่ต้องการทดสอบ' });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 // ============================================================================
 // OMNICHANNEL PUBLISH & DISTRIBUTE (8 CHANNELS — 100% REAL API / WEBHOOK / DB)
 // ============================================================================
@@ -1975,7 +2032,51 @@ app.put('/api/channels/:key', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/publish/logs', (_req, res) => {
+async function processDueScheduledPublishes(): Promise<boolean> {
+  const nowIso = new Date().toISOString().slice(0, 16); // matches datetime-local YYYY-MM-DDTHH:mm
+  const dueRows = db
+    .prepare(
+      "SELECT * FROM publish_logs WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?"
+    )
+    .all(nowIso) as any[];
+
+  if (dueRows.length === 0) return false;
+
+  for (const row of dueRows) {
+    const outcome = await dispatchSingleChannelReal({
+      channelKey: row.channel_key,
+      title: row.title,
+      content: row.content_preview,
+      category: 'education',
+      coverImage: '/images/thumb-ai-edu.jpg',
+      videoUrl: '',
+      workflowId: row.workflow_id,
+      postId: row.post_id,
+    });
+
+    db.prepare(
+      `UPDATE publish_logs SET mode = ?, status = ?, external_url = ?, response_note = ? WHERE id = ?`
+    ).run(
+      outcome.mode,
+      outcome.status,
+      outcome.externalUrl,
+      outcome.responseNote,
+      row.id
+    );
+  }
+  return true;
+}
+
+app.get('/api/publish/logs', async (_req, res) => {
+  try {
+    const mutated = await processDueScheduledPublishes();
+    if (mutated) {
+      await persistDatabaseToCloud();
+    }
+  } catch {
+    // ignore scheduler tick error
+  }
+
   const rows = db
     .prepare('SELECT * FROM publish_logs ORDER BY created_at DESC, id DESC LIMIT 100')
     .all()
@@ -2119,42 +2220,19 @@ app.delete('/api/publish/logs/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// Background Real Scheduler Worker: Executes due scheduled posts automatically
-setInterval(async () => {
-  try {
-    const nowIso = new Date().toISOString().slice(0, 16); // matches datetime-local YYYY-MM-DDTHH:mm
-    const dueRows = db
-      .prepare(
-        "SELECT * FROM publish_logs WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?"
-      )
-      .all(nowIso) as any[];
-
-    for (const row of dueRows) {
-      const outcome = await dispatchSingleChannelReal({
-        channelKey: row.channel_key,
-        title: row.title,
-        content: row.content_preview,
-        category: 'education',
-        coverImage: '/images/thumb-ai-edu.jpg',
-        videoUrl: '',
-        workflowId: row.workflow_id,
-        postId: row.post_id,
-      });
-
-      db.prepare(
-        `UPDATE publish_logs SET mode = ?, status = ?, external_url = ?, response_note = ? WHERE id = ?`
-      ).run(
-        outcome.mode,
-        outcome.status,
-        outcome.externalUrl,
-        outcome.responseNote,
-        row.id
-      );
+// Background Real Scheduler Worker: Executes due scheduled posts automatically on persistent Node servers
+if (!IS_SERVERLESS) {
+  const schedTimer = setInterval(async () => {
+    try {
+      await processDueScheduledPublishes();
+    } catch {
+      // ignore scheduler tick error
     }
-  } catch {
-    // ignore scheduler tick error
+  }, 30_000);
+  if (typeof schedTimer.unref === 'function') {
+    schedTimer.unref();
   }
-}, 30_000);
+}
 
 // --- AUDIENCE SURVEYS & SCHOOL FEEDBACK LOOP ---
 app.get('/api/surveys', (_req, res) => {

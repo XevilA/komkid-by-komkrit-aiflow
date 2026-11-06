@@ -496,6 +496,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  testExtraService: (payload: {
+    service: 'elevenlabs' | 'resend';
+    apiKey?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      latencyMs: number;
+      detail: string;
+    }>('/api/settings/test-extra', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Omnichannel Publish & Distribute (8 Channels)
   getChannels: () => request<ChannelConfig[]>('/api/channels'),

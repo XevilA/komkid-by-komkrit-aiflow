@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   FileText,
   Sparkles,
@@ -19,12 +19,14 @@ import {
   CheckCircle2,
   Bot,
   Image as ImageIcon,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Post,
   KnowledgeItem,
   BusinessPillarItem,
   AiWorkflow,
+  AiEngineSettings,
 } from '../types';
 import { api, DashboardStats, formatViews } from '../api';
 import { PostCrudManager } from './PostCrudManager';
@@ -84,6 +86,29 @@ export const AdminLayout: React.FC<Props> = ({
   const [settingsTab, setSettingsTab] = useState<SettingsSubTab>('inbox');
   const [mediaHandoff, setMediaHandoff] = useState<MediaAgentHandoff | null>(null);
   const [prefillNewPost, setPrefillNewPost] = useState<Partial<Post> | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiEngineSettings | null>(null);
+
+  const refreshAiStatus = useCallback(async () => {
+    try {
+      const s = await api.getAiSettings();
+      setAiStatus(s);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAiStatus();
+  }, [refreshAiStatus]);
+
+  const connectedProvidersCount = aiStatus
+    ? [
+        aiStatus.hasGeminiKey,
+        aiStatus.hasClaudeKey,
+        aiStatus.hasDeepseekKey,
+        aiStatus.hasOpenaiKey,
+      ].filter(Boolean).length
+    : 0;
 
   // Password Change Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -307,10 +332,26 @@ export const AdminLayout: React.FC<Props> = ({
             </h1>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {aiStatus && (
+              <button
+                type="button"
+                onClick={() => openSettingsSection('api_keys')}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-extrabold transition cursor-pointer ${
+                  connectedProvidersCount > 0
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-900 hover:bg-emerald-100'
+                    : 'bg-amber-400 text-[#0b1f3a] hover:brightness-105 shadow-xs'
+                }`}
+              >
+                <KeyRound className="w-4 h-4 shrink-0" />
+                {connectedProvidersCount > 0
+                  ? `เชื่อมต่อ AI จริงแล้ว (${connectedProvidersCount} ค่าย)`
+                  : 'เชื่อมต่อคีย์ AI จริง'}
+              </button>
+            )}
             <button
               onClick={onOpenPublicWebsite}
-              className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+              className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
             >
               <Globe className="w-4 h-4" /> ดูหน้าเว็บจริง
             </button>
@@ -324,6 +365,34 @@ export const AdminLayout: React.FC<Props> = ({
         </header>
 
         <main className="flex-1 p-4 sm:p-6 max-w-[1240px] w-full mx-auto space-y-5">
+          {/* Guided 1-Click Callout Banner if AI Keys haven't been saved yet */}
+          {aiStatus &&
+            connectedProvidersCount === 0 &&
+            (activeMenu === 'ai-chat' ||
+              activeMenu === 'media-gen' ||
+              activeMenu === 'ai-command') && (
+              <div className="rounded-2xl bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-sm sm:text-base font-extrabold text-[#0d2546]">
+                      เริ่มใช้งาน AI จริง: กรุณาใส่ API Key เพียงครั้งเดียวก่อนสั่งงานครับ
+                    </div>
+                    <p className="text-xs sm:text-sm text-slate-700 mt-0.5">
+                      ระบบนี้ปิดโหมดจำลอง (Zero Mockup) 100% — แนะนำใส่คีย์{' '}
+                      <strong>Google Gemini (AI Studio)</strong> เพียงตัวเดียว ใช้ได้ทั้งแชท, เขียนข่าว, สร้างภาพ และสร้างคลิปวิดีโอทันทีครับ
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openSettingsSection('api_keys')}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0d2546] px-5 py-3 text-sm font-extrabold text-amber-300 hover:bg-[#163a6b] cursor-pointer shrink-0"
+                >
+                  <KeyRound className="w-4 h-4" /> ไปหน้าใส่คีย์ AI & ทดสอบทันที
+                </button>
+              </div>
+            )}
           {/* 1. NEWS & ARTICLES CRUD (DEFAULT HOME SCREEN!) */}
           {(activeMenu === 'posts' || activeMenu === 'dashboard') && (
             <>
@@ -586,7 +655,10 @@ export const AdminLayout: React.FC<Props> = ({
 
                   <AudienceAndSettingsHub
                     mode="settings"
-                    onRefreshStats={onRefreshAll}
+                    onRefreshStats={async () => {
+                      await refreshAiStatus();
+                      await onRefreshAll();
+                    }}
                   />
                 </div>
               )}

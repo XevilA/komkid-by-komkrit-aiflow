@@ -235,39 +235,62 @@ export async function generateRealImage(params: {
       );
     }
 
-    const model = params.model || 'gemini-nano-banana-2.1';
+    const model =
+      params.model ||
+      getSettingValue('gemini_image_model') ||
+      'gemini-nano-banana-2.1';
     const aspectRatio = params.aspectRatio || '16:9';
     const ai = new GoogleGenAI({ apiKey: geminiKey });
 
-    const interaction = await ai.interactions.create({
-      model,
-      input: prompt,
-      response_format: {
-        type: 'image',
-        aspect_ratio: aspectRatio,
-        image_size: params.imageSize || '1K',
-        mime_type: 'image/png',
-      } as any,
-    });
-
-    const outImg = interaction.output_image as any;
     let imgBuffer: Buffer | null = null;
     let ext = 'png';
-    let mimeType = outImg?.mime_type || 'image/png';
-    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
-      ext = 'jpg';
-    }
+    let mimeType = 'image/png';
+    let interactionId = '';
 
-    if (outImg?.data) {
-      imgBuffer = Buffer.from(outImg.data, 'base64');
-    } else if (outImg?.uri) {
-      const r = await fetch(outImg.uri, {
-        headers: { 'x-goog-api-key': geminiKey },
+    if (/^imagen-/i.test(model)) {
+      const imResp = await ai.models.generateImages({
+        model,
+        prompt,
+        config: {
+          numberOfImages: 1,
+          aspectRatio,
+          outputMimeType: 'image/png',
+        },
       });
-      if (!r.ok) {
-        throw new Error(`ดาวน์โหลดรูปภาพจาก Gemini URI ไม่สำเร็จ (HTTP ${r.status})`);
+      const b64 = imResp?.generatedImages?.[0]?.image?.imageBytes;
+      if (b64) {
+        imgBuffer = Buffer.from(b64, 'base64');
       }
-      imgBuffer = Buffer.from(await r.arrayBuffer());
+    } else {
+      const interaction = await ai.interactions.create({
+        model,
+        input: prompt,
+        response_format: {
+          type: 'image',
+          aspect_ratio: aspectRatio,
+          image_size: params.imageSize || '1K',
+          mime_type: 'image/png',
+        } as any,
+      });
+
+      interactionId = interaction.id || '';
+      const outImg = interaction.output_image as any;
+      mimeType = outImg?.mime_type || 'image/png';
+      if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
+        ext = 'jpg';
+      }
+
+      if (outImg?.data) {
+        imgBuffer = Buffer.from(outImg.data, 'base64');
+      } else if (outImg?.uri) {
+        const r = await fetch(outImg.uri, {
+          headers: { 'x-goog-api-key': geminiKey },
+        });
+        if (!r.ok) {
+          throw new Error(`ดาวน์โหลดรูปภาพจาก Gemini URI ไม่สำเร็จ (HTTP ${r.status})`);
+        }
+        imgBuffer = Buffer.from(await r.arrayBuffer());
+      }
     }
 
     if (!imgBuffer || imgBuffer.length === 0) {
@@ -289,7 +312,7 @@ export async function generateRealImage(params: {
       fileUrl,
       mimeType,
       aspectRatio,
-      interactionId: interaction.id || '',
+      interactionId,
       workflowId: params.workflowId ?? null,
       thaiSummary: params.thaiSummary,
       reviewStatus: params.reviewStatus,
@@ -431,22 +454,118 @@ export async function generateRealVideo(params: {
     throw new Error('กรุณาระบุ Prompt สำหรับสร้างวิดีโอจริง');
   }
 
-  const engine = params.engine || 'gemini-omni-1.1-flash';
+  const engine =
+    params.engine ||
+    (getSettingValue('gemini_video_model') as any) ||
+    'gemini-omni-1.1-flash';
   const aspectRatio = params.aspectRatio || '16:9';
   const resolution = params.resolution || '720p';
   const durationSec = Math.min(10, Math.max(3, Math.round(Number(params.durationSec) || 6)));
 
   // --------------------------------------------------------------------------
-  // ROUTE A: Google Veo 3.1 / 3.0 GA on Vertex AI Enterprise (predictLongRunning)
+  // ROUTE A: Google Veo 3.1 / 3.0 GA (Supports BOTH Gemini Developer API Key AND Vertex AI Enterprise!)
   // --------------------------------------------------------------------------
   if (engine.startsWith('veo-')) {
     const projectId = getSettingValue('vertex_project_id', 'GOOGLE_CLOUD_PROJECT');
     const location = getSettingValue('vertex_location', 'GOOGLE_CLOUD_LOCATION') || 'us-central1';
-    const accessToken = await getVertexAccessToken();
+    const accessToken = projectId ? await getVertexAccessToken() : '';
+    const geminiKeyForVeo =
+      getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
+      getSettingValue('gemini_api_key', 'GOOGLE_API_KEY');
+
+    // A1: Direct Google Veo via GEMINI_API_KEY (@google/genai models.generateVideos) when Vertex GCP is not configured
+    if ((!projectId || !accessToken) && geminiKeyForVeo) {
+      const ai = new GoogleGenAI({
+        apiKey: geminiKeyForVeo,
+        httpOptions: { timeout: 600_000 },
+      });
+
+      const firstAbs = await resolveLocalAssetPath(params.firstFrameUrl);
+      const lastAbs = await resolveLocalAssetPath(params.lastFrameUrl);
+
+      const sourcePayload: Record<string, any> = { prompt };
+      if (firstAbs) {
+        sourcePayload.image = {
+          imageBytes: fs.readFileSync(firstAbs).toString('base64'),
+          mimeType: guessMimeType(firstAbs, 'image/png'),
+        };
+      }
+
+      const configPayload: Record<string, any> = {
+        numberOfVideos: 1,
+        aspectRatio,
+      };
+      if (lastAbs) {
+        configPayload.lastFrame = {
+          imageBytes: fs.readFileSync(lastAbs).toString('base64'),
+          mimeType: guessMimeType(lastAbs, 'image/png'),
+        };
+      }
+
+      let operation = await ai.models.generateVideos({
+        model: engine,
+        source: sourcePayload,
+        config: configPayload,
+      } as any);
+
+      const pollIntervalMs = IS_SERVERLESS ? 4000 : 6000;
+      const maxPolls = IS_SERVERLESS ? 13 : 90;
+      let polls = 0;
+      while (!operation.done && polls < maxPolls) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        operation = await ai.operations.getVideosOperation({ operation });
+        polls++;
+      }
+
+      if (!operation.done) {
+        throw new Error('Google Veo กำลังประมวลผลเกินเวลาที่กำหนด กรุณาลองความละเอียด 720p หรือใช้ Gemini Omni 1.1 Flash');
+      }
+      if ((operation as any).error) {
+        throw new Error((operation as any).error.message || JSON.stringify((operation as any).error));
+      }
+
+      const genVid = operation.response?.generatedVideos?.[0]?.video as any;
+      if (!genVid) {
+        throw new Error('Google Veo ประมวลผลเสร็จแต่ไม่พบไฟล์วิดีโอในผลลัพธ์');
+      }
+
+      const filename = `veo-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`;
+      const outAbsPath = path.join(VIDEOS_DIR, filename);
+
+      if (genVid.videoBytes) {
+        fs.writeFileSync(outAbsPath, Buffer.from(genVid.videoBytes, 'base64'));
+      } else if (genVid.uri) {
+        const dl = await fetch(genVid.uri, {
+          headers: { 'x-goog-api-key': geminiKeyForVeo },
+        });
+        if (!dl.ok) {
+          throw new Error(`ดาวน์โหลดไฟล์วิดีโอ Veo ไม่สำเร็จ (HTTP ${dl.status})`);
+        }
+        fs.writeFileSync(outAbsPath, Buffer.from(await dl.arrayBuffer()));
+      } else {
+        throw new Error('ไม่พบข้อมูลวิดีโอจาก Google Veo API');
+      }
+
+      return recordMediaAsset({
+        mediaType: 'video',
+        provider: 'google-veo-gemini-api',
+        model: engine,
+        prompt,
+        fileUrl: `/uploads/videos/${filename}`,
+        mimeType: 'video/mp4',
+        aspectRatio,
+        durationSec,
+        resolution,
+        interactionId: operation.name || '',
+        workflowId: params.workflowId ?? null,
+        thaiSummary: params.thaiSummary,
+        reviewStatus: params.reviewStatus,
+      });
+    }
 
     if (!projectId || !accessToken) {
       throw new Error(
-        `สำหรับการเรียกโมเดล Enterprise "${engine}" บน Google Cloud Vertex AI ต้องระบุ GCP Project ID และ Vertex OAuth Access Token (หรือล็อกอิน gcloud ADC) ในหน้าตั้งค่า API Keys — หรือสลับไปใช้ "Gemini Omni 1.1 Flash (Google Video API)" ซึ่งใช้เพียง GEMINI_API_KEY คีย์เดียวได้ทันที!`
+        `ยังไม่ได้ใส่คีย์สำหรับสร้างวิดีโอ Google Veo ("${engine}") — กรุณาไปที่ปุ่ม "เชื่อมต่อคีย์ AI" เพื่อใส่ GEMINI_API_KEY (ใช้ได้ทันที) หรือใส่ GCP Project ID + Vertex Token ครับ`
       );
     }
 
@@ -803,6 +922,14 @@ export async function stitchFlowScenesWithFfmpeg(params: {
 
   if (localPaths.length === 0) {
     throw new Error('ยังไม่มีคลิปวิดีโอฉากที่สร้างเสร็จสำหรับนำมาตัดต่อรวม (Assemble Film)');
+  }
+
+  try {
+    await execFileAsync('ffmpeg', ['-version'], { timeout: 4000 });
+  } catch {
+    throw new Error(
+      'เซิร์ฟเวอร์ Serverless ปัจจุบันไม่มีโปรแกรม FFmpeg ติดตั้งสำหรับรวมหลายฉาก (สามารถดาวน์โหลดหรือใช้คลิปวิดีโอแต่ละฉากจากคลังสื่อได้ทันทีครับ)'
+    );
   }
 
   const isPortrait = params.aspectRatio === '9:16';

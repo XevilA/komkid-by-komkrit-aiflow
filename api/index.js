@@ -1271,36 +1271,55 @@ async function generateRealImage(params) {
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E\u0E08\u0E23\u0E34\u0E07 (Gemini Nano Banana 2.1) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model2 = params.model || "gemini-nano-banana-2.1";
+    const model2 = params.model || getSettingValue("gemini_image_model") || "gemini-nano-banana-2.1";
     const aspectRatio = params.aspectRatio || "16:9";
     const ai = new GoogleGenAI({ apiKey: geminiKey });
-    const interaction = await ai.interactions.create({
-      model: model2,
-      input: prompt,
-      response_format: {
-        type: "image",
-        aspect_ratio: aspectRatio,
-        image_size: params.imageSize || "1K",
-        mime_type: "image/png"
-      }
-    });
-    const outImg = interaction.output_image;
     let imgBuffer2 = null;
     let ext = "png";
-    let mimeType = outImg?.mime_type || "image/png";
-    if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
-      ext = "jpg";
-    }
-    if (outImg?.data) {
-      imgBuffer2 = Buffer.from(outImg.data, "base64");
-    } else if (outImg?.uri) {
-      const r = await fetch(outImg.uri, {
-        headers: { "x-goog-api-key": geminiKey }
+    let mimeType = "image/png";
+    let interactionId = "";
+    if (/^imagen-/i.test(model2)) {
+      const imResp = await ai.models.generateImages({
+        model: model2,
+        prompt,
+        config: {
+          numberOfImages: 1,
+          aspectRatio,
+          outputMimeType: "image/png"
+        }
       });
-      if (!r.ok) {
-        throw new Error(`\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E\u0E08\u0E32\u0E01 Gemini URI \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (HTTP ${r.status})`);
+      const b64 = imResp?.generatedImages?.[0]?.image?.imageBytes;
+      if (b64) {
+        imgBuffer2 = Buffer.from(b64, "base64");
       }
-      imgBuffer2 = Buffer.from(await r.arrayBuffer());
+    } else {
+      const interaction = await ai.interactions.create({
+        model: model2,
+        input: prompt,
+        response_format: {
+          type: "image",
+          aspect_ratio: aspectRatio,
+          image_size: params.imageSize || "1K",
+          mime_type: "image/png"
+        }
+      });
+      interactionId = interaction.id || "";
+      const outImg = interaction.output_image;
+      mimeType = outImg?.mime_type || "image/png";
+      if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
+        ext = "jpg";
+      }
+      if (outImg?.data) {
+        imgBuffer2 = Buffer.from(outImg.data, "base64");
+      } else if (outImg?.uri) {
+        const r = await fetch(outImg.uri, {
+          headers: { "x-goog-api-key": geminiKey }
+        });
+        if (!r.ok) {
+          throw new Error(`\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E\u0E08\u0E32\u0E01 Gemini URI \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (HTTP ${r.status})`);
+        }
+        imgBuffer2 = Buffer.from(await r.arrayBuffer());
+      }
     }
     if (!imgBuffer2 || imgBuffer2.length === 0) {
       throw new Error(
@@ -1319,7 +1338,7 @@ async function generateRealImage(params) {
       fileUrl: fileUrl2,
       mimeType,
       aspectRatio,
-      interactionId: interaction.id || "",
+      interactionId,
       workflowId: params.workflowId ?? null,
       thaiSummary: params.thaiSummary,
       reviewStatus: params.reviewStatus
@@ -1417,17 +1436,96 @@ async function generateRealVideo(params) {
   if (!prompt) {
     throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38 Prompt \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07");
   }
-  const engine = params.engine || "gemini-omni-1.1-flash";
+  const engine = params.engine || getSettingValue("gemini_video_model") || "gemini-omni-1.1-flash";
   const aspectRatio = params.aspectRatio || "16:9";
   const resolution = params.resolution || "720p";
   const durationSec = Math.min(10, Math.max(3, Math.round(Number(params.durationSec) || 6)));
   if (engine.startsWith("veo-")) {
     const projectId = getSettingValue("vertex_project_id", "GOOGLE_CLOUD_PROJECT");
     const location = getSettingValue("vertex_location", "GOOGLE_CLOUD_LOCATION") || "us-central1";
-    const accessToken = await getVertexAccessToken();
+    const accessToken = projectId ? await getVertexAccessToken() : "";
+    const geminiKeyForVeo = getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY");
+    if ((!projectId || !accessToken) && geminiKeyForVeo) {
+      const ai2 = new GoogleGenAI({
+        apiKey: geminiKeyForVeo,
+        httpOptions: { timeout: 6e5 }
+      });
+      const firstAbs3 = await resolveLocalAssetPath(params.firstFrameUrl);
+      const lastAbs3 = await resolveLocalAssetPath(params.lastFrameUrl);
+      const sourcePayload = { prompt };
+      if (firstAbs3) {
+        sourcePayload.image = {
+          imageBytes: fs2.readFileSync(firstAbs3).toString("base64"),
+          mimeType: guessMimeType(firstAbs3, "image/png")
+        };
+      }
+      const configPayload = {
+        numberOfVideos: 1,
+        aspectRatio
+      };
+      if (lastAbs3) {
+        configPayload.lastFrame = {
+          imageBytes: fs2.readFileSync(lastAbs3).toString("base64"),
+          mimeType: guessMimeType(lastAbs3, "image/png")
+        };
+      }
+      let operation = await ai2.models.generateVideos({
+        model: engine,
+        source: sourcePayload,
+        config: configPayload
+      });
+      const pollIntervalMs = IS_SERVERLESS ? 4e3 : 6e3;
+      const maxPolls = IS_SERVERLESS ? 13 : 90;
+      let polls = 0;
+      while (!operation.done && polls < maxPolls) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        operation = await ai2.operations.getVideosOperation({ operation });
+        polls++;
+      }
+      if (!operation.done) {
+        throw new Error("Google Veo \u0E01\u0E33\u0E25\u0E31\u0E07\u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E40\u0E01\u0E34\u0E19\u0E40\u0E27\u0E25\u0E32\u0E17\u0E35\u0E48\u0E01\u0E33\u0E2B\u0E19\u0E14 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E25\u0E2D\u0E07\u0E04\u0E27\u0E32\u0E21\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14 720p \u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E0A\u0E49 Gemini Omni 1.1 Flash");
+      }
+      if (operation.error) {
+        throw new Error(operation.error.message || JSON.stringify(operation.error));
+      }
+      const genVid = operation.response?.generatedVideos?.[0]?.video;
+      if (!genVid) {
+        throw new Error("Google Veo \u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E41\u0E15\u0E48\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E43\u0E19\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C");
+      }
+      const filename3 = `veo-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`;
+      const outAbsPath3 = path2.join(VIDEOS_DIR, filename3);
+      if (genVid.videoBytes) {
+        fs2.writeFileSync(outAbsPath3, Buffer.from(genVid.videoBytes, "base64"));
+      } else if (genVid.uri) {
+        const dl = await fetch(genVid.uri, {
+          headers: { "x-goog-api-key": geminiKeyForVeo }
+        });
+        if (!dl.ok) {
+          throw new Error(`\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D Veo \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (HTTP ${dl.status})`);
+        }
+        fs2.writeFileSync(outAbsPath3, Buffer.from(await dl.arrayBuffer()));
+      } else {
+        throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E32\u0E01 Google Veo API");
+      }
+      return recordMediaAsset({
+        mediaType: "video",
+        provider: "google-veo-gemini-api",
+        model: engine,
+        prompt,
+        fileUrl: `/uploads/videos/${filename3}`,
+        mimeType: "video/mp4",
+        aspectRatio,
+        durationSec,
+        resolution,
+        interactionId: operation.name || "",
+        workflowId: params.workflowId ?? null,
+        thaiSummary: params.thaiSummary,
+        reviewStatus: params.reviewStatus
+      });
+    }
     if (!projectId || !accessToken) {
       throw new Error(
-        `\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E01\u0E32\u0E23\u0E40\u0E23\u0E35\u0E22\u0E01\u0E42\u0E21\u0E40\u0E14\u0E25 Enterprise "${engine}" \u0E1A\u0E19 Google Cloud Vertex AI \u0E15\u0E49\u0E2D\u0E07\u0E23\u0E30\u0E1A\u0E38 GCP Project ID \u0E41\u0E25\u0E30 Vertex OAuth Access Token (\u0E2B\u0E23\u0E37\u0E2D\u0E25\u0E47\u0E2D\u0E01\u0E2D\u0E34\u0E19 gcloud ADC) \u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys \u2014 \u0E2B\u0E23\u0E37\u0E2D\u0E2A\u0E25\u0E31\u0E1A\u0E44\u0E1B\u0E43\u0E0A\u0E49 "Gemini Omni 1.1 Flash (Google Video API)" \u0E0B\u0E36\u0E48\u0E07\u0E43\u0E0A\u0E49\u0E40\u0E1E\u0E35\u0E22\u0E07 GEMINI_API_KEY \u0E04\u0E35\u0E22\u0E4C\u0E40\u0E14\u0E35\u0E22\u0E27\u0E44\u0E14\u0E49\u0E17\u0E31\u0E19\u0E17\u0E35!`
+        `\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D Google Veo ("${engine}") \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E44\u0E1B\u0E17\u0E35\u0E48\u0E1B\u0E38\u0E48\u0E21 "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E04\u0E35\u0E22\u0E4C AI" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E43\u0E2A\u0E48 GEMINI_API_KEY (\u0E43\u0E0A\u0E49\u0E44\u0E14\u0E49\u0E17\u0E31\u0E19\u0E17\u0E35) \u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E2A\u0E48 GCP Project ID + Vertex Token \u0E04\u0E23\u0E31\u0E1A`
       );
     }
     const instance = { prompt };
@@ -1723,6 +1821,13 @@ async function stitchFlowScenesWithFfmpeg(params) {
   const localPaths = resolvedList.filter((p) => Boolean(p && fs2.existsSync(p)));
   if (localPaths.length === 0) {
     throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E25\u0E34\u0E1B\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E09\u0E32\u0E01\u0E17\u0E35\u0E48\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E19\u0E33\u0E21\u0E32\u0E15\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E23\u0E27\u0E21 (Assemble Film)");
+  }
+  try {
+    await execFileAsync("ffmpeg", ["-version"], { timeout: 4e3 });
+  } catch {
+    throw new Error(
+      "\u0E40\u0E0B\u0E34\u0E23\u0E4C\u0E1F\u0E40\u0E27\u0E2D\u0E23\u0E4C Serverless \u0E1B\u0E31\u0E08\u0E08\u0E38\u0E1A\u0E31\u0E19\u0E44\u0E21\u0E48\u0E21\u0E35\u0E42\u0E1B\u0E23\u0E41\u0E01\u0E23\u0E21 FFmpeg \u0E15\u0E34\u0E14\u0E15\u0E31\u0E49\u0E07\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21\u0E2B\u0E25\u0E32\u0E22\u0E09\u0E32\u0E01 (\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E0A\u0E49\u0E04\u0E25\u0E34\u0E1B\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E41\u0E15\u0E48\u0E25\u0E30\u0E09\u0E32\u0E01\u0E08\u0E32\u0E01\u0E04\u0E25\u0E31\u0E07\u0E2A\u0E37\u0E48\u0E2D\u0E44\u0E14\u0E49\u0E17\u0E31\u0E19\u0E17\u0E35\u0E04\u0E23\u0E31\u0E1A)"
+    );
   }
   const isPortrait = params.aspectRatio === "9:16";
   const targetW = isPortrait ? 720 : 1280;
@@ -2098,6 +2203,13 @@ function getActiveKnowledgeContext(topic) {
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, 6);
 }
+function sanitizeApiError(rawMsg, secret) {
+  let msg = String(rawMsg || "\u0E40\u0E01\u0E34\u0E14\u0E02\u0E49\u0E2D\u0E1C\u0E34\u0E14\u0E1E\u0E25\u0E32\u0E14\u0E43\u0E19\u0E01\u0E32\u0E23\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D API");
+  if (secret && secret.trim().length > 6) {
+    msg = msg.split(secret.trim()).join("***");
+  }
+  return msg;
+}
 async function callRealLlm(params) {
   const cfg = getProviderConfigs();
   const provider = params.provider && params.provider !== "auto" ? params.provider : resolveActiveProvider(params.provider);
@@ -2106,37 +2218,70 @@ async function callRealLlm(params) {
     const apiKey = params.apiKeyOverride?.trim() || cfg.gemini.apiKey;
     if (!apiKey) {
       throw new Error(
-        '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 Google Gemini API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
+        '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 Google Gemini API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E44\u0E1B\u0E17\u0E35\u0E48\u0E1B\u0E38\u0E48\u0E21 "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E04\u0E35\u0E22\u0E4C AI" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E27\u0E32\u0E07\u0E04\u0E35\u0E22\u0E4C\u0E41\u0E25\u0E30\u0E01\u0E14\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E48\u0E2D\u0E19\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E04\u0E23\u0E31\u0E1A'
       );
     }
     const model = params.model?.trim() || cfg.gemini.model || "gemini-3.8-flash";
     const ai = new GoogleGenAI2({ apiKey });
-    const inputPayload = params.messages.length === 1 && params.messages[0].role === "user" ? params.messages[0].content : params.messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      content: m.content
-    }));
-    const createReq = {
-      model,
-      input: inputPayload
-    };
-    if (params.systemInstruction) {
-      createReq.system_instruction = params.systemInstruction;
+    try {
+      const isLegacyGen2Model = /^gemini-(2\.|1\.)/i.test(model);
+      if (!isLegacyGen2Model) {
+        const inputPayload = params.messages.length === 1 && params.messages[0].role === "user" ? params.messages[0].content : params.messages.map((m) => ({
+          type: m.role === "assistant" ? "model_output" : "user_input",
+          content: [{ type: "text", text: m.content }]
+        }));
+        const createReq = {
+          model,
+          input: inputPayload
+        };
+        if (params.systemInstruction) {
+          createReq.system_instruction = params.systemInstruction;
+        }
+        if (params.jsonMode) {
+          createReq.response_format = {
+            type: "text",
+            mime_type: "application/json"
+          };
+        }
+        const interaction = await ai.interactions.create(createReq);
+        const text3 = (interaction.output_text || "").trim();
+        if (!text3) {
+          throw new Error(`Google Gemini (${model}) \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19\u0E04\u0E48\u0E32\u0E27\u0E48\u0E32\u0E07`);
+        }
+        return {
+          text: text3,
+          provider: "gemini",
+          model,
+          engineLabel: `Google Gemini (${model})`,
+          latencyMs: Date.now() - startedAt
+        };
+      }
+      const genResp = await ai.models.generateContent({
+        model,
+        contents: params.messages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        })),
+        config: {
+          ...params.systemInstruction ? { systemInstruction: params.systemInstruction } : {},
+          ...typeof params.temperature === "number" ? { temperature: params.temperature } : {},
+          ...params.jsonMode ? { responseMimeType: "application/json" } : {}
+        }
+      });
+      const text2 = (genResp.text || "").trim();
+      if (!text2) {
+        throw new Error(`Google Gemini (${model}) \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19\u0E04\u0E48\u0E32\u0E27\u0E48\u0E32\u0E07`);
+      }
+      return {
+        text: text2,
+        provider: "gemini",
+        model,
+        engineLabel: `Google Gemini (${model})`,
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (err) {
+      throw new Error(sanitizeApiError(err.message, apiKey));
     }
-    if (typeof params.temperature === "number") {
-      createReq.generation_config = { temperature: params.temperature };
-    }
-    const interaction = await ai.interactions.create(createReq);
-    const text2 = (interaction.output_text || "").trim();
-    if (!text2) {
-      throw new Error(`Google Gemini (${model}) \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19\u0E04\u0E48\u0E32\u0E27\u0E48\u0E32\u0E07`);
-    }
-    return {
-      text: text2,
-      provider: "gemini",
-      model,
-      engineLabel: `Google Gemini (${model})`,
-      latencyMs: Date.now() - startedAt
-    };
   }
   if (provider === "claude") {
     const apiKey = params.apiKeyOverride?.trim() || cfg.claude.apiKey;
@@ -2890,12 +3035,23 @@ ${idea}` : "",
 // server/publishEngine.ts
 import fs3 from "node:fs";
 import path3 from "node:path";
-function resolveLocalVideoPath(videoUrl) {
+async function resolveVideoBytes(videoUrl) {
   if (!videoUrl) return null;
   const clean = videoUrl.trim();
+  if (!clean) return null;
   if (clean.startsWith("/uploads/")) {
     const abs = path3.join(UPLOADS_ROOT, clean.replace(/^\/uploads\//, ""));
-    if (fs3.existsSync(abs)) return abs;
+    if (fs3.existsSync(abs)) return fs3.readFileSync(abs);
+  }
+  if (/^https?:\/\//i.test(clean)) {
+    try {
+      const resp = await fetch(clean);
+      if (resp.ok) {
+        return Buffer.from(await resp.arrayBuffer());
+      }
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -3113,15 +3269,29 @@ ${input.content.slice(0, 4500)}`
         responseNote: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Facebook Page ID \u0E41\u0E25\u0E30 Page Access Token (\u0E2B\u0E23\u0E37\u0E2D Webhook URL) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07\u0E01\u0E48\u0E2D\u0E19\u0E42\u0E1E\u0E2A\u0E15\u0E4C"
       };
     }
-    const fbResp = await fetch(`https://graph.facebook.com/v21.0/${targetId}/feed`, {
+    const fullMessage = `${input.title}
+
+${input.content}`;
+    const hasPublicVideo = /^https:\/\//i.test(input.videoUrl || "");
+    const hasPublicPhoto = /^https:\/\//i.test(input.coverImage || "");
+    const fbEndpoint = hasPublicVideo ? `https://graph-video.facebook.com/v21.0/${targetId}/videos` : hasPublicPhoto ? `https://graph.facebook.com/v21.0/${targetId}/photos` : `https://graph.facebook.com/v21.0/${targetId}/feed`;
+    const fbPayload = hasPublicVideo ? {
+      file_url: input.videoUrl,
+      title: input.title,
+      description: fullMessage,
+      access_token: token
+    } : hasPublicPhoto ? {
+      url: input.coverImage,
+      caption: fullMessage,
+      access_token: token
+    } : {
+      message: fullMessage,
+      access_token: token
+    };
+    const fbResp = await fetch(fbEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: `${input.title}
-
-${input.content}`,
-        access_token: token
-      })
+      body: JSON.stringify(fbPayload)
     });
     const fbData = await fbResp.json();
     if (!fbResp.ok) {
@@ -3134,13 +3304,14 @@ ${input.content}`,
         responseNote: `Facebook Graph API Error (HTTP ${fbResp.status}): ${fbData?.error?.message || "\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A Page Access Token"}`
       };
     }
+    const postIdOut = fbData?.post_id || fbData?.id;
     return {
       channelKey: "facebook",
       channelName: chName,
       mode: "live_api",
       status: "published",
-      externalUrl: fbData?.id ? `https://facebook.com/${fbData.id}` : "",
-      responseNote: `\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E02\u0E36\u0E49\u0E19 Facebook Page \u0E08\u0E23\u0E34\u0E07\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (Post ID: ${fbData?.id})`
+      externalUrl: postIdOut ? `https://facebook.com/${postIdOut}` : "",
+      responseNote: `\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E02\u0E36\u0E49\u0E19 Facebook Page \u0E08\u0E23\u0E34\u0E07\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (Post ID: ${postIdOut})`
     };
   }
   if (input.channelKey === "instagram") {
@@ -3281,8 +3452,8 @@ ${input.content}`.slice(0, 275);
         responseNote: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 Google OAuth2 Access Token (scope: youtube.upload) \u0E2B\u0E23\u0E37\u0E2D Webhook URL \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E02\u0E36\u0E49\u0E19 YouTube \u0E08\u0E23\u0E34\u0E07"
       };
     }
-    const localVid = resolveLocalVideoPath(input.videoUrl);
-    if (!localVid) {
+    const videoBytes = await resolveVideoBytes(input.videoUrl);
+    if (!videoBytes || videoBytes.length === 0) {
       return {
         channelKey: "youtube",
         channelName: chName,
@@ -3292,7 +3463,6 @@ ${input.content}`.slice(0, 275);
         responseNote: "\u0E01\u0E32\u0E23\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14\u0E02\u0E36\u0E49\u0E19 YouTube Data API v3 \u0E15\u0E49\u0E2D\u0E07\u0E41\u0E19\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D .mp4 \u0E08\u0E23\u0E34\u0E07 (\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07\u0E08\u0E32\u0E01 Google Flow / Veo Studio \u0E41\u0E25\u0E49\u0E27\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E41\u0E19\u0E1A\u0E44\u0E14\u0E49\u0E17\u0E31\u0E19\u0E17\u0E35)"
       };
     }
-    const videoBytes = fs3.readFileSync(localVid);
     const initResp = await fetch(
       "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
       {
@@ -3345,7 +3515,7 @@ ${input.content}`.slice(0, 275);
         "Content-Type": "video/mp4",
         "Content-Length": String(videoBytes.length)
       },
-      body: videoBytes
+      body: new Uint8Array(videoBytes)
     });
     const ytJson = await putResp.json();
     if (!putResp.ok) {
@@ -3378,8 +3548,8 @@ ${input.content}`.slice(0, 275);
         responseNote: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 TikTok Content Posting API v2 Access Token (\u0E2B\u0E23\u0E37\u0E2D Webhook URL) \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07"
       };
     }
-    const localVid = resolveLocalVideoPath(input.videoUrl);
-    if (!localVid && !/^https:\/\//i.test(input.videoUrl)) {
+    const videoBytes = await resolveVideoBytes(input.videoUrl);
+    if (!videoBytes && !/^https:\/\//i.test(input.videoUrl)) {
       return {
         channelKey: "tiktok",
         channelName: chName,
@@ -3389,8 +3559,7 @@ ${input.content}`.slice(0, 275);
         responseNote: "TikTok Content Posting API \u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D .mp4 \u0E08\u0E23\u0E34\u0E07 (\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E08\u0E32\u0E01 Google Veo / Flow Studio \u0E01\u0E48\u0E2D\u0E19\u0E2A\u0E48\u0E07\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48)"
       };
     }
-    if (localVid) {
-      const videoBytes = fs3.readFileSync(localVid);
+    if (videoBytes && videoBytes.length > 0) {
       const initResp = await fetch(
         "https://open.tiktokapis.com/v2/post/publish/video/init/",
         {
@@ -3431,7 +3600,7 @@ ${input.content}`.slice(0, 275);
           "Content-Length": String(videoBytes.length),
           "Content-Range": `bytes 0-${videoBytes.length - 1}/${videoBytes.length}`
         },
-        body: videoBytes
+        body: new Uint8Array(videoBytes)
       });
       if (!putResp.ok) {
         return {
@@ -5138,6 +5307,59 @@ app.post("/api/settings/test-provider", async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+app.post("/api/settings/test-extra", async (req, res) => {
+  try {
+    const { service, apiKey } = req.body || {};
+    const cfg = getProviderConfigs();
+    const startedAt = Date.now();
+    if (service === "elevenlabs") {
+      const key = String(apiKey || "").trim() || cfg.elevenlabs.apiKey;
+      if (!key) {
+        res.status(400).json({ error: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48 ElevenLabs API Key \u0E01\u0E48\u0E2D\u0E19\u0E17\u0E14\u0E2A\u0E2D\u0E1A" });
+        return;
+      }
+      const r = await fetch("https://api.elevenlabs.io/v1/user", {
+        headers: { "xi-api-key": key }
+      });
+      if (!r.ok) {
+        res.status(400).json({ error: `ElevenLabs API \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A HTTP ${r.status} (\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E04\u0E35\u0E22\u0E4C\u0E2D\u0E35\u0E01\u0E04\u0E23\u0E31\u0E49\u0E07)` });
+        return;
+      }
+      const u = await r.json();
+      res.json({
+        ok: true,
+        latencyMs: Date.now() - startedAt,
+        detail: `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D ElevenLabs \u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (\u0E42\u0E04\u0E27\u0E15\u0E49\u0E32\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23: ${u?.subscription?.character_count ?? 0}/${u?.subscription?.character_limit ?? "?"})`
+      });
+      return;
+    }
+    if (service === "resend") {
+      const key = String(apiKey || "").trim() || cfg.resend.apiKey;
+      if (!key) {
+        res.status(400).json({ error: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48 Resend API Key (re_...) \u0E01\u0E48\u0E2D\u0E19\u0E17\u0E14\u0E2A\u0E2D\u0E1A" });
+        return;
+      }
+      const r = await fetch("https://api.resend.com/domains", {
+        headers: { Authorization: `Bearer ${key}` }
+      });
+      if (!r.ok) {
+        res.status(400).json({ error: `Resend API \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A HTTP ${r.status} (\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E04\u0E35\u0E22\u0E4C\u0E2D\u0E35\u0E01\u0E04\u0E23\u0E31\u0E49\u0E07)` });
+        return;
+      }
+      const d = await r.json();
+      const domainCount = Array.isArray(d?.data) ? d.data.length : 0;
+      res.json({
+        ok: true,
+        latencyMs: Date.now() - startedAt,
+        detail: `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D Resend Email API \u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (\u0E42\u0E14\u0E40\u0E21\u0E19\u0E22\u0E37\u0E19\u0E22\u0E31\u0E19\u0E41\u0E25\u0E49\u0E27 ${domainCount} \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)`
+      });
+      return;
+    }
+    res.status(400).json({ error: "\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E08\u0E31\u0E01\u0E1A\u0E23\u0E34\u0E01\u0E32\u0E23\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E17\u0E14\u0E2A\u0E2D\u0E1A" });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get("/api/channels", (_req, res) => {
   const resendGlobalKey = getProviderConfigs().resend.apiKey;
   const rows = db.prepare("SELECT * FROM channel_configs ORDER BY id ASC").all().map((c) => {
@@ -5192,7 +5414,43 @@ app.put("/api/channels/:key", (req, res) => {
   );
   res.json({ ok: true });
 });
-app.get("/api/publish/logs", (_req, res) => {
+async function processDueScheduledPublishes() {
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16);
+  const dueRows = db.prepare(
+    "SELECT * FROM publish_logs WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?"
+  ).all(nowIso);
+  if (dueRows.length === 0) return false;
+  for (const row of dueRows) {
+    const outcome = await dispatchSingleChannelReal({
+      channelKey: row.channel_key,
+      title: row.title,
+      content: row.content_preview,
+      category: "education",
+      coverImage: "/images/thumb-ai-edu.jpg",
+      videoUrl: "",
+      workflowId: row.workflow_id,
+      postId: row.post_id
+    });
+    db.prepare(
+      `UPDATE publish_logs SET mode = ?, status = ?, external_url = ?, response_note = ? WHERE id = ?`
+    ).run(
+      outcome.mode,
+      outcome.status,
+      outcome.externalUrl,
+      outcome.responseNote,
+      row.id
+    );
+  }
+  return true;
+}
+app.get("/api/publish/logs", async (_req, res) => {
+  try {
+    const mutated = await processDueScheduledPublishes();
+    if (mutated) {
+      await persistDatabaseToCloud();
+    }
+  } catch {
+  }
   const rows = db.prepare("SELECT * FROM publish_logs ORDER BY created_at DESC, id DESC LIMIT 100").all().map((l) => ({
     id: l.id,
     workflowId: l.workflow_id,
@@ -5313,36 +5571,17 @@ app.delete("/api/publish/logs/:id", (req, res) => {
   db.prepare("DELETE FROM publish_logs WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true });
 });
-setInterval(async () => {
-  try {
-    const nowIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16);
-    const dueRows = db.prepare(
-      "SELECT * FROM publish_logs WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?"
-    ).all(nowIso);
-    for (const row of dueRows) {
-      const outcome = await dispatchSingleChannelReal({
-        channelKey: row.channel_key,
-        title: row.title,
-        content: row.content_preview,
-        category: "education",
-        coverImage: "/images/thumb-ai-edu.jpg",
-        videoUrl: "",
-        workflowId: row.workflow_id,
-        postId: row.post_id
-      });
-      db.prepare(
-        `UPDATE publish_logs SET mode = ?, status = ?, external_url = ?, response_note = ? WHERE id = ?`
-      ).run(
-        outcome.mode,
-        outcome.status,
-        outcome.externalUrl,
-        outcome.responseNote,
-        row.id
-      );
+if (!IS_SERVERLESS) {
+  const schedTimer = setInterval(async () => {
+    try {
+      await processDueScheduledPublishes();
+    } catch {
     }
-  } catch {
+  }, 3e4);
+  if (typeof schedTimer.unref === "function") {
+    schedTimer.unref();
   }
-}, 3e4);
+}
 app.get("/api/surveys", (_req, res) => {
   const rows = db.prepare("SELECT * FROM audience_surveys ORDER BY created_at DESC, id DESC").all().map((s) => ({
     id: s.id,
