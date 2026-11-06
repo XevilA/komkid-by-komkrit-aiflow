@@ -466,25 +466,36 @@ export async function fetchOpenAiLiveCatalog(
       if (!id || seen.has(id)) continue;
       seen.add(id);
 
+      if (id.startsWith('ft:')) continue;
+
       const option: LiveModelOption = {
         id,
         label: id,
         createdAt: m.created,
       };
 
-      if (/(gpt-image|dall-e|chatgpt-image)/i.test(id)) {
+      if (/(image|dall-e)/i.test(id)) {
         imageModels.push(option);
       } else if (/(^tts-|tts$|-tts)/i.test(id)) {
         ttsModels.push(option);
       } else if (
         /^(gpt-|o[1-9]|chatgpt-)/i.test(id) &&
-        !/(realtime|audio|transcribe|whisper|embedding|moderation|instruct|babbage|davinci|codex|computer-use|search-api)/i.test(
+        !/(realtime|audio|transcribe|diarize|whisper|embedding|moderation|instruct|babbage|davinci|codex|computer-use|search|deep-research)/i.test(
           id
         )
       ) {
         textModels.push(option);
       }
     }
+
+    // Keep standard general-purpose models ahead of ultra-heavy "-pro" tiers for Auto-Latest,
+    // while strictly sorting newest created timestamp first within each tier.
+    textModels.sort((a, b) => {
+      const aPro = /-pro(\b|-)/i.test(a.id) ? 1 : 0;
+      const bPro = /-pro(\b|-)/i.test(b.id) ? 1 : 0;
+      if (aPro !== bPro) return aPro - bPro;
+      return (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0);
+    });
 
     const catalog: ProviderLiveCatalog = {
       provider: 'openai',

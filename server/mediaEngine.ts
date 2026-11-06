@@ -396,18 +396,30 @@ export async function generateRealImage(params: {
     bodyPayload.response_format = 'b64_json';
   }
 
-  const resp = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${openaiKey}`,
-    },
-    body: JSON.stringify(bodyPayload),
-  });
+  let data: any = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify(bodyPayload),
+    });
 
-  const data = (await resp.json()) as any;
-  if (!resp.ok) {
-    throw new Error(data?.error?.message || `OpenAI Images API Error (HTTP ${resp.status})`);
+    data = (await resp.json()) as any;
+    if (resp.ok) break;
+
+    const errMsg = String(data?.error?.message || '');
+    if (/response_format/i.test(errMsg) && 'response_format' in bodyPayload) {
+      delete bodyPayload.response_format;
+      continue;
+    }
+    if (/size/i.test(errMsg) && bodyPayload.size !== '1024x1024') {
+      bodyPayload.size = '1024x1024';
+      continue;
+    }
+    throw new Error(errMsg || `OpenAI Images API Error (HTTP ${resp.status})`);
   }
 
   const item = data?.data?.[0];

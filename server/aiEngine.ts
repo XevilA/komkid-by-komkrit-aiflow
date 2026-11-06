@@ -231,18 +231,42 @@ export async function callRealLlm(params: {
         };
       }
 
-      const genResp = await ai.models.generateContent({
-        model,
-        contents: params.messages.map((m) => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
-        config: {
-          ...(params.systemInstruction ? { systemInstruction: params.systemInstruction } : {}),
-          ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
-          ...(params.jsonMode ? { responseMimeType: 'application/json' } : {}),
-        },
-      });
+      let genResp;
+      try {
+        genResp = await ai.models.generateContent({
+          model,
+          contents: params.messages.map((m) => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }],
+          })),
+          config: {
+            ...(params.systemInstruction ? { systemInstruction: params.systemInstruction } : {}),
+            ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
+            ...(params.jsonMode ? { responseMimeType: 'application/json' } : {}),
+          },
+        });
+      } catch (firstErr) {
+        const errMsg = String((firstErr as Error)?.message || '');
+        if (/temperature|responseMimeType|JSON|Developer instruction|systemInstruction/i.test(errMsg)) {
+          const fallbackMessages = params.messages.map((m, idx) => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [
+              {
+                text:
+                  idx === 0 && m.role === 'user' && params.systemInstruction
+                    ? `${params.systemInstruction}\n\n${m.content}`
+                    : m.content,
+              },
+            ],
+          }));
+          genResp = await ai.models.generateContent({
+            model,
+            contents: fallbackMessages,
+          });
+        } else {
+          throw firstErr;
+        }
+      }
 
       const text = (genResp.text || '').trim();
       if (!text) {
@@ -291,21 +315,31 @@ export async function callRealLlm(params: {
       body.temperature = params.temperature;
     }
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    let data: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+      });
 
-    const data = (await resp.json()) as any;
-    if (!resp.ok) {
-      throw new Error(
-        data?.error?.message || `Anthropic Claude API Error (HTTP ${resp.status})`
-      );
+      data = (await resp.json()) as any;
+      if (resp.ok) break;
+
+      const errMsg = String(data?.error?.message || '');
+      if (/temperature/i.test(errMsg) && 'temperature' in body) {
+        delete body.temperature;
+        continue;
+      }
+      if (/max_tokens/i.test(errMsg) && body.max_tokens > 4096) {
+        body.max_tokens = 4096;
+        continue;
+      }
+      throw new Error(errMsg || `Anthropic Claude API Error (HTTP ${resp.status})`);
     }
 
     const blocks = Array.isArray(data?.content) ? data.content : [];
@@ -370,20 +404,34 @@ export async function callRealLlm(params: {
       body.response_format = { type: 'json_object' };
     }
 
-    const resp = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    let data: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const resp = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-    const data = (await resp.json()) as any;
-    if (!resp.ok) {
-      throw new Error(
-        data?.error?.message || `DeepSeek API Error (HTTP ${resp.status})`
-      );
+      data = (await resp.json()) as any;
+      if (resp.ok) break;
+
+      const errMsg = String(data?.error?.message || '');
+      if (/temperature/i.test(errMsg) && 'temperature' in body) {
+        delete body.temperature;
+        continue;
+      }
+      if (/response_format/i.test(errMsg) && 'response_format' in body) {
+        delete body.response_format;
+        continue;
+      }
+      if (/max_tokens/i.test(errMsg) && body.max_tokens > 4096) {
+        body.max_tokens = 4096;
+        continue;
+      }
+      throw new Error(errMsg || `DeepSeek API Error (HTTP ${resp.status})`);
     }
 
     const msg = data?.choices?.[0]?.message;
@@ -404,7 +452,7 @@ export async function callRealLlm(params: {
     };
   }
 
-  // 4. OPENAI CHATGPT (Official OpenAI Chat Completions API + Live Model Discovery)
+  // 4. OPENAI CHATGPT (Official OpenAI Chat Completions + Responses API Auto-Adaptation)
   if (provider === 'openai') {
     const apiKey = params.apiKeyOverride?.trim() || cfg.openai.apiKey;
     if (!apiKey) {
@@ -418,49 +466,147 @@ export async function callRealLlm(params: {
       requestedModel: params.model || cfg.openai.model,
       apiKeyOverride: apiKey,
     });
-    const isReasoningModel = /^o\d/i.test(model);
+    const isReasoningSeries = /^o\d/i.test(model);
 
     const apiMessages: any[] = [];
     if (params.systemInstruction) {
+      const sysContent =
+        params.jsonMode && !/json/i.test(params.systemInstruction)
+          ? `${params.systemInstruction}\nReturn valid JSON.`
+          : params.systemInstruction;
       apiMessages.push({
-        role: isReasoningModel ? 'developer' : 'system',
-        content: params.systemInstruction,
+        role: isReasoningSeries ? 'developer' : 'system',
+        content: sysContent,
+      });
+    } else if (params.jsonMode) {
+      apiMessages.push({
+        role: isReasoningSeries ? 'developer' : 'system',
+        content: 'Respond strictly with valid JSON.',
       });
     }
     for (const m of params.messages) {
       apiMessages.push({ role: m.role, content: m.content });
     }
 
+    // Modern OpenAI flagship & reasoning models enforce default temperature (1) and reject custom values (e.g. 0.2 / 0.6).
+    // Omit custom non-default temperature so every live OpenAI model uses its native calibrated default cleanly.
     const body: Record<string, any> = {
       model,
       messages: apiMessages,
     };
-    if (!isReasoningModel && typeof params.temperature === 'number') {
-      body.temperature = params.temperature;
-    }
-    if (params.jsonMode && !isReasoningModel) {
+    if (params.jsonMode && !isReasoningSeries) {
       body.response_format = { type: 'json_object' };
     }
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    let data: any = null;
+    let usedResponsesApi = false;
 
-    const data = (await resp.json()) as any;
-    if (!resp.ok) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      data = (await resp.json()) as any;
+      if (resp.ok) break;
+
+      const errMsg = String(data?.error?.message || '');
+
+      // Automatic fallback to OpenAI /v1/responses for Responses-only flagship/pro models
+      if (/v1\/responses|not a chat model|not supported in the v1\/chat\/completions/i.test(errMsg)) {
+        const respBody: Record<string, any> = {
+          model,
+          input: params.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        };
+        if (params.systemInstruction) {
+          respBody.instructions =
+            params.jsonMode && !/json/i.test(params.systemInstruction)
+              ? `${params.systemInstruction}\nReturn valid JSON.`
+              : params.systemInstruction;
+        }
+        const r2 = await fetch('https://api.openai.com/v1/responses', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(respBody),
+        });
+        const d2 = (await r2.json()) as any;
+        if (!r2.ok) {
+          throw new Error(
+            d2?.error?.message || `OpenAI Responses API Error (HTTP ${r2.status})`
+          );
+        }
+        data = d2;
+        usedResponsesApi = true;
+        break;
+      }
+
+      if (/temperature/i.test(errMsg) && 'temperature' in body) {
+        delete body.temperature;
+        continue;
+      }
+      if (/response_format/i.test(errMsg) && 'response_format' in body) {
+        delete body.response_format;
+        continue;
+      }
+      if (/role.*system|developer/i.test(errMsg) && Array.isArray(body.messages)) {
+        const hasSys = body.messages.some((m: any) => m.role === 'system');
+        if (hasSys) {
+          body.messages = body.messages.map((m: any) =>
+            m.role === 'system' ? { ...m, role: 'developer' } : m
+          );
+          continue;
+        }
+      }
+
       throw new Error(
-        data?.error?.message || `OpenAI ChatGPT API Error (HTTP ${resp.status})`
+        errMsg || `OpenAI ChatGPT API Error (HTTP ${resp.status})`
       );
     }
 
-    const text = (data?.choices?.[0]?.message?.content || '').trim();
+    let text = '';
+    if (usedResponsesApi) {
+      if (typeof data?.output_text === 'string' && data.output_text.trim()) {
+        text = data.output_text.trim();
+      } else if (Array.isArray(data?.output)) {
+        const parts: string[] = [];
+        for (const item of data.output) {
+          if (Array.isArray(item?.content)) {
+            for (const c of item.content) {
+              if (typeof c?.text === 'string') parts.push(c.text);
+            }
+          }
+        }
+        text = parts.join('\n').trim();
+      }
+    } else {
+      const rawContent = data?.choices?.[0]?.message?.content;
+      if (typeof rawContent === 'string') {
+        text = rawContent.trim();
+      } else if (Array.isArray(rawContent)) {
+        text = rawContent
+          .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+          .join('\n')
+          .trim();
+      }
+    }
+
     if (!text) {
-      throw new Error(`OpenAI ChatGPT (${model}) ไม่ได้ส่งข้อความตอบกลับ`);
+      const refusal = data?.choices?.[0]?.message?.refusal;
+      throw new Error(
+        refusal
+          ? `OpenAI (${model}) ปฏิเสธคำขอ: ${refusal}`
+          : `OpenAI ChatGPT (${model}) ไม่ได้ส่งข้อความตอบกลับ`
+      );
     }
 
     return {
@@ -495,24 +641,37 @@ export async function callRealLlm(params: {
     apiMessages.push({ role: m.role, content: m.content });
   }
 
-  const resp = await fetch(`${endpoint}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: localModel,
-      messages: apiMessages,
-      temperature: params.temperature ?? 0.6,
-    }),
-  });
+  const compatBody: Record<string, any> = {
+    model: localModel,
+    messages: apiMessages,
+  };
+  if (typeof params.temperature === 'number') {
+    compatBody.temperature = params.temperature;
+  }
 
-  if (!resp.ok) {
+  let data: any = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const resp = await fetch(`${endpoint}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(compatBody),
+    });
+
+    if (resp.ok) {
+      data = (await resp.json()) as any;
+      break;
+    }
+
     const errText = await resp.text();
+    if (/temperature/i.test(errText) && 'temperature' in compatBody) {
+      delete compatBody.temperature;
+      continue;
+    }
     throw new Error(
       `OpenAI-Compatible Server (${endpoint}) ตอบกลับ HTTP ${resp.status}: ${errText.slice(0, 200)}`
     );
   }
 
-  const data = (await resp.json()) as any;
   const text = (data?.choices?.[0]?.message?.content || '').trim();
   if (!text) {
     throw new Error(`OpenAI-Compatible Server (${localModel}) ไม่ได้ส่งข้อความตอบกลับ`);
@@ -565,7 +724,6 @@ export async function testProviderConnection(params: {
         content: 'ยืนยันการเชื่อมต่อระบบ คมคิด by KOMKRIT สั้นๆ 1 ประโยค',
       },
     ],
-    temperature: 0.2,
   });
 
   return {
