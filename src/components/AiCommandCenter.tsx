@@ -124,12 +124,31 @@ export const AiCommandCenter: React.FC<Props> = ({
   const [stepIdx, setStepIdx] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mediaBusy, setMediaBusy] = useState<'image' | 'video' | 'audio' | null>(null);
-  const [videoEngineChoice, setVideoEngineChoice] = useState<
-    | 'gemini-omni-1.1-flash'
-    | 'veo-3.1-generate-001'
-    | 'veo-3.1-fast-generate-001'
-  >('gemini-omni-1.1-flash');
+  const [videoEngineChoice, setVideoEngineChoice] = useState<string>('');
+  const [liveVideoModels, setLiveVideoModels] = useState<
+    { id: string; label: string }[]
+  >([]);
   const [videoAspectChoice, setVideoAspectChoice] = useState<'16:9' | '9:16'>('16:9');
+
+  useEffect(() => {
+    api
+      .getLiveModels()
+      .then((cat) => {
+        const merged: { id: string; label: string }[] = [];
+        const seen = new Set<string>();
+        for (const m of [
+          ...(cat.providers.gemini?.videoModels || []),
+          ...(cat.providers.vertex_veo?.videoModels || []),
+        ]) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            merged.push({ id: m.id, label: m.label });
+          }
+        }
+        setLiveVideoModels(merged);
+      })
+      .catch(() => {});
+  }, []);
 
   // Human Approval & Inline Edit States
   const [editTitle, setEditTitle] = useState('');
@@ -1262,18 +1281,17 @@ export const AiCommandCenter: React.FC<Props> = ({
                       <div className="flex flex-wrap items-center gap-2">
                         <select
                           value={videoEngineChoice}
-                          onChange={(e) => setVideoEngineChoice(e.target.value as any)}
+                          onChange={(e) => setVideoEngineChoice(e.target.value)}
                           className="rounded-xl border border-purple-200 bg-white px-3 py-1.5 text-xs font-bold text-[#0d2546]"
                         >
-                          <option value="gemini-omni-1.1-flash">
-                            gemini-omni-1.1-flash (แนะนำ • ใช้ GEMINI_API_KEY + เสียงพร้อมภาพ)
+                          <option value="">
+                            ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API ที่เชื่อมต่อ)
                           </option>
-                          <option value="veo-3.1-generate-001">
-                            veo-3.1-generate-001 (Vertex AI Enterprise GA)
-                          </option>
-                          <option value="veo-3.1-fast-generate-001">
-                            veo-3.1-fast-generate-001 (Vertex AI Fast GA)
-                          </option>
+                          {liveVideoModels.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
                         </select>
                         <select
                           value={videoAspectChoice}

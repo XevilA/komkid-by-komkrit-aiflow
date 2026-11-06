@@ -20,6 +20,7 @@ import {
 import {
   AiEngineSettings,
   AiMediaAsset,
+  LiveModelOption,
   Post,
 } from '../types';
 import { api, formatThaiDate } from '../api';
@@ -68,11 +69,8 @@ export const MediaGenStudio: React.FC<Props> = ({
 
   // ---------------- VIDEO AGENT STATE ----------------
   const [vidFullPrompt, setVidFullPrompt] = useState('');
-  const [vidEngine, setVidEngine] = useState<
-    | 'gemini-omni-1.1-flash'
-    | 'veo-3.1-generate-001'
-    | 'veo-3.1-fast-generate-001'
-  >('gemini-omni-1.1-flash');
+  const [vidEngine, setVidEngine] = useState<string>('');
+  const [liveVideoModels, setLiveVideoModels] = useState<LiveModelOption[]>([]);
   const [vidAspect, setVidAspect] = useState<'16:9' | '9:16'>('16:9');
   const [vidDuration, setVidDuration] = useState<number>(6);
   const [vidFirstFrameUrl, setVidFirstFrameUrl] = useState<string>('');
@@ -97,9 +95,27 @@ export const MediaGenStudio: React.FC<Props> = ({
 
   const loadData = async () => {
     try {
-      const [st, ma] = await Promise.all([api.getAiSettings(), api.getMediaAssets()]);
+      const [st, ma, liveCatalog] = await Promise.all([
+        api.getAiSettings(),
+        api.getMediaAssets(),
+        api.getLiveModels().catch(() => null),
+      ]);
       setSettings(st);
       setAssets(ma);
+      if (liveCatalog) {
+        const merged: LiveModelOption[] = [];
+        const seen = new Set<string>();
+        for (const m of [
+          ...(liveCatalog.providers.gemini?.videoModels || []),
+          ...(liveCatalog.providers.vertex_veo?.videoModels || []),
+        ]) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            merged.push(m);
+          }
+        }
+        setLiveVideoModels(merged);
+      }
       // Auto-select default image provider based on configured key
       if (!st.hasGeminiKey && st.hasOpenaiKey) {
         setImgProvider('openai');
@@ -944,22 +960,21 @@ export const MediaGenStudio: React.FC<Props> = ({
 
               <div>
                 <label className="block text-sm font-extrabold text-slate-700 mb-2">
-                  ระบบสร้างวิดีโอ (Video Agent):
+                  ระบบสร้างวิดีโอ (ดึงรายชื่อโมเดลสดจาก API):
                 </label>
                 <select
                   value={vidEngine}
-                  onChange={(e) => setVidEngine(e.target.value as any)}
+                  onChange={(e) => setVidEngine(e.target.value)}
                   className="w-full rounded-xl border-2 border-slate-300 px-3.5 py-3 text-sm font-extrabold text-[#0d2546] bg-white"
                 >
-                  <option value="gemini-omni-1.1-flash">
-                    Google Video (Gemini Omni 1.1 — ใช้คีย์ Gemini เดียว)
+                  <option value="">
+                    ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API ที่เชื่อมต่อ)
                   </option>
-                  <option value="veo-3.1-generate-001">
-                    Google Veo 3.1 (Vertex AI คุณภาพสูงสุด)
-                  </option>
-                  <option value="veo-3.1-fast-generate-001">
-                    Google Veo 3.1 Fast (Vertex AI ความเร็วสูง)
-                  </option>
+                  {liveVideoModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 

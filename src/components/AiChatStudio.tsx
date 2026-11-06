@@ -31,6 +31,7 @@ import {
   CategoryId,
   LlmProviderId,
   Post,
+  UnifiedLiveModelsResponse,
 } from '../types';
 import { api } from '../api';
 import { renderRichMarkdown } from './ArticleReaderModal';
@@ -83,10 +84,13 @@ export const AiChatStudio: React.FC<Props> = ({
   onOpenInPostEditor,
 }) => {
   const [settings, setSettings] = useState<AiEngineSettings | null>(null);
+  const [liveModels, setLiveModels] = useState<UnifiedLiveModelsResponse | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const [sessions, setSessions] = useState<AiChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => createSessionId());
   const [messages, setMessages] = useState<AiChatMessage[]>([]);
   const [provider, setProvider] = useState<LlmProviderId>('auto');
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -127,9 +131,14 @@ export const AiChatStudio: React.FC<Props> = ({
 
   const loadInitial = async () => {
     try {
-      const [st, sess] = await Promise.all([api.getAiSettings(), api.getChatSessions()]);
+      const [st, sess, lm] = await Promise.all([
+        api.getAiSettings(),
+        api.getChatSessions(),
+        api.getLiveModels(false),
+      ]);
       setSettings(st);
       setSessions(sess);
+      setLiveModels(lm);
       if (sess.length > 0 && messages.length === 0) {
         setActiveSessionId(sess[0].sessionId);
         const hist = await api.getChatHistory(sess[0].sessionId);
@@ -137,6 +146,18 @@ export const AiChatStudio: React.FC<Props> = ({
       }
     } catch {
       // ignore initial load errors
+    }
+  };
+
+  const handleRefreshChatModels = async () => {
+    setRefreshingModels(true);
+    try {
+      const lm = await api.getLiveModels(true);
+      setLiveModels(lm);
+    } catch {
+      // ignore
+    } finally {
+      setRefreshingModels(false);
     }
   };
 
@@ -215,6 +236,7 @@ export const AiChatStudio: React.FC<Props> = ({
       await api.sendChatMessage({
         sessionId: activeSessionId,
         provider,
+        model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
         message: clean,
         useKnowledgeBase: true,
       });
@@ -260,6 +282,7 @@ export const AiChatStudio: React.FC<Props> = ({
         ideaText: customContextText || input.trim() || undefined,
         aspectRatio: '16:9',
         provider,
+        model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
       });
       setEvaluatedPrompt(res);
       setEditableFullPrompt(res.fullPrompt);
@@ -293,7 +316,7 @@ export const AiChatStudio: React.FC<Props> = ({
         const vidAspect: '16:9' | '9:16' = selectedAspect === '9:16' ? '9:16' : '16:9';
         const asset = await api.generateRealVideo({
           prompt: editableFullPrompt.trim(),
-          engine: 'gemini-omni-1.1-flash',
+          engine: settings?.geminiVideoModel || undefined,
           aspectRatio: vidAspect,
           durationSec: 6,
           resolution: '720p',
@@ -396,6 +419,7 @@ export const AiChatStudio: React.FC<Props> = ({
         ideaText: customText || input.trim() || undefined,
         contentFormat: format,
         provider,
+        model: provider !== 'auto' && selectedModel ? selectedModel : undefined,
       });
       setDraftPost(draft);
       setDraftPreviewMode('preview');
@@ -604,10 +628,22 @@ export const AiChatStudio: React.FC<Props> = ({
           </div>
 
           {/* Provider Selector Box */}
-          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3.5 space-y-2">
-            <label className="block text-xs font-extrabold text-slate-600">
-              เลือกค่าย AI ที่ต้องการคุย:
-            </label>
+          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="block text-xs font-extrabold text-slate-600">
+                เลือกค่าย AI ที่ต้องการคุย:
+              </label>
+              <button
+                type="button"
+                onClick={handleRefreshChatModels}
+                disabled={refreshingModels}
+                title="ดึงรายชื่อโมเดลล่าสุดจาก API"
+                className="inline-flex items-center gap-1 rounded-lg bg-white border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${refreshingModels ? 'animate-spin' : ''}`} />
+                อัปเดตรุ่น
+              </button>
+            </div>
             <div className="space-y-1.5">
               {PROVIDER_OPTIONS.map((p) => {
                 const isSelected = provider === p.id;
@@ -615,7 +651,10 @@ export const AiChatStudio: React.FC<Props> = ({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setProvider(p.id)}
+                    onClick={() => {
+                      setProvider(p.id);
+                      setSelectedModel('');
+                    }}
                     className={`w-full text-left rounded-xl px-3 py-2 transition cursor-pointer border ${
                       isSelected
                         ? 'bg-[#0d2546] text-white border-[#0d2546]'
@@ -634,6 +673,34 @@ export const AiChatStudio: React.FC<Props> = ({
                 );
               })}
             </div>
+            {provider !== 'auto' && (() => {
+              const cat = liveModels?.providers?.[provider];
+              const models = cat?.textModels || [];
+              return (
+                <div className="pt-1.5 border-t border-slate-200 space-y-1">
+                  <label className="block text-[11px] font-extrabold text-slate-600">
+                    รุ่นโมเดลสดจาก API ({models.length} รุ่น):
+                  </label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold text-[#0d2546]"
+                  >
+                    <option value="">✨ อัตโนมัติ (ใช้รุ่นใหม่ล่าสุดจาก API)</option>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  {!cat?.connected && (
+                    <p className="text-[11px] text-amber-700">
+                      ยังไม่ได้เชื่อม API Key ค่ายนี้ — เมื่อใส่คีย์แล้วระบบจะดึงรุ่นล่าสุดให้อัตโนมัติ
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 

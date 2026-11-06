@@ -18,6 +18,9 @@ import {
   AudienceSurvey,
   ChannelKey,
   LlmProviderId,
+  DiscoverableProvider,
+  ProviderLiveCatalog,
+  UnifiedLiveModelsResponse,
 } from './types';
 
 const ADMIN_TOKEN_KEY = 'komkrit_admin_token';
@@ -287,11 +290,7 @@ export const api = {
     }),
   generateRealVideo: (payload: {
     prompt: string;
-    engine?:
-      | 'gemini-omni-1.1-flash'
-      | 'veo-3.1-generate-001'
-      | 'veo-3.1-fast-generate-001'
-      | 'veo-3.0-generate-001';
+    engine?: string;
     aspectRatio?: '16:9' | '9:16';
     durationSec?: number;
     resolution?: '360p' | '720p' | '1080p' | '4k';
@@ -311,6 +310,7 @@ export const api = {
   generateRealAudio: (payload: {
     text: string;
     provider?: 'gemini' | 'openai' | 'elevenlabs';
+    model?: string;
     voice?: string;
     style?: string;
     workflowId?: number | null;
@@ -473,11 +473,26 @@ export const api = {
   deleteContact: (id: number) =>
     request<{ ok: boolean }>(`/api/contacts/${id}`, { method: 'DELETE' }),
 
-  // Multi-Provider AI Engine Settings & Live Connection Tester
+  // Multi-Provider AI Engine Settings, Live Model Discovery & Live Connection Tester
   getAiSettings: () => request<AiEngineSettings>('/api/settings/ai'),
   saveAiSettings: (payload: Record<string, any>) =>
     request<{ ok: boolean }>('/api/settings/ai', {
       method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getLiveModels: (forceRefresh = false) =>
+    request<UnifiedLiveModelsResponse>(
+      `/api/ai/models${forceRefresh ? '?refresh=1' : ''}`
+    ),
+  discoverProviderModels: (payload: {
+    provider: DiscoverableProvider;
+    apiKey?: string;
+    endpoint?: string;
+    projectId?: string;
+    location?: string;
+  }) =>
+    request<ProviderLiveCatalog>('/api/ai/models/provider', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
   testAiProvider: (payload: {

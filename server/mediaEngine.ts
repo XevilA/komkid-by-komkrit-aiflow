@@ -5,6 +5,11 @@ import { promisify } from 'node:util';
 import { GoogleGenAI } from '@google/genai';
 import { db, IS_SERVERLESS } from './db.ts';
 import { uploadMediaToCloudBlob } from './cloudSync.ts';
+import {
+  getGeminiModelMethods,
+  resolveLatestElevenLabsVoice,
+  resolveLatestModel,
+} from './modelRegistry.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -205,7 +210,7 @@ async function recordMediaAsset(params: {
 }
 
 // ============================================================================
-// 1. REAL AI IMAGE GENERATION (Gemini Nano Banana 2.1 / Gemini 3 Pro Image / OpenAI)
+// 1. REAL AI IMAGE GENERATION (Live Model Discovery: Google Gemini / Imagen / OpenAI)
 // ============================================================================
 export async function generateRealImage(params: {
   prompt: string;
@@ -222,7 +227,9 @@ export async function generateRealImage(params: {
     throw new Error('กรุณาระบุ Prompt สำหรับสร้างรูปภาพ');
   }
 
-  const geminiKey = getSettingValue('gemini_api_key', 'GEMINI_API_KEY') || getSettingValue('gemini_api_key', 'GOOGLE_API_KEY');
+  const geminiKey =
+    getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
+    getSettingValue('gemini_api_key', 'GOOGLE_API_KEY');
   const openaiKey = getSettingValue('openai_api_key', 'OPENAI_API_KEY');
 
   const chosenProvider =
@@ -231,14 +238,17 @@ export async function generateRealImage(params: {
   if (chosenProvider === 'gemini') {
     if (!geminiKey) {
       throw new Error(
-        'ยังไม่ได้ตั้งค่า Google Gemini API Key สำหรับสร้างภาพจริง (Gemini Nano Banana 2.1) — กรุณาใส่คีย์ในเมนู "ตั้งค่า API Keys & Providers"'
+        'ยังไม่ได้ตั้งค่า Google Gemini API Key สำหรับสร้างภาพจริง — กรุณาใส่คีย์ในเมนู "ตั้งค่า API Keys & Providers"'
       );
     }
 
-    const model =
-      params.model ||
-      getSettingValue('gemini_image_model') ||
-      'gemini-nano-banana-2.1';
+    const model = await resolveLatestModel({
+      provider: 'gemini',
+      capability: 'image',
+      requestedModel: params.model || getSettingValue('gemini_image_model'),
+      apiKeyOverride: geminiKey,
+    });
+    const methods = await getGeminiModelMethods(geminiKey, model);
     const aspectRatio = params.aspectRatio || '16:9';
     const ai = new GoogleGenAI({ apiKey: geminiKey });
 
@@ -247,7 +257,7 @@ export async function generateRealImage(params: {
     let mimeType = 'image/png';
     let interactionId = '';
 
-    if (/^imagen-/i.test(model)) {
+    if (methods.includes('predict') || /^imagen/i.test(model)) {
       const imResp = await ai.models.generateImages({
         model,
         prompt,
@@ -260,6 +270,35 @@ export async function generateRealImage(params: {
       const b64 = imResp?.generatedImages?.[0]?.image?.imageBytes;
       if (b64) {
         imgBuffer = Buffer.from(b64, 'base64');
+      }
+    } else if (methods.includes('generateContent')) {
+      let genResp: any;
+      try {
+        genResp = await ai.models.generateContent({
+          model,
+          contents: `${prompt} (Aspect ratio: ${aspectRatio})`,
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: { aspectRatio },
+          } as any,
+        });
+      } catch {
+        genResp = await ai.models.generateContent({
+          model,
+          contents: `${prompt} (Aspect ratio: ${aspectRatio})`,
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+          } as any,
+        });
+      }
+
+      const parts: any[] = genResp?.candidates?.[0]?.content?.parts || [];
+      const imgPart = parts.find((p) => p?.inlineData?.data);
+      if (imgPart?.inlineData?.data) {
+        mimeType = imgPart.inlineData.mimeType || 'image/png';
+        if (mimeType.includes('jpeg') || mimeType.includes('jpg')) ext = 'jpg';
+        else if (mimeType.includes('webp')) ext = 'webp';
+        imgBuffer = Buffer.from(imgPart.inlineData.data, 'base64');
       }
     } else {
       const interaction = await ai.interactions.create({
@@ -295,7 +334,7 @@ export async function generateRealImage(params: {
 
     if (!imgBuffer || imgBuffer.length === 0) {
       throw new Error(
-        `โมเดล ${model} ไม่ได้ส่งข้อมูลรูปภาพกลับมา กรุณาตรวจสอบสิทธิ์ API Key หรือปรับ Prompt`
+        `โมเดล ${model} ไม่ได้ส่งข้อมูลรูปภาพกลับมา กรุณาตรวจสอบสิทธิ์ API Key หรือเลือกโมเดลรูปภาพอื่นจากรายการล่าสุด`
       );
     }
 
@@ -319,28 +358,41 @@ export async function generateRealImage(params: {
     });
   }
 
-  // OpenAI Image API (gpt-image-1 / dall-e-3)
+  // OpenAI Image API (Live Model Discovery)
   if (!openaiKey) {
     throw new Error(
       'ยังไม่ได้ตั้งค่า OpenAI API Key สำหรับสร้างภาพจริง — กรุณาใส่คีย์ในเมนู "ตั้งค่า API Keys & Providers"'
     );
   }
 
-  const model = params.model || 'dall-e-3';
-  const size =
+  const model = await resolveLatestModel({
+    provider: 'openai',
+    capability: 'image',
+    requestedModel: params.model || getSettingValue('openai_image_model'),
+    apiKeyOverride: openaiKey,
+  });
+
+  const isLegacyDalle = /^dall-e/i.test(model);
+  const legacySize =
     params.aspectRatio === '9:16'
       ? '1024x1792'
       : params.aspectRatio === '1:1'
       ? '1024x1024'
       : '1792x1024';
+  const modernSize =
+    params.aspectRatio === '9:16'
+      ? '1024x1536'
+      : params.aspectRatio === '1:1'
+      ? '1024x1024'
+      : '1536x1024';
 
   const bodyPayload: Record<string, any> = {
     model,
     prompt,
     n: 1,
-    size: model === 'gpt-image-1' ? (params.aspectRatio === '9:16' ? '1024x1536' : params.aspectRatio === '1:1' ? '1024x1024' : '1536x1024') : size,
+    size: isLegacyDalle ? legacySize : modernSize,
   };
-  if (model !== 'gpt-image-1') {
+  if (isLegacyDalle) {
     bodyPayload.response_format = 'b64_json';
   }
 
@@ -435,7 +487,7 @@ async function getVertexAccessToken(): Promise<string> {
 
 export async function generateRealVideo(params: {
   prompt: string;
-  engine?: 'gemini-omni-1.1-flash' | 'veo-3.1-generate-001' | 'veo-3.1-fast-generate-001' | 'veo-3.0-generate-001';
+  engine?: string;
   aspectRatio?: '16:9' | '9:16';
   durationSec?: number;
   resolution?: '360p' | '720p' | '1080p' | '4k';
@@ -454,24 +506,51 @@ export async function generateRealVideo(params: {
     throw new Error('กรุณาระบุ Prompt สำหรับสร้างวิดีโอจริง');
   }
 
-  const engine =
-    params.engine ||
-    (getSettingValue('gemini_video_model') as any) ||
-    'gemini-omni-1.1-flash';
+  const projectId = getSettingValue('vertex_project_id', 'GOOGLE_CLOUD_PROJECT');
+  const location = getSettingValue('vertex_location', 'GOOGLE_CLOUD_LOCATION') || 'us-central1';
+  const accessToken = projectId ? await getVertexAccessToken() : '';
+  const geminiKey =
+    getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
+    getSettingValue('gemini_api_key', 'GOOGLE_API_KEY');
+
+  if (!geminiKey && (!projectId || !accessToken)) {
+    throw new Error(
+      'ยังไม่ได้ใส่คีย์สำหรับสร้างวิดีโอจริง — กรุณาไปที่ปุ่ม "เชื่อมต่อคีย์ AI" เพื่อใส่ GEMINI_API_KEY (ดึงโมเดลวิดีโอล่าสุดอัตโนมัติ) หรือใส่ GCP Project ID + Vertex Token ครับ'
+    );
+  }
+
+  const requestedEngine =
+    params.engine?.trim() ||
+    getSettingValue('gemini_video_model') ||
+    getSettingValue('vertex_veo_model');
+
+  const engine = geminiKey
+    ? await resolveLatestModel({
+        provider: 'gemini',
+        capability: 'video',
+        requestedModel: requestedEngine,
+        apiKeyOverride: geminiKey,
+      })
+    : await resolveLatestModel({
+        provider: 'vertex_veo',
+        capability: 'video',
+        requestedModel: requestedEngine,
+        apiKeyOverride: accessToken,
+      });
+
+  const geminiMethods = geminiKey ? await getGeminiModelMethods(geminiKey, engine) : [];
+  const isLongRunningVeo =
+    geminiMethods.includes('predictLongRunning') || /^veo/i.test(engine);
+
   const aspectRatio = params.aspectRatio || '16:9';
   const resolution = params.resolution || '720p';
   const durationSec = Math.min(10, Math.max(3, Math.round(Number(params.durationSec) || 6)));
 
   // --------------------------------------------------------------------------
-  // ROUTE A: Google Veo 3.1 / 3.0 GA (Supports BOTH Gemini Developer API Key AND Vertex AI Enterprise!)
+  // ROUTE A: Google Veo / predictLongRunning (Supports BOTH Gemini API Key AND Vertex AI!)
   // --------------------------------------------------------------------------
-  if (engine.startsWith('veo-')) {
-    const projectId = getSettingValue('vertex_project_id', 'GOOGLE_CLOUD_PROJECT');
-    const location = getSettingValue('vertex_location', 'GOOGLE_CLOUD_LOCATION') || 'us-central1';
-    const accessToken = projectId ? await getVertexAccessToken() : '';
-    const geminiKeyForVeo =
-      getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
-      getSettingValue('gemini_api_key', 'GOOGLE_API_KEY');
+  if (isLongRunningVeo) {
+    const geminiKeyForVeo = geminiKey;
 
     // A1: Direct Google Veo via GEMINI_API_KEY (@google/genai models.generateVideos) when Vertex GCP is not configured
     if ((!projectId || !accessToken) && geminiKeyForVeo) {
@@ -518,7 +597,7 @@ export async function generateRealVideo(params: {
       }
 
       if (!operation.done) {
-        throw new Error('Google Veo กำลังประมวลผลเกินเวลาที่กำหนด กรุณาลองความละเอียด 720p หรือใช้ Gemini Omni 1.1 Flash');
+        throw new Error('Google Veo กำลังประมวลผลเกินเวลาที่กำหนด กรุณาลองความละเอียด 720p หรือเลือกโมเดลวิดีโอแบบ Fast จากรายการล่าสุด');
       }
       if ((operation as any).error) {
         throw new Error((operation as any).error.message || JSON.stringify((operation as any).error));
@@ -696,17 +775,11 @@ export async function generateRealVideo(params: {
   }
 
   // --------------------------------------------------------------------------
-  // ROUTE B: Gemini Omni 1.1 Flash via Official @google/genai Interactions API
-  // (Supports Text-to-Video, First-Frame, First+Last Frame Flow Transitions,
-  // Reference Ingredients, and Multi-Turn Video Extension up to 40s!)
+  // ROUTE B: Google Gemini Video via Official @google/genai Interactions API
   // --------------------------------------------------------------------------
-  const geminiKey =
-    getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
-    getSettingValue('gemini_api_key', 'GOOGLE_API_KEY');
-
   if (!geminiKey) {
     throw new Error(
-      'ยังไม่ได้ตั้งค่า Google Gemini API Key สำหรับสร้างวิดีโอจริง (Gemini Omni 1.1 Flash / Google Flow) — กรุณาใส่คีย์ในเมนู "ตั้งค่า API Keys & Providers"'
+      'ยังไม่ได้ตั้งค่า Google Gemini API Key สำหรับสร้างวิดีโอจริง — กรุณาใส่คีย์ในเมนู "ตั้งค่า API Keys & Providers"'
     );
   }
 
@@ -850,7 +923,7 @@ export async function generateRealVideo(params: {
   }
 
   const createPayload: Record<string, any> = {
-    model: 'gemini-omni-1.1-flash',
+    model: engine,
     input: inputParts,
     response_format: videoResponseFormat,
   };
@@ -891,8 +964,8 @@ export async function generateRealVideo(params: {
 
   return recordMediaAsset({
     mediaType: 'video',
-    provider: 'google-gemini-omni',
-    model: 'gemini-omni-1.1-flash',
+    provider: 'google-gemini-video',
+    model: engine,
     prompt,
     fileUrl: `/uploads/videos/${filename}`,
     mimeType: 'video/mp4',
@@ -1101,11 +1174,40 @@ export async function stitchFlowScenesWithFfmpeg(params: {
 }
 
 // ============================================================================
-// 4. REAL AI SPEECH / AUDIO TTS GENERATION (Gemini 3.8 Flash TTS / OpenAI / ElevenLabs)
+// 4. REAL AI SPEECH / AUDIO TTS GENERATION (Live Model Discovery: Gemini / OpenAI / ElevenLabs)
 // ============================================================================
+function wrapPcm16InWavHeader(
+  pcmData: Buffer,
+  sampleRate = 24000,
+  numChannels = 1
+): Buffer {
+  if (pcmData.length >= 4 && pcmData.subarray(0, 4).toString('ascii') === 'RIFF') {
+    return pcmData;
+  }
+  const bitsPerSample = 16;
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmData.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // PCM chunk size
+  header.writeUInt16LE(1, 20); // AudioFormat = 1 (PCM)
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmData.length, 40);
+  return Buffer.concat([header, pcmData]);
+}
+
 export async function generateRealAudio(params: {
   text: string;
   provider?: 'gemini' | 'openai' | 'elevenlabs';
+  model?: string;
   voice?: string;
   style?: string;
   workflowId?: number | null;
@@ -1130,49 +1232,89 @@ export async function generateRealAudio(params: {
   if (chosenProvider === 'gemini') {
     if (!geminiKey) {
       throw new Error(
-        'ยังไม่ได้ตั้งค่า Google Gemini API Key สำหรับสร้างเสียงพากย์จริง (Gemini 3.8 Flash TTS รองรับภาษาไทย) — กรุณาใส่คีย์ในหน้าตั้งค่า API Keys'
+        'ยังไม่ได้ตั้งค่า Google Gemini API Key สำหรับสร้างเสียงพากย์จริง — กรุณาใส่คีย์ในหน้าตั้งค่า API Keys'
       );
     }
+
+    const ttsModel = await resolveLatestModel({
+      provider: 'gemini',
+      capability: 'tts',
+      requestedModel: params.model || getSettingValue('gemini_tts_model'),
+      apiKeyOverride: geminiKey,
+    });
+    const methods = await getGeminiModelMethods(geminiKey, ttsModel);
 
     const ai = new GoogleGenAI({ apiKey: geminiKey });
     const voiceName = params.voice || 'Kore';
     const deliveryStyle =
       params.style || 'warm, articulate, inspiring Thai educator and executive speaker';
 
-    const interaction = await ai.interactions.create({
-      model: 'gemini-3.8-flash-tts',
-      input: [
-        {
-          type: 'user_input',
-          content: [
-            {
-              type: 'text',
-              text: cleanTranscript,
-              annotations: [
-                {
-                  type: 'speech_metadata',
-                  speaker: 'Komkrit',
-                  style: deliveryStyle,
-                },
-              ],
-            },
-          ],
-        },
-      ] as any,
-      response_format: { type: 'audio' } as any,
-      generation_config: {
-        speech_config: {
-          speakers: [{ speaker: 'Komkrit', voice: voiceName }],
-        },
-      } as any,
-    });
+    let audioBuffer: Buffer | null = null;
+    let interactionId = '';
 
-    const outAudio = interaction.output_audio as any;
-    if (!outAudio?.data) {
-      throw new Error('Gemini 3.8 Flash TTS ไม่ได้ส่งข้อมูลเสียงกลับมา');
+    if (methods.includes('generateContent')) {
+      const ttsResp = (await ai.models.generateContent({
+        model: ttsModel,
+        contents: [{ parts: [{ text: cleanTranscript }] }],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
+          },
+        } as any,
+      })) as any;
+
+      const inline = ttsResp?.candidates?.[0]?.content?.parts?.find(
+        (p: any) => p?.inlineData?.data
+      )?.inlineData;
+      if (inline?.data) {
+        const rawBuf = Buffer.from(inline.data, 'base64');
+        const rateMatch = String(inline.mimeType || '').match(/rate=(\d+)/i);
+        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+        audioBuffer = wrapPcm16InWavHeader(rawBuf, sampleRate, 1);
+      }
+    } else {
+      const interaction = await ai.interactions.create({
+        model: ttsModel,
+        input: [
+          {
+            type: 'user_input',
+            content: [
+              {
+                type: 'text',
+                text: cleanTranscript,
+                annotations: [
+                  {
+                    type: 'speech_metadata',
+                    speaker: 'Komkrit',
+                    style: deliveryStyle,
+                  },
+                ],
+              },
+            ],
+          },
+        ] as any,
+        response_format: { type: 'audio' } as any,
+        generation_config: {
+          speech_config: {
+            speakers: [{ speaker: 'Komkrit', voice: voiceName }],
+          },
+        } as any,
+      });
+
+      interactionId = interaction.id || '';
+      const outAudio = interaction.output_audio as any;
+      if (outAudio?.data) {
+        audioBuffer = wrapPcm16InWavHeader(Buffer.from(outAudio.data, 'base64'), 24000, 1);
+      }
     }
 
-    const audioBuffer = Buffer.from(outAudio.data, 'base64');
+    if (!audioBuffer || audioBuffer.length === 0) {
+      throw new Error(`Google Gemini TTS (${ttsModel}) ไม่ได้ส่งข้อมูลเสียงกลับมา`);
+    }
+
     const filename = `tts-gemini-${Date.now()}-${Math.round(Math.random() * 1e4)}.wav`;
     fs.writeFileSync(path.join(AUDIO_DIR, filename), audioBuffer);
     const fileUrl = `/uploads/audio/${filename}`;
@@ -1180,11 +1322,11 @@ export async function generateRealAudio(params: {
     return recordMediaAsset({
       mediaType: 'audio',
       provider: 'gemini',
-      model: `gemini-3.8-flash-tts (${voiceName})`,
+      model: `${ttsModel} (${voiceName})`,
       prompt: cleanTranscript.slice(0, 300),
       fileUrl,
       mimeType: 'audio/wav',
-      interactionId: interaction.id || '',
+      interactionId,
       workflowId: params.workflowId ?? null,
     });
   }
@@ -1195,7 +1337,17 @@ export async function generateRealAudio(params: {
         'ยังไม่ได้ตั้งค่า ElevenLabs API Key สำหรับสร้างเสียงพากย์จริง — กรุณาใส่คีย์ในหน้าตั้งค่า API Keys'
       );
     }
-    const voiceId = params.voice || getSettingValue('elevenlabs_voice_id') || 'JBFqnCBsd6RMkjVDRZzb';
+    const ttsModel = await resolveLatestModel({
+      provider: 'elevenlabs',
+      capability: 'tts',
+      requestedModel: params.model || getSettingValue('elevenlabs_model'),
+      apiKeyOverride: elevenKey,
+    });
+    const voiceId = await resolveLatestElevenLabsVoice(
+      params.voice || getSettingValue('elevenlabs_voice_id'),
+      elevenKey
+    );
+
     const resp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
@@ -1204,7 +1356,7 @@ export async function generateRealAudio(params: {
       },
       body: JSON.stringify({
         text: cleanTranscript,
-        model_id: 'eleven_multilingual_v2',
+        model_id: ttsModel,
       }),
     });
 
@@ -1221,7 +1373,7 @@ export async function generateRealAudio(params: {
     return recordMediaAsset({
       mediaType: 'audio',
       provider: 'elevenlabs',
-      model: `eleven_multilingual_v2 (${voiceId})`,
+      model: `${ttsModel} (${voiceId})`,
       prompt: cleanTranscript.slice(0, 300),
       fileUrl,
       mimeType: 'audio/mpeg',
@@ -1229,12 +1381,18 @@ export async function generateRealAudio(params: {
     });
   }
 
-  // OpenAI Speech API
+  // OpenAI Speech API (Live Model Discovery)
   if (!openaiKey) {
     throw new Error(
       'ยังไม่ได้ตั้งค่า OpenAI API Key สำหรับสร้างเสียงพากย์จริง — กรุณาใส่คีย์ในหน้าตั้งค่า API Keys'
     );
   }
+  const ttsModel = await resolveLatestModel({
+    provider: 'openai',
+    capability: 'tts',
+    requestedModel: params.model || getSettingValue('openai_tts_model'),
+    apiKeyOverride: openaiKey,
+  });
   const voice = params.voice || 'alloy';
   const resp = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
@@ -1243,7 +1401,7 @@ export async function generateRealAudio(params: {
       Authorization: `Bearer ${openaiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini-tts',
+      model: ttsModel,
       voice,
       input: cleanTranscript,
       response_format: 'mp3',
@@ -1263,7 +1421,7 @@ export async function generateRealAudio(params: {
   return recordMediaAsset({
     mediaType: 'audio',
     provider: 'openai',
-    model: `gpt-4o-mini-tts (${voice})`,
+    model: `${ttsModel} (${voice})`,
     prompt: cleanTranscript.slice(0, 300),
     fileUrl,
     mimeType: 'audio/mpeg',

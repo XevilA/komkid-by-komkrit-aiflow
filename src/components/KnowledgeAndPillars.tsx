@@ -27,6 +27,9 @@ import {
   Subscriber,
   ContactMessage,
   AiEngineSettings,
+  DiscoverableProvider,
+  LiveModelOption,
+  UnifiedLiveModelsResponse,
 } from '../types';
 import { api, formatThaiDate } from '../api';
 
@@ -531,13 +534,16 @@ export const AudienceAndSettingsHub: React.FC<{
   const [testResults, setTestResults] = useState<
     Record<string, { ok: boolean; text: string }>
   >({});
+  const [liveModels, setLiveModels] = useState<UnifiedLiveModelsResponse | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [fetchingSingle, setFetchingSingle] = useState<string | null>(null);
 
   // Quick Add Subscriber state in Inbox mode
   const [newSubEmail, setNewSubEmail] = useState('');
   const [newSubName, setNewSubName] = useState('');
   const [addingSub, setAddingSub] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (forceModelRefresh = false) => {
     try {
       if (mode === 'feedback') {
         const [c, s, m] = await Promise.all([
@@ -549,12 +555,86 @@ export const AudienceAndSettingsHub: React.FC<{
         setSubscribers(s);
         setContacts(m);
       } else {
-        const st = await api.getAiSettings();
+        const [st, lm] = await Promise.all([
+          api.getAiSettings(),
+          api.getLiveModels(forceModelRefresh),
+        ]);
         setSettings(st);
+        setLiveModels(lm);
       }
     } catch (err) {
       setActionError((err as Error).message);
     }
+  };
+
+  const handleRefreshAllModels = async () => {
+    setRefreshingModels(true);
+    setActionError(null);
+    try {
+      const lm = await api.getLiveModels(true);
+      setLiveModels(lm);
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setRefreshingModels(false);
+    }
+  };
+
+  const handleFetchProviderModelsLive = async (
+    provider: DiscoverableProvider,
+    typedKey?: string
+  ) => {
+    setFetchingSingle(provider);
+    setActionError(null);
+    try {
+      const cat = await api.discoverProviderModels({
+        provider,
+        apiKey: typedKey?.trim() || undefined,
+        endpoint: provider === 'openai_compatible' ? settings?.localEndpoint : undefined,
+        projectId: provider === 'vertex_veo' ? settings?.vertexProjectId : undefined,
+        location: provider === 'vertex_veo' ? settings?.vertexLocation : undefined,
+      });
+      setLiveModels((prev) => ({
+        fetchedAt: new Date().toISOString(),
+        providers: {
+          ...(prev?.providers || ({} as any)),
+          [provider]: cat,
+        },
+      }));
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setFetchingSingle(null);
+    }
+  };
+
+  const renderLiveOptions = (
+    options: LiveModelOption[] | undefined,
+    currentVal: string | undefined,
+    hasKey: boolean
+  ) => {
+    const list = options || [];
+    const val = (currentVal || '').trim();
+    const autoLabel =
+      list.length > 0
+        ? `✨ ดึงรุ่นใหม่ล่าสุดอัตโนมัติ (${list[0].id})`
+        : hasKey
+        ? '✨ ดึงรุ่นใหม่ล่าสุดจาก API อัตโนมัติ'
+        : 'เชื่อมต่อ API Key เพื่อดึงโมเดลล่าสุดอัตโนมัติ';
+
+    return (
+      <>
+        <option value="">{autoLabel}</option>
+        {val && !list.some((m) => m.id === val) && (
+          <option value={val}>{val}</option>
+        )}
+        {list.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </>
+    );
   };
 
   useEffect(() => {
@@ -570,6 +650,7 @@ export const AudienceAndSettingsHub: React.FC<{
       geminiModel: currentSettings.geminiModel,
       geminiImageModel: currentSettings.geminiImageModel,
       geminiVideoModel: currentSettings.geminiVideoModel,
+      geminiTtsModel: currentSettings.geminiTtsModel || '',
       geminiApiKey: currentSecrets.geminiApiKey.trim()
         ? currentSecrets.geminiApiKey.trim()
         : '__KEEP__',
@@ -591,6 +672,7 @@ export const AudienceAndSettingsHub: React.FC<{
       vertexAccessToken: currentSecrets.vertexAccessToken.trim()
         ? currentSecrets.vertexAccessToken.trim()
         : '__KEEP__',
+      elevenlabsModel: currentSettings.elevenlabsModel || '',
       elevenlabsVoiceId: currentSettings.elevenlabsVoiceId,
       elevenlabsApiKey: currentSecrets.elevenlabsApiKey.trim()
         ? currentSecrets.elevenlabsApiKey.trim()
@@ -615,7 +697,7 @@ export const AudienceAndSettingsHub: React.FC<{
       resendApiKey: '',
       localApiKey: '',
     });
-    await loadData();
+    await loadData(true);
     await onRefreshStats();
   };
 
@@ -717,17 +799,30 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
               <div>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2.5 py-0.5 text-[10.5px] font-extrabold text-emerald-300">
-                  เชื่อมต่อ API จริง 100% • เข้ารหัสเก็บใน Cloud ถาวร
+                  เชื่อมต่อ API จริง 100% • ดึงโมเดลล่าสุดจาก API เสมอ (Zero Hardcode)
                 </span>
                 <h2 className="mt-1 text-lg sm:text-xl font-extrabold">
                   เชื่อมต่อคีย์ AI (วางคีย์แล้วกดปุ่ม "บันทึก & ทดสอบยิง API จริง" ได้เลย)
                 </h2>
               </div>
             </div>
+            <button
+              type="button"
+              disabled={refreshingModels}
+              onClick={handleRefreshAllModels}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white/15 border border-white/25 px-3.5 py-2 text-xs font-extrabold text-amber-300 hover:bg-white/25 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${refreshingModels ? 'animate-spin' : ''}`}
+              />
+              {refreshingModels
+                ? 'กำลังดึงโมเดลล่าสุดจาก API...'
+                : 'ดึงรายชื่อโมเดลล่าสุดจาก API สด'}
+            </button>
           </div>
           <p className="mt-2 text-xs sm:text-sm text-slate-200 leading-relaxed">
             <strong>วิธีง่ายที่สุด:</strong> เพียงวางคีย์ช่อง <strong>Google Gemini (AI Studio)</strong> ช่องเดียวแล้วกดปุ่ม{' '}
-            <strong className="text-amber-300">"บันทึก & ทดสอบยิง API จริง"</strong> ระบบจะเข้ารหัสเก็บคีย์ไว้บน Cloud ถาวรและปลดล็อกครบทั้ง แชท AI, เขียนข่าว, สร้างภาพปก, สร้างวิดีโอ Google Veo / Omni และเสียงพากย์ภาษาไทยทันทีครับ (หรือจะเพิ่มคีย์ Claude, DeepSeek, ChatGPT ร่วมด้วยก็ได้)
+            <strong className="text-amber-300">"บันทึก & ทดสอบยิง API จริง"</strong> ระบบจะดึงรายชื่อโมเดลใหม่ล่าสุดจาก API ของแต่ละค่ายโดยตรงและตั้งค่าให้พร้อมใช้ทั้ง แชท AI, เขียนข่าว, สร้างภาพปก, สร้างวิดีโอ Google Veo และเสียงพากย์ภาษาไทยทันทีครับ
           </p>
         </div>
 
@@ -874,7 +969,28 @@ export const AudienceAndSettingsHub: React.FC<{
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold text-sky-800">
+                    รายชื่อโมเดลสดจาก Google `/v1beta/models`:
+                  </span>
+                  <button
+                    type="button"
+                    disabled={fetchingSingle === 'gemini'}
+                    onClick={() =>
+                      handleFetchProviderModelsLive('gemini', secrets.geminiApiKey)
+                    }
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:underline cursor-pointer"
+                  >
+                    <RefreshCw
+                      className={`w-3 h-3 ${
+                        fetchingSingle === 'gemini' ? 'animate-spin' : ''
+                      }`}
+                    />
+                    รีเฟรชโมเดลจาก API
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
                       โมเดลแชท & เขียนข่าว
@@ -886,11 +1002,11 @@ export const AudienceAndSettingsHub: React.FC<{
                       }
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                     >
-                      <option value="gemini-3.8-flash">gemini-3.8-flash (รุ่นใหม่ แนะนำ)</option>
-                      <option value="gemini-4-argon">gemini-4-argon (วิเคราะห์ลึกสูงสุด)</option>
-                      <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (ความเร็วสูง)</option>
-                      <option value="gemini-2.5-flash">gemini-2.5-flash (เสถียร มาตรฐาน)</option>
-                      <option value="gemini-2.5-pro">gemini-2.5-pro (ละเอียดสูง)</option>
+                      {renderLiveOptions(
+                        liveModels?.providers.gemini.textModels,
+                        settings.geminiModel,
+                        settings.hasGeminiKey || Boolean(secrets.geminiApiKey.trim())
+                      )}
                     </select>
                   </div>
                   <div>
@@ -907,14 +1023,37 @@ export const AudienceAndSettingsHub: React.FC<{
                       }
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                     >
-                      <option value="gemini-nano-banana-2.1">gemini-nano-banana-2.1 (แนะนำ)</option>
-                      <option value="gemini-3-pro-image">gemini-3-pro-image</option>
-                      <option value="imagen-4.0-generate-001">imagen-4.0-generate-001</option>
+                      {renderLiveOptions(
+                        liveModels?.providers.gemini.imageModels,
+                        settings.geminiImageModel,
+                        settings.hasGeminiKey || Boolean(secrets.geminiApiKey.trim())
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      โมเดลสร้างวิดีโอจริง
+                    </label>
+                    <select
+                      value={settings.geminiVideoModel}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          geminiVideoModel: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                    >
+                      {renderLiveOptions(
+                        liveModels?.providers.gemini.videoModels,
+                        settings.geminiVideoModel,
+                        settings.hasGeminiKey || Boolean(secrets.geminiApiKey.trim())
+                      )}
                     </select>
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  * คีย์นี้ปลดล็อกสร้างวิดีโอ <strong>Gemini Omni 1.1 Flash</strong>, <strong>Google Veo 3.1 / 3.0</strong> และเสียงพากย์ไทย <strong>Gemini 3.8 Flash TTS</strong> อัตโนมัติ
+                  * ระบบดึงรายชื่อโมเดลแชท ภาพ วิดีโอ Veo และเสียงพากย์ TTS รุ่นล่าสุดจาก Google API โดยอัตโนมัติเสมอ
                 </p>
                 {testResults.gemini && (
                   <div
@@ -937,7 +1076,7 @@ export const AudienceAndSettingsHub: React.FC<{
                       ANTHROPIC CLAUDE
                     </span>
                     <h3 className="mt-1 font-extrabold text-sm sm:text-base text-[#0d2546]">
-                      Claude Sonnet 4 / Opus 4 (เด่นงานเขียนบทความสละสลวย)
+                      Anthropic Claude (ดึงโมเดลล่าสุดจาก `/v1/models`)
                     </h3>
                   </div>
                   <button
@@ -996,9 +1135,26 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    รุ่นโมเดล Claude
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-slate-600">
+                      รุ่นโมเดล Claude (ดึงสดจาก Anthropic /v1/models)
+                    </label>
+                    <button
+                      type="button"
+                      disabled={fetchingSingle === 'claude' || refreshingModels}
+                      onClick={() =>
+                        handleFetchProviderModelsLive('claude', secrets.claudeApiKey)
+                      }
+                      className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-amber-800 hover:underline cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${
+                          fetchingSingle === 'claude' ? 'animate-spin' : ''
+                        }`}
+                      />
+                      ดึงโมเดลล่าสุด
+                    </button>
+                  </div>
                   <select
                     value={settings.claudeModel}
                     onChange={(e) =>
@@ -1006,10 +1162,11 @@ export const AudienceAndSettingsHub: React.FC<{
                     }
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                   >
-                    <option value="claude-sonnet-4-20250514">claude-sonnet-4-20250514 (แนะนำ)</option>
-                    <option value="claude-opus-4-20250514">claude-opus-4-20250514 (สูงสุด)</option>
-                    <option value="claude-3-7-sonnet-latest">claude-3-7-sonnet-latest</option>
-                    <option value="claude-3-5-haiku-latest">claude-3-5-haiku-latest (เร็ว)</option>
+                    {renderLiveOptions(
+                      liveModels?.providers?.claude?.textModels,
+                      settings.claudeModel,
+                      settings.hasClaudeKey
+                    )}
                   </select>
                 </div>
 
@@ -1093,9 +1250,29 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    รุ่นโมเดล DeepSeek
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-slate-600">
+                      รุ่นโมเดล DeepSeek (ดึงสดจาก DeepSeek /models)
+                    </label>
+                    <button
+                      type="button"
+                      disabled={fetchingSingle === 'deepseek' || refreshingModels}
+                      onClick={() =>
+                        handleFetchProviderModelsLive(
+                          'deepseek',
+                          secrets.deepseekApiKey
+                        )
+                      }
+                      className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-indigo-700 hover:underline cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${
+                          fetchingSingle === 'deepseek' ? 'animate-spin' : ''
+                        }`}
+                      />
+                      ดึงโมเดลล่าสุด
+                    </button>
+                  </div>
                   <select
                     value={settings.deepseekModel}
                     onChange={(e) =>
@@ -1106,8 +1283,11 @@ export const AudienceAndSettingsHub: React.FC<{
                     }
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                   >
-                    <option value="deepseek-chat">deepseek-chat (DeepSeek-V3 เร็วและประหยัด)</option>
-                    <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1 แสดงวิธีคิดเชิงลึก)</option>
+                    {renderLiveOptions(
+                      liveModels?.providers?.deepseek?.textModels,
+                      settings.deepseekModel,
+                      settings.hasDeepseekKey
+                    )}
                   </select>
                 </div>
 
@@ -1132,7 +1312,7 @@ export const AudienceAndSettingsHub: React.FC<{
                       OPENAI CHATGPT + IMAGE + TTS
                     </span>
                     <h3 className="mt-1 font-extrabold text-sm sm:text-base text-[#0d2546]">
-                      ChatGPT (GPT-4.1 / GPT-4o) + สร้างรูปภาพ OpenAI
+                      OpenAI ChatGPT + Image + TTS (ดึงโมเดลล่าสุดจาก `/v1/models`)
                     </h3>
                   </div>
                   <button
@@ -1191,9 +1371,26 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    รุ่นโมเดล ChatGPT
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-slate-600">
+                      รุ่นโมเดล ChatGPT (ดึงสดจาก OpenAI /v1/models)
+                    </label>
+                    <button
+                      type="button"
+                      disabled={fetchingSingle === 'openai' || refreshingModels}
+                      onClick={() =>
+                        handleFetchProviderModelsLive('openai', secrets.openaiApiKey)
+                      }
+                      className="inline-flex items-center gap-1 text-[10.5px] font-extrabold text-emerald-700 hover:underline cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${
+                          fetchingSingle === 'openai' ? 'animate-spin' : ''
+                        }`}
+                      />
+                      ดึงโมเดลล่าสุด
+                    </button>
+                  </div>
                   <select
                     value={settings.openaiModel}
                     onChange={(e) =>
@@ -1201,10 +1398,11 @@ export const AudienceAndSettingsHub: React.FC<{
                     }
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                   >
-                    <option value="gpt-4.1">gpt-4.1 (แนะนำ)</option>
-                    <option value="gpt-4o">gpt-4o</option>
-                    <option value="gpt-4o-mini">gpt-4o-mini (ความเร็วสูง)</option>
-                    <option value="o3-mini">o3-mini (Reasoning)</option>
+                    {renderLiveOptions(
+                      liveModels?.providers?.openai?.textModels,
+                      settings.openaiModel,
+                      settings.hasOpenaiKey
+                    )}
                   </select>
                 </div>
 
@@ -1272,7 +1470,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    รุ่นโมเดล Google Veo
+                    รุ่นโมเดล Google Veo (ดึงสดจาก API)
                   </label>
                   <select
                     value={settings.vertexVeoModel}
@@ -1284,9 +1482,13 @@ export const AudienceAndSettingsHub: React.FC<{
                     }
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
                   >
-                    <option value="veo-3.1-generate-001">veo-3.1-generate-001</option>
-                    <option value="veo-3.1-fast-generate-001">veo-3.1-fast-generate-001</option>
-                    <option value="veo-3.0-generate-001">veo-3.0-generate-001</option>
+                    {renderLiveOptions(
+                      liveModels?.providers?.vertex_veo?.videoModels?.length
+                        ? liveModels.providers.vertex_veo.videoModels
+                        : liveModels?.providers?.gemini?.videoModels,
+                      settings.vertexVeoModel,
+                      settings.hasVertexToken || settings.hasGeminiKey
+                    )}
                   </select>
                 </div>
                 <div>
@@ -1363,20 +1565,39 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      ElevenLabs Voice ID
+                      เสียงพากย์ ElevenLabs (ดึงจาก API สด)
                     </label>
-                    <input
-                      type="text"
-                      value={settings.elevenlabsVoiceId}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          elevenlabsVoiceId: e.target.value,
-                        })
-                      }
-                      placeholder="JBFqnCBsd6RMkjVDRZzb"
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
-                    />
+                    {(liveModels?.providers.elevenlabs.voices?.length || 0) > 0 ? (
+                      <select
+                        value={settings.elevenlabsVoiceId}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            elevenlabsVoiceId: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                      >
+                        {renderLiveOptions(
+                          liveModels?.providers.elevenlabs.voices,
+                          settings.elevenlabsVoiceId,
+                          settings.hasElevenlabsKey
+                        )}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={settings.elevenlabsVoiceId}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            elevenlabsVoiceId: e.target.value,
+                          })
+                        }
+                        placeholder="ว่างไว้เพื่อดึงเสียงจาก API อัตโนมัติ"
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                      />
+                    )}
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-1">
@@ -1499,17 +1720,50 @@ export const AudienceAndSettingsHub: React.FC<{
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      Model ID
-                    </label>
-                    <input
-                      type="text"
-                      value={settings.localModel}
-                      onChange={(e) =>
-                        setSettings({ ...settings, localModel: e.target.value })
-                      }
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-600">
+                        Model (Live `/models`)
+                      </label>
+                      <button
+                        type="button"
+                        disabled={fetchingSingle === 'openai_compatible'}
+                        onClick={() =>
+                          handleFetchProviderModelsLive(
+                            'openai_compatible',
+                            secrets.localApiKey
+                          )
+                        }
+                        className="text-[10.5px] font-bold text-sky-700 hover:underline cursor-pointer"
+                      >
+                        ดึงโมเดล
+                      </button>
+                    </div>
+                    {(liveModels?.providers.openai_compatible.textModels?.length ||
+                      0) > 0 ? (
+                      <select
+                        value={settings.localModel}
+                        onChange={(e) =>
+                          setSettings({ ...settings, localModel: e.target.value })
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                      >
+                        {renderLiveOptions(
+                          liveModels?.providers.openai_compatible.textModels,
+                          settings.localModel,
+                          true
+                        )}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={settings.localModel}
+                        onChange={(e) =>
+                          setSettings({ ...settings, localModel: e.target.value })
+                        }
+                        placeholder="ว่างไว้ = ดึงจาก /models อัตโนมัติ"
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                      />
+                    )}
                   </div>
                 </div>
                 {testResults.openai_compatible && (
@@ -1622,7 +1876,7 @@ export const AudienceAndSettingsHub: React.FC<{
             </h3>
             <button
               type="button"
-              onClick={loadData}
+              onClick={() => loadData()}
               className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-[#0d2546] cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" /> รีเฟรช

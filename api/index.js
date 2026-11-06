@@ -236,7 +236,7 @@ function initDatabase() {
       concept TEXT NOT NULL,
       aspect_ratio TEXT NOT NULL DEFAULT '16:9',
       resolution TEXT NOT NULL DEFAULT '720p',
-      video_engine TEXT NOT NULL DEFAULT 'gemini-omni-1.1-flash',
+      video_engine TEXT NOT NULL DEFAULT '',
       scenes_json TEXT NOT NULL DEFAULT '[]',
       master_video_url TEXT DEFAULT '',
       voiceover_audio_url TEXT DEFAULT '',
@@ -263,6 +263,21 @@ function initDatabase() {
   } catch {
   }
   db.exec("DELETE FROM publish_logs WHERE mode = 'sandbox_ready' OR response_note LIKE '%\u0E08\u0E33\u0E25\u0E2D\u0E07%'");
+  try {
+    const migrated = db.prepare("SELECT value FROM settings WHERE key = 'dynamic_model_discovery_v1'").get();
+    if (!migrated) {
+      db.exec(`
+        UPDATE settings SET value = ''
+        WHERE key IN (
+          'gemini_model', 'gemini_image_model', 'gemini_video_model',
+          'claude_model', 'deepseek_model', 'openai_model',
+          'vertex_veo_model', 'local_model'
+        );
+        INSERT OR REPLACE INTO settings (key, value) VALUES ('dynamic_model_discovery_v1', '1');
+      `);
+    }
+  } catch {
+  }
   seedIfEmpty();
   seedOmnichannelIfEmpty();
 }
@@ -929,10 +944,11 @@ function seedIfEmpty() {
   );
   const setSetting = db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`);
   setSetting.run("ai_provider", "auto");
-  setSetting.run("gemini_model", "gemini-3.8-flash");
+  setSetting.run("gemini_model", "");
   setSetting.run("gemini_api_key", process.env.GEMINI_API_KEY || "");
   setSetting.run("local_endpoint", "http://localhost:1234/v1");
-  setSetting.run("local_model", "omni-o1x-pro");
+  setSetting.run("local_model", "");
+  setSetting.run("dynamic_model_discovery_v1", "1");
 }
 
 // server/aiEngine.ts
@@ -941,8 +957,8 @@ import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 // server/mediaEngine.ts
 import fs2 from "node:fs";
 import path2 from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
 import { GoogleGenAI } from "@google/genai";
 
 // server/cloudSync.ts
@@ -1101,8 +1117,665 @@ async function deleteMediaFromCloudBlob(blobUrl) {
   }
 }
 
-// server/mediaEngine.ts
+// server/modelRegistry.ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
+var CACHE_TTL_MS = 3 * 60 * 1e3;
+var catalogCache = /* @__PURE__ */ new Map();
+function invalidateModelCatalogCache(provider) {
+  if (!provider) {
+    catalogCache.clear();
+    return;
+  }
+  for (const key of catalogCache.keys()) {
+    if (key.startsWith(`${provider}:`)) {
+      catalogCache.delete(key);
+    }
+  }
+}
+function fingerprintSecret(secret) {
+  if (!secret) return "none";
+  let hash = 2166136261;
+  for (let i = 0; i < secret.length; i++) {
+    hash ^= secret.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+function sanitizeSecretInError(raw, secret) {
+  let msg = String(raw || "\u0E44\u0E21\u0E48\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E14\u0E36\u0E07\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E42\u0E21\u0E40\u0E14\u0E25\u0E08\u0E32\u0E01 API \u0E44\u0E14\u0E49");
+  if (secret && secret.trim().length > 6) {
+    msg = msg.split(secret.trim()).join("***");
+  }
+  return msg;
+}
+function emptyCatalog(provider, connected = false, error) {
+  return {
+    provider,
+    connected,
+    fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    ...error ? { error } : {},
+    textModels: [],
+    imageModels: [],
+    videoModels: [],
+    ttsModels: [],
+    voices: []
+  };
+}
+function scoreModelRecency(id) {
+  const lower = id.toLowerCase();
+  const verMatch = lower.match(/(?:^|[-_])(\d+(?:\.\d+)?)(?:[-_]|$)/) || lower.match(/(\d+(?:\.\d+)?)/);
+  const majorMinor = verMatch ? parseFloat(verMatch[1]) : 0;
+  let dateScore = 0;
+  const isoDate = lower.match(/(20\d{2})-(\d{2})-(\d{2})/);
+  const compactDate = lower.match(/(20\d{2})(\d{2})(\d{2})/);
+  if (isoDate) {
+    dateScore = parseInt(`${isoDate[1]}${isoDate[2]}${isoDate[3]}`, 10) / 1e9;
+  } else if (compactDate) {
+    dateScore = parseInt(`${compactDate[1]}${compactDate[2]}${compactDate[3]}`, 10) / 1e9;
+  }
+  let tierAdjust = 0;
+  if (/-flash\b/.test(lower) && !/lite|8b/.test(lower)) tierAdjust += 0.04;
+  if (/-pro\b/.test(lower)) tierAdjust += 0.03;
+  if (/latest/.test(lower)) tierAdjust += 0.02;
+  if (/lite|mini|nano|8b/.test(lower)) tierAdjust -= 0.02;
+  if (/exp|tuning|legacy|001$/.test(lower)) tierAdjust -= 0.03;
+  return majorMinor * 10 + tierAdjust + dateScore;
+}
+async function fetchGeminiLiveCatalog(apiKeyOverride, forceRefresh = false) {
+  const apiKey = apiKeyOverride?.trim() || getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY");
+  if (!apiKey) {
+    return emptyCatalog("gemini", false);
+  }
+  const cacheKey = `gemini:${fingerprintSecret(apiKey)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const allRawModels = [];
+    let pageToken = "";
+    for (let page = 0; page < 4; page++) {
+      const url = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+      url.searchParams.set("pageSize", "200");
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const resp = await fetch(url.toString(), {
+        headers: { "x-goog-api-key": apiKey },
+        signal: AbortSignal.timeout(1e4)
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(
+          data?.error?.message || `Google Gemini Models API HTTP ${resp.status}`
+        );
+      }
+      if (Array.isArray(data?.models)) {
+        allRawModels.push(...data.models);
+      }
+      if (data?.nextPageToken) {
+        pageToken = String(data.nextPageToken);
+      } else {
+        break;
+      }
+    }
+    const textModels = [];
+    const imageModels = [];
+    const videoModels = [];
+    const ttsModels = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const raw of allRawModels) {
+      const rawName = String(raw?.name || "");
+      const id = rawName.replace(/^models\//, "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const methods = Array.isArray(raw?.supportedGenerationMethods) ? raw.supportedGenerationMethods.map(String) : [];
+      const displayName = String(raw?.displayName || "").trim();
+      const label = displayName && displayName.toLowerCase() !== id.toLowerCase() ? `${displayName} (${id})` : id;
+      if (/^(embedding|text-embedding|gemini-embedding|aqa|chat-bison|text-bison|codechat-bison|learnlm|gemma-)/i.test(
+        id
+      )) {
+        continue;
+      }
+      if (methods.length > 0 && methods.every((m) => m === "embedContent" || m === "countTokens" || m === "embedText")) {
+        continue;
+      }
+      const item = {
+        id,
+        label,
+        supportedMethods: methods
+      };
+      const isVideo = methods.includes("predictLongRunning") || /(^veo|-video|omni)/i.test(id);
+      const isTts = /(tts|speech)/i.test(id);
+      const isImage = !isVideo && !isTts && (/(^imagen|-image|banana)/i.test(id) || methods.includes("predict") && !/embed|veo|video|tts|audio/i.test(id));
+      if (isVideo) {
+        videoModels.push(item);
+      } else if (isImage) {
+        imageModels.push(item);
+      } else if (isTts) {
+        ttsModels.push(item);
+      } else if ((methods.includes("generateContent") || methods.includes("createInteraction")) && !/(native-audio|live-|robotics|computer-use)/i.test(id)) {
+        textModels.push(item);
+      }
+    }
+    const byNewest = (a, b) => scoreModelRecency(b.id) - scoreModelRecency(a.id);
+    textModels.sort(byNewest);
+    imageModels.sort(byNewest);
+    videoModels.sort(byNewest);
+    ttsModels.sort(byNewest);
+    const catalog = {
+      provider: "gemini",
+      connected: true,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels,
+      imageModels,
+      videoModels,
+      ttsModels
+    };
+    catalogCache.set(cacheKey, {
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      catalog
+    });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "gemini",
+      true,
+      sanitizeSecretInError(err.message, apiKey)
+    );
+  }
+}
+async function getGeminiModelMethods(apiKey, modelId) {
+  const cat = await fetchGeminiLiveCatalog(apiKey, false);
+  const all = [
+    ...cat.textModels,
+    ...cat.imageModels,
+    ...cat.videoModels,
+    ...cat.ttsModels
+  ];
+  const found = all.find((m) => m.id === modelId);
+  return found?.supportedMethods || [];
+}
+async function fetchClaudeLiveCatalog(apiKeyOverride, forceRefresh = false) {
+  const apiKey = apiKeyOverride?.trim() || getSettingValue("claude_api_key", "ANTHROPIC_API_KEY");
+  if (!apiKey) {
+    return emptyCatalog("claude", false);
+  }
+  const cacheKey = `claude:${fingerprintSecret(apiKey)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/models?limit=100", {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      signal: AbortSignal.timeout(1e4)
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(
+        data?.error?.message || `Anthropic Models API HTTP ${resp.status}`
+      );
+    }
+    const list = Array.isArray(data?.data) ? data.data : [];
+    list.sort((a, b) => {
+      const ta = Date.parse(String(a?.created_at || "")) || 0;
+      const tb = Date.parse(String(b?.created_at || "")) || 0;
+      return tb - ta;
+    });
+    const textModels = list.filter((m) => m?.id).map((m) => {
+      const id = String(m.id).trim();
+      const name = String(m.display_name || "").trim();
+      return {
+        id,
+        label: name && name.toLowerCase() !== id.toLowerCase() ? `${name} (${id})` : id,
+        createdAt: m.created_at
+      };
+    });
+    const catalog = {
+      provider: "claude",
+      connected: true,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels,
+      imageModels: [],
+      videoModels: [],
+      ttsModels: []
+    };
+    catalogCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, catalog });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "claude",
+      true,
+      sanitizeSecretInError(err.message, apiKey)
+    );
+  }
+}
+async function fetchDeepSeekLiveCatalog(apiKeyOverride, forceRefresh = false) {
+  const apiKey = apiKeyOverride?.trim() || getSettingValue("deepseek_api_key", "DEEPSEEK_API_KEY");
+  if (!apiKey) {
+    return emptyCatalog("deepseek", false);
+  }
+  const cacheKey = `deepseek:${fingerprintSecret(apiKey)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const resp = await fetch("https://api.deepseek.com/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(
+        data?.error?.message || `DeepSeek Models API HTTP ${resp.status}`
+      );
+    }
+    const list = Array.isArray(data?.data) ? data.data : [];
+    list.sort((a, b) => (Number(b?.created) || 0) - (Number(a?.created) || 0));
+    const textModels = list.filter((m) => m?.id).map((m) => ({
+      id: String(m.id).trim(),
+      label: String(m.id).trim(),
+      createdAt: m.created
+    }));
+    const catalog = {
+      provider: "deepseek",
+      connected: true,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels,
+      imageModels: [],
+      videoModels: [],
+      ttsModels: []
+    };
+    catalogCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, catalog });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "deepseek",
+      true,
+      sanitizeSecretInError(err.message, apiKey)
+    );
+  }
+}
+async function fetchOpenAiLiveCatalog(apiKeyOverride, forceRefresh = false) {
+  const apiKey = apiKeyOverride?.trim() || getSettingValue("openai_api_key", "OPENAI_API_KEY");
+  if (!apiKey) {
+    return emptyCatalog("openai", false);
+  }
+  const cacheKey = `openai:${fingerprintSecret(apiKey)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const resp = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(
+        data?.error?.message || `OpenAI Models API HTTP ${resp.status}`
+      );
+    }
+    const list = Array.isArray(data?.data) ? data.data : [];
+    list.sort((a, b) => (Number(b?.created) || 0) - (Number(a?.created) || 0));
+    const textModels = [];
+    const imageModels = [];
+    const ttsModels = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const m of list) {
+      const id = String(m?.id || "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const option = {
+        id,
+        label: id,
+        createdAt: m.created
+      };
+      if (/(gpt-image|dall-e|chatgpt-image)/i.test(id)) {
+        imageModels.push(option);
+      } else if (/(^tts-|tts$|-tts)/i.test(id)) {
+        ttsModels.push(option);
+      } else if (/^(gpt-|o[1-9]|chatgpt-)/i.test(id) && !/(realtime|audio|transcribe|whisper|embedding|moderation|instruct|babbage|davinci|codex|computer-use|search-api)/i.test(
+        id
+      )) {
+        textModels.push(option);
+      }
+    }
+    const catalog = {
+      provider: "openai",
+      connected: true,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels,
+      imageModels,
+      videoModels: [],
+      ttsModels
+    };
+    catalogCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, catalog });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "openai",
+      true,
+      sanitizeSecretInError(err.message, apiKey)
+    );
+  }
+}
+async function resolveVertexTokenForDiscovery(overrideToken) {
+  if (overrideToken?.trim()) return overrideToken.trim();
+  const configured = getSettingValue("vertex_access_token", "GOOGLE_OAUTH_ACCESS_TOKEN");
+  if (configured) return configured;
+  if (!IS_SERVERLESS) {
+    try {
+      const { stdout } = await execFileAsync(
+        "gcloud",
+        ["auth", "application-default", "print-access-token"],
+        { timeout: 3500 }
+      );
+      if (stdout && stdout.trim().length > 20) return stdout.trim();
+    } catch {
+    }
+  }
+  return "";
+}
+async function fetchVertexVeoLiveCatalog(params, forceRefresh = false) {
+  const projectId = params?.projectId?.trim() || getSettingValue("vertex_project_id", "GOOGLE_CLOUD_PROJECT");
+  const location = params?.location?.trim() || getSettingValue("vertex_location", "GOOGLE_CLOUD_LOCATION") || "us-central1";
+  const accessToken = projectId ? await resolveVertexTokenForDiscovery(params?.accessToken) : "";
+  if (!projectId || !accessToken) {
+    const geminiCat = await fetchGeminiLiveCatalog(void 0, forceRefresh);
+    if (geminiCat.connected && geminiCat.videoModels.length > 0) {
+      return {
+        provider: "vertex_veo",
+        connected: true,
+        fetchedAt: geminiCat.fetchedAt,
+        textModels: [],
+        imageModels: [],
+        videoModels: geminiCat.videoModels,
+        ttsModels: []
+      };
+    }
+    return emptyCatalog("vertex_veo", false);
+  }
+  const cacheKey = `vertex_veo:${projectId}:${location}:${fingerprintSecret(accessToken)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const url = `https://${location}-aiplatform.googleapis.com/v1beta1/publishers/google/models?pageSize=100`;
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(1e4)
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(
+        data?.error?.message || `Vertex AI Publisher Models HTTP ${resp.status}`
+      );
+    }
+    const rawModels = Array.isArray(data?.publisherModels) ? data.publisherModels : [];
+    const videoModels = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const m of rawModels) {
+      const rawName = String(m?.name || "");
+      const id = rawName.replace(/^publishers\/google\/models\//, "").trim();
+      if (!id || seen.has(id)) continue;
+      if (/(^veo|video)/i.test(id)) {
+        seen.add(id);
+        videoModels.push({
+          id,
+          label: id
+        });
+      }
+    }
+    const geminiCat = await fetchGeminiLiveCatalog(void 0, false);
+    for (const vm of geminiCat.videoModels) {
+      if (!seen.has(vm.id)) {
+        seen.add(vm.id);
+        videoModels.push(vm);
+      }
+    }
+    videoModels.sort((a, b) => scoreModelRecency(b.id) - scoreModelRecency(a.id));
+    const catalog = {
+      provider: "vertex_veo",
+      connected: true,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels: [],
+      imageModels: [],
+      videoModels,
+      ttsModels: []
+    };
+    catalogCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, catalog });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "vertex_veo",
+      true,
+      sanitizeSecretInError(err.message, accessToken)
+    );
+  }
+}
+async function fetchElevenLabsLiveCatalog(apiKeyOverride, forceRefresh = false) {
+  const apiKey = apiKeyOverride?.trim() || getSettingValue("elevenlabs_api_key", "ELEVENLABS_API_KEY");
+  if (!apiKey) {
+    return emptyCatalog("elevenlabs", false);
+  }
+  const cacheKey = `elevenlabs:${fingerprintSecret(apiKey)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const [modelsResp, voicesResp] = await Promise.all([
+      fetch("https://api.elevenlabs.io/v1/models", {
+        headers: { "xi-api-key": apiKey },
+        signal: AbortSignal.timeout(1e4)
+      }),
+      fetch("https://api.elevenlabs.io/v1/voices", {
+        headers: { "xi-api-key": apiKey },
+        signal: AbortSignal.timeout(1e4)
+      })
+    ]);
+    if (!modelsResp.ok) {
+      throw new Error(`ElevenLabs Models API HTTP ${modelsResp.status}`);
+    }
+    const rawModels = await modelsResp.json();
+    const ttsList = (Array.isArray(rawModels) ? rawModels : []).filter(
+      (m) => m?.model_id && m?.can_do_text_to_speech !== false
+    );
+    ttsList.sort((a, b) => {
+      const aTh = Array.isArray(a?.languages) && a.languages.some((l) => l?.language_id === "th") ? 1 : 0;
+      const bTh = Array.isArray(b?.languages) && b.languages.some((l) => l?.language_id === "th") ? 1 : 0;
+      if (bTh !== aTh) return bTh - aTh;
+      return scoreModelRecency(String(b.model_id)) - scoreModelRecency(String(a.model_id));
+    });
+    const ttsModels = ttsList.map((m) => ({
+      id: String(m.model_id).trim(),
+      label: m.name ? `${m.name} (${m.model_id})` : String(m.model_id)
+    }));
+    let voices = [];
+    if (voicesResp.ok) {
+      const vData = await voicesResp.json();
+      const rawVoices = Array.isArray(vData?.voices) ? vData.voices : [];
+      voices = rawVoices.filter((v) => v?.voice_id).map((v) => ({
+        id: String(v.voice_id).trim(),
+        label: v.name ? `${v.name}${v.category ? ` \u2022 ${v.category}` : ""}` : String(v.voice_id)
+      }));
+    }
+    const catalog = {
+      provider: "elevenlabs",
+      connected: true,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels: [],
+      imageModels: [],
+      videoModels: [],
+      ttsModels,
+      voices
+    };
+    catalogCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, catalog });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "elevenlabs",
+      true,
+      sanitizeSecretInError(err.message, apiKey)
+    );
+  }
+}
+async function fetchOpenAiCompatibleLiveCatalog(params, forceRefresh = false, explicitProbe = false) {
+  const endpoint = (params?.endpoint?.trim() || getSettingValue("local_endpoint")).replace(/\/$/, "");
+  const apiKey = params?.apiKey?.trim() || getSettingValue("local_api_key");
+  if (!endpoint) {
+    return emptyCatalog("openai_compatible", false);
+  }
+  if (IS_SERVERLESS && !explicitProbe && /^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(endpoint)) {
+    return emptyCatalog("openai_compatible", false);
+  }
+  const cacheKey = `openai_compatible:${endpoint}:${fingerprintSecret(apiKey)}`;
+  if (!forceRefresh) {
+    const hit = catalogCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.catalog;
+  }
+  try {
+    const headers = {};
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const resp = await fetch(`${endpoint}/models`, {
+      headers,
+      signal: AbortSignal.timeout(3500)
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const rawList = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
+    const textModels = rawList.map((m) => String(m?.id || m?.name || "").trim()).filter(Boolean).map((id) => ({ id, label: id }));
+    const catalog = {
+      provider: "openai_compatible",
+      connected: textModels.length > 0,
+      fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      textModels,
+      imageModels: [],
+      videoModels: [],
+      ttsModels: []
+    };
+    catalogCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, catalog });
+    return catalog;
+  } catch (err) {
+    return emptyCatalog(
+      "openai_compatible",
+      false,
+      sanitizeSecretInError(err.message, apiKey)
+    );
+  }
+}
+async function fetchAllConfiguredLiveModels(forceRefresh = false) {
+  const [
+    gemini,
+    claude,
+    deepseek,
+    openai,
+    vertexVeo,
+    elevenlabs,
+    openaiCompatible
+  ] = await Promise.all([
+    fetchGeminiLiveCatalog(void 0, forceRefresh),
+    fetchClaudeLiveCatalog(void 0, forceRefresh),
+    fetchDeepSeekLiveCatalog(void 0, forceRefresh),
+    fetchOpenAiLiveCatalog(void 0, forceRefresh),
+    fetchVertexVeoLiveCatalog(void 0, forceRefresh),
+    fetchElevenLabsLiveCatalog(void 0, forceRefresh),
+    fetchOpenAiCompatibleLiveCatalog(void 0, forceRefresh, false)
+  ]);
+  return {
+    fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    providers: {
+      gemini,
+      claude,
+      deepseek,
+      openai,
+      vertex_veo: vertexVeo,
+      elevenlabs,
+      openai_compatible: openaiCompatible
+    }
+  };
+}
+async function fetchSingleProviderLiveCatalog(params) {
+  const force = params.forceRefresh ?? true;
+  switch (params.provider) {
+    case "gemini":
+      return fetchGeminiLiveCatalog(params.apiKey, force);
+    case "claude":
+      return fetchClaudeLiveCatalog(params.apiKey, force);
+    case "deepseek":
+      return fetchDeepSeekLiveCatalog(params.apiKey, force);
+    case "openai":
+      return fetchOpenAiLiveCatalog(params.apiKey, force);
+    case "vertex_veo":
+      return fetchVertexVeoLiveCatalog(
+        {
+          projectId: params.projectId,
+          location: params.location,
+          accessToken: params.apiKey
+        },
+        force
+      );
+    case "elevenlabs":
+      return fetchElevenLabsLiveCatalog(params.apiKey, force);
+    case "openai_compatible":
+      return fetchOpenAiCompatibleLiveCatalog(
+        { endpoint: params.endpoint, apiKey: params.apiKey },
+        force,
+        true
+      );
+  }
+}
+async function resolveLatestModel(params) {
+  const candidate = (params.requestedModel || "").trim();
+  const normalizedCandidate = candidate === "auto" || candidate === "auto_latest" ? "" : candidate;
+  const catalog = await fetchSingleProviderLiveCatalog({
+    provider: params.provider,
+    apiKey: params.apiKeyOverride,
+    forceRefresh: false
+  });
+  const bucket = params.capability === "image" ? catalog.imageModels : params.capability === "video" ? catalog.videoModels : params.capability === "tts" ? catalog.ttsModels : catalog.textModels;
+  if (normalizedCandidate && bucket.some((m) => m.id === normalizedCandidate)) {
+    return normalizedCandidate;
+  }
+  if (bucket.length > 0) {
+    return bucket[0].id;
+  }
+  if (normalizedCandidate) {
+    return normalizedCandidate;
+  }
+  const detail = catalog.error ? ` (${catalog.error})` : "";
+  throw new Error(
+    `\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E42\u0E21\u0E40\u0E14\u0E25\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17 ${params.capability} \u0E08\u0E32\u0E01 API \u0E02\u0E2D\u0E07\u0E04\u0E48\u0E32\u0E22 ${params.provider} \u0E42\u0E14\u0E22\u0E15\u0E23\u0E07${detail} \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E27\u0E48\u0E32 API Key \u0E21\u0E35\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E42\u0E21\u0E40\u0E14\u0E25\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17\u0E19\u0E35\u0E49`
+  );
+}
+async function resolveLatestElevenLabsVoice(requestedVoiceId, apiKeyOverride) {
+  const candidate = (requestedVoiceId || "").trim();
+  const catalog = await fetchElevenLabsLiveCatalog(apiKeyOverride, false);
+  const voices = catalog.voices || [];
+  if (candidate && voices.some((v) => v.id === candidate)) {
+    return candidate;
+  }
+  if (voices.length > 0) {
+    return voices[0].id;
+  }
+  if (candidate) {
+    return candidate;
+  }
+  throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1E\u0E32\u0E01\u0E22\u0E4C (Voices) \u0E08\u0E32\u0E01 ElevenLabs API");
+}
+
+// server/mediaEngine.ts
+var execFileAsync2 = promisify2(execFile2);
 var UPLOADS_ROOT = IS_SERVERLESS ? "/tmp/komkrit-uploads" : path2.resolve(process.cwd(), "uploads");
 var IMAGES_DIR = path2.join(UPLOADS_ROOT, "images");
 var VIDEOS_DIR = path2.join(UPLOADS_ROOT, "videos");
@@ -1268,17 +1941,23 @@ async function generateRealImage(params) {
   if (chosenProvider === "gemini") {
     if (!geminiKey) {
       throw new Error(
-        '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E\u0E08\u0E23\u0E34\u0E07 (Gemini Nano Banana 2.1) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
+        '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model2 = params.model || getSettingValue("gemini_image_model") || "gemini-nano-banana-2.1";
+    const model2 = await resolveLatestModel({
+      provider: "gemini",
+      capability: "image",
+      requestedModel: params.model || getSettingValue("gemini_image_model"),
+      apiKeyOverride: geminiKey
+    });
+    const methods = await getGeminiModelMethods(geminiKey, model2);
     const aspectRatio = params.aspectRatio || "16:9";
     const ai = new GoogleGenAI({ apiKey: geminiKey });
     let imgBuffer2 = null;
     let ext = "png";
     let mimeType = "image/png";
     let interactionId = "";
-    if (/^imagen-/i.test(model2)) {
+    if (methods.includes("predict") || /^imagen/i.test(model2)) {
       const imResp = await ai.models.generateImages({
         model: model2,
         prompt,
@@ -1291,6 +1970,34 @@ async function generateRealImage(params) {
       const b64 = imResp?.generatedImages?.[0]?.image?.imageBytes;
       if (b64) {
         imgBuffer2 = Buffer.from(b64, "base64");
+      }
+    } else if (methods.includes("generateContent")) {
+      let genResp;
+      try {
+        genResp = await ai.models.generateContent({
+          model: model2,
+          contents: `${prompt} (Aspect ratio: ${aspectRatio})`,
+          config: {
+            responseModalities: ["TEXT", "IMAGE"],
+            imageConfig: { aspectRatio }
+          }
+        });
+      } catch {
+        genResp = await ai.models.generateContent({
+          model: model2,
+          contents: `${prompt} (Aspect ratio: ${aspectRatio})`,
+          config: {
+            responseModalities: ["TEXT", "IMAGE"]
+          }
+        });
+      }
+      const parts = genResp?.candidates?.[0]?.content?.parts || [];
+      const imgPart = parts.find((p) => p?.inlineData?.data);
+      if (imgPart?.inlineData?.data) {
+        mimeType = imgPart.inlineData.mimeType || "image/png";
+        if (mimeType.includes("jpeg") || mimeType.includes("jpg")) ext = "jpg";
+        else if (mimeType.includes("webp")) ext = "webp";
+        imgBuffer2 = Buffer.from(imgPart.inlineData.data, "base64");
       }
     } else {
       const interaction = await ai.interactions.create({
@@ -1323,7 +2030,7 @@ async function generateRealImage(params) {
     }
     if (!imgBuffer2 || imgBuffer2.length === 0) {
       throw new Error(
-        `\u0E42\u0E21\u0E40\u0E14\u0E25 ${model2} \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E2A\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E\u0E01\u0E25\u0E31\u0E1A\u0E21\u0E32 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C API Key \u0E2B\u0E23\u0E37\u0E2D\u0E1B\u0E23\u0E31\u0E1A Prompt`
+        `\u0E42\u0E21\u0E40\u0E14\u0E25 ${model2} \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E2A\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E\u0E01\u0E25\u0E31\u0E1A\u0E21\u0E32 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C API Key \u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E42\u0E21\u0E40\u0E14\u0E25\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E\u0E2D\u0E37\u0E48\u0E19\u0E08\u0E32\u0E01\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14`
       );
     }
     const filename2 = `gemini-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`;
@@ -1349,15 +2056,22 @@ async function generateRealImage(params) {
       '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 OpenAI API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
     );
   }
-  const model = params.model || "dall-e-3";
-  const size = params.aspectRatio === "9:16" ? "1024x1792" : params.aspectRatio === "1:1" ? "1024x1024" : "1792x1024";
+  const model = await resolveLatestModel({
+    provider: "openai",
+    capability: "image",
+    requestedModel: params.model || getSettingValue("openai_image_model"),
+    apiKeyOverride: openaiKey
+  });
+  const isLegacyDalle = /^dall-e/i.test(model);
+  const legacySize = params.aspectRatio === "9:16" ? "1024x1792" : params.aspectRatio === "1:1" ? "1024x1024" : "1792x1024";
+  const modernSize = params.aspectRatio === "9:16" ? "1024x1536" : params.aspectRatio === "1:1" ? "1024x1024" : "1536x1024";
   const bodyPayload = {
     model,
     prompt,
     n: 1,
-    size: model === "gpt-image-1" ? params.aspectRatio === "9:16" ? "1024x1536" : params.aspectRatio === "1:1" ? "1024x1024" : "1536x1024" : size
+    size: isLegacyDalle ? legacySize : modernSize
   };
-  if (model !== "gpt-image-1") {
+  if (isLegacyDalle) {
     bodyPayload.response_format = "b64_json";
   }
   const resp = await fetch("https://api.openai.com/v1/images/generations", {
@@ -1416,14 +2130,14 @@ async function getVertexAccessToken() {
   } catch {
   }
   try {
-    const { stdout } = await execFileAsync("gcloud", ["auth", "application-default", "print-access-token"], {
+    const { stdout } = await execFileAsync2("gcloud", ["auth", "application-default", "print-access-token"], {
       timeout: 6e3
     });
     if (stdout && stdout.trim().length > 20) return stdout.trim();
   } catch {
   }
   try {
-    const { stdout } = await execFileAsync("gcloud", ["auth", "print-access-token"], {
+    const { stdout } = await execFileAsync2("gcloud", ["auth", "print-access-token"], {
       timeout: 6e3
     });
     if (stdout && stdout.trim().length > 20) return stdout.trim();
@@ -1436,15 +2150,34 @@ async function generateRealVideo(params) {
   if (!prompt) {
     throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38 Prompt \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07");
   }
-  const engine = params.engine || getSettingValue("gemini_video_model") || "gemini-omni-1.1-flash";
+  const projectId = getSettingValue("vertex_project_id", "GOOGLE_CLOUD_PROJECT");
+  const location = getSettingValue("vertex_location", "GOOGLE_CLOUD_LOCATION") || "us-central1";
+  const accessToken = projectId ? await getVertexAccessToken() : "";
+  const geminiKey = getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY");
+  if (!geminiKey && (!projectId || !accessToken)) {
+    throw new Error(
+      '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E44\u0E1B\u0E17\u0E35\u0E48\u0E1B\u0E38\u0E48\u0E21 "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E04\u0E35\u0E22\u0E4C AI" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E43\u0E2A\u0E48 GEMINI_API_KEY (\u0E14\u0E36\u0E07\u0E42\u0E21\u0E40\u0E14\u0E25\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34) \u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E2A\u0E48 GCP Project ID + Vertex Token \u0E04\u0E23\u0E31\u0E1A'
+    );
+  }
+  const requestedEngine = params.engine?.trim() || getSettingValue("gemini_video_model") || getSettingValue("vertex_veo_model");
+  const engine = geminiKey ? await resolveLatestModel({
+    provider: "gemini",
+    capability: "video",
+    requestedModel: requestedEngine,
+    apiKeyOverride: geminiKey
+  }) : await resolveLatestModel({
+    provider: "vertex_veo",
+    capability: "video",
+    requestedModel: requestedEngine,
+    apiKeyOverride: accessToken
+  });
+  const geminiMethods = geminiKey ? await getGeminiModelMethods(geminiKey, engine) : [];
+  const isLongRunningVeo = geminiMethods.includes("predictLongRunning") || /^veo/i.test(engine);
   const aspectRatio = params.aspectRatio || "16:9";
   const resolution = params.resolution || "720p";
   const durationSec = Math.min(10, Math.max(3, Math.round(Number(params.durationSec) || 6)));
-  if (engine.startsWith("veo-")) {
-    const projectId = getSettingValue("vertex_project_id", "GOOGLE_CLOUD_PROJECT");
-    const location = getSettingValue("vertex_location", "GOOGLE_CLOUD_LOCATION") || "us-central1";
-    const accessToken = projectId ? await getVertexAccessToken() : "";
-    const geminiKeyForVeo = getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY");
+  if (isLongRunningVeo) {
+    const geminiKeyForVeo = geminiKey;
     if ((!projectId || !accessToken) && geminiKeyForVeo) {
       const ai2 = new GoogleGenAI({
         apiKey: geminiKeyForVeo,
@@ -1483,7 +2216,7 @@ async function generateRealVideo(params) {
         polls++;
       }
       if (!operation.done) {
-        throw new Error("Google Veo \u0E01\u0E33\u0E25\u0E31\u0E07\u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E40\u0E01\u0E34\u0E19\u0E40\u0E27\u0E25\u0E32\u0E17\u0E35\u0E48\u0E01\u0E33\u0E2B\u0E19\u0E14 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E25\u0E2D\u0E07\u0E04\u0E27\u0E32\u0E21\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14 720p \u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E0A\u0E49 Gemini Omni 1.1 Flash");
+        throw new Error("Google Veo \u0E01\u0E33\u0E25\u0E31\u0E07\u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E40\u0E01\u0E34\u0E19\u0E40\u0E27\u0E25\u0E32\u0E17\u0E35\u0E48\u0E01\u0E33\u0E2B\u0E19\u0E14 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E25\u0E2D\u0E07\u0E04\u0E27\u0E32\u0E21\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14 720p \u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E42\u0E21\u0E40\u0E14\u0E25\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E41\u0E1A\u0E1A Fast \u0E08\u0E32\u0E01\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14");
       }
       if (operation.error) {
         throw new Error(operation.error.message || JSON.stringify(operation.error));
@@ -1638,10 +2371,9 @@ async function generateRealVideo(params) {
       reviewStatus: params.reviewStatus
     });
   }
-  const geminiKey = getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY");
   if (!geminiKey) {
     throw new Error(
-      '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07 (Gemini Omni 1.1 Flash / Google Flow) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
+      '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E40\u0E21\u0E19\u0E39 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
     );
   }
   if (params.lastFrameUrl && !params.firstFrameUrl) {
@@ -1703,7 +2435,7 @@ async function generateRealVideo(params) {
           VIDEOS_DIR,
           `temp-stripped-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`
         );
-        await execFileAsync("ffmpeg", [
+        await execFileAsync2("ffmpeg", [
           "-y",
           "-i",
           extendAbs,
@@ -1764,7 +2496,7 @@ async function generateRealVideo(params) {
     videoResponseFormat.aspect_ratio = aspectRatio;
   }
   const createPayload = {
-    model: "gemini-omni-1.1-flash",
+    model: engine,
     input: inputParts,
     response_format: videoResponseFormat
   };
@@ -1800,8 +2532,8 @@ async function generateRealVideo(params) {
   }
   return recordMediaAsset({
     mediaType: "video",
-    provider: "google-gemini-omni",
-    model: "gemini-omni-1.1-flash",
+    provider: "google-gemini-video",
+    model: engine,
     prompt,
     fileUrl: `/uploads/videos/${filename}`,
     mimeType: "video/mp4",
@@ -1823,7 +2555,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
     throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E25\u0E34\u0E1B\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E09\u0E32\u0E01\u0E17\u0E35\u0E48\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E19\u0E33\u0E21\u0E32\u0E15\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E23\u0E27\u0E21 (Assemble Film)");
   }
   try {
-    await execFileAsync("ffmpeg", ["-version"], { timeout: 4e3 });
+    await execFileAsync2("ffmpeg", ["-version"], { timeout: 4e3 });
   } catch {
     throw new Error(
       "\u0E40\u0E0B\u0E34\u0E23\u0E4C\u0E1F\u0E40\u0E27\u0E2D\u0E23\u0E4C Serverless \u0E1B\u0E31\u0E08\u0E08\u0E38\u0E1A\u0E31\u0E19\u0E44\u0E21\u0E48\u0E21\u0E35\u0E42\u0E1B\u0E23\u0E41\u0E01\u0E23\u0E21 FFmpeg \u0E15\u0E34\u0E14\u0E15\u0E31\u0E49\u0E07\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21\u0E2B\u0E25\u0E32\u0E22\u0E09\u0E32\u0E01 (\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E0A\u0E49\u0E04\u0E25\u0E34\u0E1B\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E41\u0E15\u0E48\u0E25\u0E30\u0E09\u0E32\u0E01\u0E08\u0E32\u0E01\u0E04\u0E25\u0E31\u0E07\u0E2A\u0E37\u0E48\u0E2D\u0E44\u0E14\u0E49\u0E17\u0E31\u0E19\u0E17\u0E35\u0E04\u0E23\u0E31\u0E1A)"
@@ -1843,7 +2575,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
       const normPath = path2.join(VIDEOS_DIR, `temp-norm-${Date.now()}-${i}.mp4`);
       let hasAudio = false;
       try {
-        const { stdout } = await execFileAsync("ffprobe", [
+        const { stdout } = await execFileAsync2("ffprobe", [
           "-v",
           "error",
           "-select_streams",
@@ -1860,7 +2592,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
       }
       const vf = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p`;
       if (hasAudio) {
-        await execFileAsync("ffmpeg", [
+        await execFileAsync2("ffmpeg", [
           "-y",
           "-i",
           src,
@@ -1881,7 +2613,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
           normPath
         ]);
       } else {
-        await execFileAsync("ffmpeg", [
+        await execFileAsync2("ffmpeg", [
           "-y",
           "-f",
           "lavfi",
@@ -1913,7 +2645,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
     fs2.writeFileSync(concatListPath, listBody, "utf-8");
     const voiceoverAbs = await resolveLocalAssetPath(params.voiceoverAudioUrl);
     if (voiceoverAbs && fs2.existsSync(voiceoverAbs)) {
-      await execFileAsync("ffmpeg", [
+      await execFileAsync2("ffmpeg", [
         "-y",
         "-f",
         "concat",
@@ -1925,7 +2657,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
         "copy",
         stitchedRawPath
       ]);
-      await execFileAsync("ffmpeg", [
+      await execFileAsync2("ffmpeg", [
         "-y",
         "-i",
         stitchedRawPath,
@@ -1945,7 +2677,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
         finalOutPath
       ]);
     } else {
-      await execFileAsync("ffmpeg", [
+      await execFileAsync2("ffmpeg", [
         "-y",
         "-f",
         "concat",
@@ -1982,6 +2714,29 @@ async function stitchFlowScenesWithFfmpeg(params) {
     }
   }
 }
+function wrapPcm16InWavHeader(pcmData, sampleRate = 24e3, numChannels = 1) {
+  if (pcmData.length >= 4 && pcmData.subarray(0, 4).toString("ascii") === "RIFF") {
+    return pcmData;
+  }
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcmData.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcmData.length, 40);
+  return Buffer.concat([header, pcmData]);
+}
 async function generateRealAudio(params) {
   const rawText = params.text?.trim();
   if (!rawText) {
@@ -1995,55 +2750,91 @@ async function generateRealAudio(params) {
   if (chosenProvider === "gemini") {
     if (!geminiKey) {
       throw new Error(
-        "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07 (Gemini 3.8 Flash TTS \u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22) \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys"
+        "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 Google Gemini API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys"
       );
     }
+    const ttsModel2 = await resolveLatestModel({
+      provider: "gemini",
+      capability: "tts",
+      requestedModel: params.model || getSettingValue("gemini_tts_model"),
+      apiKeyOverride: geminiKey
+    });
+    const methods = await getGeminiModelMethods(geminiKey, ttsModel2);
     const ai = new GoogleGenAI({ apiKey: geminiKey });
     const voiceName = params.voice || "Kore";
     const deliveryStyle = params.style || "warm, articulate, inspiring Thai educator and executive speaker";
-    const interaction = await ai.interactions.create({
-      model: "gemini-3.8-flash-tts",
-      input: [
-        {
-          type: "user_input",
-          content: [
-            {
-              type: "text",
-              text: cleanTranscript,
-              annotations: [
-                {
-                  type: "speech_metadata",
-                  speaker: "Komkrit",
-                  style: deliveryStyle
-                }
-              ]
+    let audioBuffer2 = null;
+    let interactionId = "";
+    if (methods.includes("generateContent")) {
+      const ttsResp = await ai.models.generateContent({
+        model: ttsModel2,
+        contents: [{ parts: [{ text: cleanTranscript }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName }
             }
-          ]
+          }
         }
-      ],
-      response_format: { type: "audio" },
-      generation_config: {
-        speech_config: {
-          speakers: [{ speaker: "Komkrit", voice: voiceName }]
-        }
+      });
+      const inline = ttsResp?.candidates?.[0]?.content?.parts?.find(
+        (p) => p?.inlineData?.data
+      )?.inlineData;
+      if (inline?.data) {
+        const rawBuf = Buffer.from(inline.data, "base64");
+        const rateMatch = String(inline.mimeType || "").match(/rate=(\d+)/i);
+        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24e3;
+        audioBuffer2 = wrapPcm16InWavHeader(rawBuf, sampleRate, 1);
       }
-    });
-    const outAudio = interaction.output_audio;
-    if (!outAudio?.data) {
-      throw new Error("Gemini 3.8 Flash TTS \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E2A\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E01\u0E25\u0E31\u0E1A\u0E21\u0E32");
+    } else {
+      const interaction = await ai.interactions.create({
+        model: ttsModel2,
+        input: [
+          {
+            type: "user_input",
+            content: [
+              {
+                type: "text",
+                text: cleanTranscript,
+                annotations: [
+                  {
+                    type: "speech_metadata",
+                    speaker: "Komkrit",
+                    style: deliveryStyle
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        response_format: { type: "audio" },
+        generation_config: {
+          speech_config: {
+            speakers: [{ speaker: "Komkrit", voice: voiceName }]
+          }
+        }
+      });
+      interactionId = interaction.id || "";
+      const outAudio = interaction.output_audio;
+      if (outAudio?.data) {
+        audioBuffer2 = wrapPcm16InWavHeader(Buffer.from(outAudio.data, "base64"), 24e3, 1);
+      }
     }
-    const audioBuffer2 = Buffer.from(outAudio.data, "base64");
+    if (!audioBuffer2 || audioBuffer2.length === 0) {
+      throw new Error(`Google Gemini TTS (${ttsModel2}) \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E2A\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E01\u0E25\u0E31\u0E1A\u0E21\u0E32`);
+    }
     const filename2 = `tts-gemini-${Date.now()}-${Math.round(Math.random() * 1e4)}.wav`;
     fs2.writeFileSync(path2.join(AUDIO_DIR, filename2), audioBuffer2);
     const fileUrl2 = `/uploads/audio/${filename2}`;
     return recordMediaAsset({
       mediaType: "audio",
       provider: "gemini",
-      model: `gemini-3.8-flash-tts (${voiceName})`,
+      model: `${ttsModel2} (${voiceName})`,
       prompt: cleanTranscript.slice(0, 300),
       fileUrl: fileUrl2,
       mimeType: "audio/wav",
-      interactionId: interaction.id || "",
+      interactionId,
       workflowId: params.workflowId ?? null
     });
   }
@@ -2053,7 +2844,16 @@ async function generateRealAudio(params) {
         "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 ElevenLabs API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys"
       );
     }
-    const voiceId = params.voice || getSettingValue("elevenlabs_voice_id") || "JBFqnCBsd6RMkjVDRZzb";
+    const ttsModel2 = await resolveLatestModel({
+      provider: "elevenlabs",
+      capability: "tts",
+      requestedModel: params.model || getSettingValue("elevenlabs_model"),
+      apiKeyOverride: elevenKey
+    });
+    const voiceId = await resolveLatestElevenLabsVoice(
+      params.voice || getSettingValue("elevenlabs_voice_id"),
+      elevenKey
+    );
     const resp2 = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",
       headers: {
@@ -2062,7 +2862,7 @@ async function generateRealAudio(params) {
       },
       body: JSON.stringify({
         text: cleanTranscript,
-        model_id: "eleven_multilingual_v2"
+        model_id: ttsModel2
       })
     });
     if (!resp2.ok) {
@@ -2076,7 +2876,7 @@ async function generateRealAudio(params) {
     return recordMediaAsset({
       mediaType: "audio",
       provider: "elevenlabs",
-      model: `eleven_multilingual_v2 (${voiceId})`,
+      model: `${ttsModel2} (${voiceId})`,
       prompt: cleanTranscript.slice(0, 300),
       fileUrl: fileUrl2,
       mimeType: "audio/mpeg",
@@ -2088,6 +2888,12 @@ async function generateRealAudio(params) {
       "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 OpenAI API Key \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E08\u0E23\u0E34\u0E07 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys"
     );
   }
+  const ttsModel = await resolveLatestModel({
+    provider: "openai",
+    capability: "tts",
+    requestedModel: params.model || getSettingValue("openai_tts_model"),
+    apiKeyOverride: openaiKey
+  });
   const voice = params.voice || "alloy";
   const resp = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
@@ -2096,7 +2902,7 @@ async function generateRealAudio(params) {
       Authorization: `Bearer ${openaiKey}`
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini-tts",
+      model: ttsModel,
       voice,
       input: cleanTranscript,
       response_format: "mp3"
@@ -2113,7 +2919,7 @@ async function generateRealAudio(params) {
   return recordMediaAsset({
     mediaType: "audio",
     provider: "openai",
-    model: `gpt-4o-mini-tts (${voice})`,
+    model: `${ttsModel} (${voice})`,
     prompt: cleanTranscript.slice(0, 300),
     fileUrl,
     mimeType: "audio/mpeg",
@@ -2133,37 +2939,38 @@ function getProviderConfigs() {
     defaultProvider: getSettingValue("ai_provider") || "auto",
     gemini: {
       apiKey: geminiKey,
-      model: getSettingValue("gemini_model") || "gemini-3.8-flash",
-      imageModel: getSettingValue("gemini_image_model") || "gemini-nano-banana-2.1",
-      videoModel: getSettingValue("gemini_video_model") || "gemini-omni-1.1-flash",
-      ttsModel: "gemini-3.8-flash-tts"
+      model: getSettingValue("gemini_model"),
+      imageModel: getSettingValue("gemini_image_model"),
+      videoModel: getSettingValue("gemini_video_model"),
+      ttsModel: getSettingValue("gemini_tts_model")
     },
     claude: {
       apiKey: claudeKey,
-      model: getSettingValue("claude_model") || "claude-sonnet-4-20250514"
+      model: getSettingValue("claude_model")
     },
     deepseek: {
       apiKey: deepseekKey,
-      model: getSettingValue("deepseek_model") || "deepseek-chat"
+      model: getSettingValue("deepseek_model")
     },
     openai: {
       apiKey: openaiKey,
-      model: getSettingValue("openai_model") || "gpt-4.1"
+      model: getSettingValue("openai_model")
     },
     localOpenAi: {
       endpoint: getSettingValue("local_endpoint") || "http://localhost:1234/v1",
-      model: getSettingValue("local_model") || "omni-o1x-pro",
+      model: getSettingValue("local_model"),
       apiKey: getSettingValue("local_api_key") || ""
     },
     vertexVeo: {
       projectId: getSettingValue("vertex_project_id", "GOOGLE_CLOUD_PROJECT"),
       location: getSettingValue("vertex_location", "GOOGLE_CLOUD_LOCATION") || "us-central1",
       accessToken: getSettingValue("vertex_access_token", "GOOGLE_OAUTH_ACCESS_TOKEN"),
-      veoModel: getSettingValue("vertex_veo_model") || "veo-3.1-generate-001"
+      veoModel: getSettingValue("vertex_veo_model")
     },
     elevenlabs: {
       apiKey: elevenlabsKey,
-      voiceId: getSettingValue("elevenlabs_voice_id") || "JBFqnCBsd6RMkjVDRZzb"
+      model: getSettingValue("elevenlabs_model"),
+      voiceId: getSettingValue("elevenlabs_voice_id")
     },
     resend: {
       apiKey: resendKey,
@@ -2221,11 +3028,17 @@ async function callRealLlm(params) {
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 Google Gemini API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E44\u0E1B\u0E17\u0E35\u0E48\u0E1B\u0E38\u0E48\u0E21 "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E04\u0E35\u0E22\u0E4C AI" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E27\u0E32\u0E07\u0E04\u0E35\u0E22\u0E4C\u0E41\u0E25\u0E30\u0E01\u0E14\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E48\u0E2D\u0E19\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E04\u0E23\u0E31\u0E1A'
       );
     }
-    const model = params.model?.trim() || cfg.gemini.model || "gemini-3.8-flash";
-    const ai = new GoogleGenAI2({ apiKey });
     try {
-      const isLegacyGen2Model = /^gemini-(2\.|1\.)/i.test(model);
-      if (!isLegacyGen2Model) {
+      const model = await resolveLatestModel({
+        provider: "gemini",
+        capability: "text",
+        requestedModel: params.model || cfg.gemini.model,
+        apiKeyOverride: apiKey
+      });
+      const methods = await getGeminiModelMethods(apiKey, model);
+      const supportsGenerateContent = methods.length === 0 || methods.includes("generateContent");
+      const ai = new GoogleGenAI2({ apiKey });
+      if (!supportsGenerateContent) {
         const inputPayload = params.messages.length === 1 && params.messages[0].role === "user" ? params.messages[0].content : params.messages.map((m) => ({
           type: m.role === "assistant" ? "model_output" : "user_input",
           content: [{ type: "text", text: m.content }]
@@ -2290,7 +3103,12 @@ async function callRealLlm(params) {
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 Anthropic Claude API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model = params.model?.trim() || cfg.claude.model || "claude-sonnet-4-20250514";
+    const model = await resolveLatestModel({
+      provider: "claude",
+      capability: "text",
+      requestedModel: params.model || cfg.claude.model,
+      apiKeyOverride: apiKey
+    });
     const body = {
       model,
       max_tokens: 8192,
@@ -2342,7 +3160,13 @@ async function callRealLlm(params) {
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 DeepSeek API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model = params.model?.trim() || cfg.deepseek.model || "deepseek-chat";
+    const model = await resolveLatestModel({
+      provider: "deepseek",
+      capability: "text",
+      requestedModel: params.model || cfg.deepseek.model,
+      apiKeyOverride: apiKey
+    });
+    const isReasoner = /reasoner/i.test(model);
     const apiMessages2 = [];
     if (params.systemInstruction) {
       apiMessages2.push({ role: "system", content: params.systemInstruction });
@@ -2355,10 +3179,10 @@ async function callRealLlm(params) {
       messages: apiMessages2,
       max_tokens: 8192
     };
-    if (model !== "deepseek-reasoner" && typeof params.temperature === "number") {
+    if (!isReasoner && typeof params.temperature === "number") {
       body.temperature = params.temperature;
     }
-    if (params.jsonMode && model !== "deepseek-reasoner") {
+    if (params.jsonMode && !isReasoner) {
       body.response_format = { type: "json_object" };
     }
     const resp2 = await fetch("https://api.deepseek.com/chat/completions", {
@@ -2397,8 +3221,13 @@ async function callRealLlm(params) {
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 OpenAI (ChatGPT) API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model = params.model?.trim() || cfg.openai.model || "gpt-4.1";
-    const isReasoningModel = /^o[134]/.test(model);
+    const model = await resolveLatestModel({
+      provider: "openai",
+      capability: "text",
+      requestedModel: params.model || cfg.openai.model,
+      apiKeyOverride: apiKey
+    });
+    const isReasoningModel = /^o\d/i.test(model);
     const apiMessages2 = [];
     if (params.systemInstruction) {
       apiMessages2.push({
@@ -2446,8 +3275,13 @@ async function callRealLlm(params) {
     };
   }
   const endpoint = cfg.localOpenAi.endpoint.replace(/\/$/, "");
-  const localModel = params.model?.trim() || cfg.localOpenAi.model;
   const localKey = params.apiKeyOverride?.trim() || cfg.localOpenAi.apiKey;
+  const localModel = await resolveLatestModel({
+    provider: "openai_compatible",
+    capability: "text",
+    requestedModel: params.model || cfg.localOpenAi.model,
+    apiKeyOverride: localKey
+  });
   const headers = { "Content-Type": "application/json" };
   if (localKey) {
     headers.Authorization = `Bearer ${localKey}`;
@@ -2589,10 +3423,10 @@ async function generateFlowStoryboardWithLlm(params) {
   const systemInstruction = `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D AI Film Director \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E23\u0E30\u0E1A\u0E1A Google Flow & Google Veo Filmmaking Studio \u0E02\u0E2D\u0E07 "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT"
 \u0E08\u0E07\u0E2D\u0E2D\u0E01\u0E41\u0E1A\u0E1A Storyboard \u0E20\u0E32\u0E1E\u0E22\u0E19\u0E15\u0E23\u0E4C\u0E2A\u0E31\u0E49\u0E19\u0E08\u0E33\u0E19\u0E27\u0E19 ${count} \u0E09\u0E32\u0E01 (Scenes) \u0E17\u0E35\u0E48\u0E21\u0E35\u0E04\u0E27\u0E32\u0E21\u0E15\u0E48\u0E2D\u0E40\u0E19\u0E37\u0E48\u0E2D\u0E07\u0E01\u0E31\u0E19\u0E17\u0E31\u0E49\u0E07\u0E15\u0E31\u0E27\u0E25\u0E30\u0E04\u0E23 \u0E41\u0E2A\u0E07 \u0E2A\u0E35 \u0E41\u0E25\u0E30\u0E21\u0E38\u0E21\u0E01\u0E25\u0E49\u0E2D\u0E07
 \u0E42\u0E14\u0E22\u0E41\u0E15\u0E48\u0E25\u0E30\u0E09\u0E32\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35:
-- firstFramePrompt (\u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29 \u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E20\u0E32\u0E1E\u0E16\u0E48\u0E32\u0E22\u0E20\u0E32\u0E1E\u0E22\u0E19\u0E15\u0E23\u0E4C \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E Keyframe \u0E15\u0E49\u0E19\u0E09\u0E32\u0E01\u0E14\u0E49\u0E27\u0E22 Gemini Nano Banana 2.1)
+- firstFramePrompt (\u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29 \u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E20\u0E32\u0E1E\u0E16\u0E48\u0E32\u0E22\u0E20\u0E32\u0E1E\u0E22\u0E19\u0E15\u0E23\u0E4C \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E Keyframe \u0E15\u0E49\u0E19\u0E09\u0E32\u0E01\u0E14\u0E49\u0E27\u0E22\u0E42\u0E21\u0E40\u0E14\u0E25 Google Gemini Image \u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14)
 - lastFramePrompt (\u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29 \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E20\u0E32\u0E1E\u0E17\u0E49\u0E32\u0E22\u0E09\u0E32\u0E01\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E43\u0E2B\u0E49\u0E40\u0E01\u0E34\u0E14 Smooth Transition \u0E2B\u0E32\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23)
-- videoMotionPrompt (\u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29 \u0E23\u0E30\u0E1A\u0E38\u0E01\u0E32\u0E23\u0E40\u0E04\u0E25\u0E37\u0E48\u0E2D\u0E19\u0E01\u0E25\u0E49\u0E2D\u0E07 \u0E01\u0E32\u0E23\u0E02\u0E22\u0E31\u0E1A\u0E02\u0E2D\u0E07\u0E15\u0E31\u0E27\u0E41\u0E1A\u0E1A \u0E41\u0E2A\u0E07 \u0E41\u0E25\u0E30\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E01\u0E32\u0E28 \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E48\u0E07\u0E40\u0E02\u0E49\u0E32 Google Veo / Gemini Omni 1.1 Flash)
-- narrationThai (\u0E1A\u0E17\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A Gemini 3.8 Flash TTS \u0E04\u0E27\u0E32\u0E21\u0E22\u0E32\u0E27\u0E01\u0E23\u0E30\u0E0A\u0E31\u0E1A\u0E1E\u0E2D\u0E14\u0E35\u0E01\u0E31\u0E1A\u0E40\u0E27\u0E25\u0E32\u0E09\u0E32\u0E01)
+- videoMotionPrompt (\u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29 \u0E23\u0E30\u0E1A\u0E38\u0E01\u0E32\u0E23\u0E40\u0E04\u0E25\u0E37\u0E48\u0E2D\u0E19\u0E01\u0E25\u0E49\u0E2D\u0E07 \u0E01\u0E32\u0E23\u0E02\u0E22\u0E31\u0E1A\u0E02\u0E2D\u0E07\u0E15\u0E31\u0E27\u0E41\u0E1A\u0E1A \u0E41\u0E2A\u0E07 \u0E41\u0E25\u0E30\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E01\u0E32\u0E28 \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E48\u0E07\u0E40\u0E02\u0E49\u0E32 Google Veo / Google Flow Video)
+- narrationThai (\u0E1A\u0E17\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E42\u0E21\u0E40\u0E14\u0E25 Google Gemini TTS \u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14 \u0E04\u0E27\u0E32\u0E21\u0E22\u0E32\u0E27\u0E01\u0E23\u0E30\u0E0A\u0E31\u0E1A\u0E1E\u0E2D\u0E14\u0E35\u0E01\u0E31\u0E1A\u0E40\u0E27\u0E25\u0E32\u0E09\u0E32\u0E01)
 \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19 \u0E2B\u0E49\u0E32\u0E21\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E2D\u0E37\u0E48\u0E19\u0E19\u0E2D\u0E01 JSON`;
   const userPrompt = `\u0E0A\u0E37\u0E48\u0E2D\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D: ${params.title}
 \u0E41\u0E19\u0E27\u0E04\u0E34\u0E14 / \u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E2B\u0E25\u0E31\u0E01: ${params.concept}
@@ -2664,7 +3498,7 @@ async function executeMultiAgentWorkflow(input) {
   };
   const catLabel = categoryNames[input.category] || "\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32";
   const systemPrompt = `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D\u0E23\u0E30\u0E1A\u0E1A Multi-Agent AI Content Creation Ecosystem \u0E02\u0E2D\u0E07 "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT" (\u0E2A\u0E42\u0E25\u0E41\u0E01\u0E19: "\u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E2A\u0E31\u0E07\u0E04\u0E21 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E2D\u0E19\u0E32\u0E04\u0E15\u0E17\u0E35\u0E48\u0E14\u0E35\u0E01\u0E27\u0E48\u0E32")
-\u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19\u0E08\u0E23\u0E34\u0E07\u0E02\u0E2D\u0E07\u0E17\u0E35\u0E21 AI Agents \u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14 (CEO Agent, 01 Research Agent, 02 Idea & Script Agent, 03 Content Design Agent, 04 Visual Creator Agent, 05 Video Production Agent \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A Google Veo & Flow, 06 Audio Production Agent \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A Gemini 3.8 Flash TTS, 07 QA Agent 4 \u0E21\u0E34\u0E15\u0E34 \u0E41\u0E25\u0E30 08 Analytics & Omnichannel 8 \u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07)
+\u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19\u0E08\u0E23\u0E34\u0E07\u0E02\u0E2D\u0E07\u0E17\u0E35\u0E21 AI Agents \u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14 (CEO Agent, 01 Research Agent, 02 Idea & Script Agent, 03 Content Design Agent, 04 Visual Creator Agent, 05 Video Production Agent \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A Google Veo & Flow, 06 Audio Production Agent \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A AI Speech TTS, 07 QA Agent 4 \u0E21\u0E34\u0E15\u0E34 \u0E41\u0E25\u0E30 08 Analytics & Omnichannel 8 \u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07)
 \u0E42\u0E14\u0E22\u0E22\u0E36\u0E14\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E32\u0E01\u0E10\u0E32\u0E19\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 (Knowledge Base) \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E04\u0E23\u0E48\u0E07\u0E04\u0E23\u0E31\u0E14 \u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 (fullArticleMarkdown) \u0E15\u0E49\u0E2D\u0E07\u0E40\u0E02\u0E35\u0E22\u0E19\u0E09\u0E1A\u0E31\u0E1A\u0E40\u0E15\u0E47\u0E21\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14 \u0E25\u0E36\u0E01\u0E0B\u0E36\u0E49\u0E07 \u0E43\u0E0A\u0E49 Markdown \u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D ## \u0E41\u0E25\u0E30 ### \u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E02\u0E49\u0E2D\u0E40\u0E2A\u0E19\u0E2D\u0E40\u0E0A\u0E34\u0E07\u0E1B\u0E0F\u0E34\u0E1A\u0E31\u0E15\u0E34\u0E08\u0E23\u0E34\u0E07
 \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON Object \u0E17\u0E35\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E15\u0E32\u0E21\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E17\u0E35\u0E48\u0E23\u0E30\u0E1A\u0E38\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19 \u0E2B\u0E49\u0E32\u0E21\u0E04\u0E23\u0E2D\u0E1A\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22\u0E2D\u0E37\u0E48\u0E19`;
   const userPrompt = `\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E42\u0E08\u0E17\u0E22\u0E4C (Topic): ${input.topic}
@@ -2716,13 +3550,13 @@ ${kbContextString}
   },
   "visualOutput": {
     "imagePrompts": [
-      { "platform": "Gemini Nano Banana 2.1", "prompt": "Detailed English visual prompt..." },
-      { "platform": "OpenAI GPT-Image / DALL-E 3", "prompt": "Detailed English infographic/editorial prompt..." }
+      { "platform": "Google Gemini Image (Auto-Latest)", "prompt": "Detailed English visual prompt..." },
+      { "platform": "OpenAI Image (Auto-Latest)", "prompt": "Detailed English infographic/editorial prompt..." }
     ],
     "infographicHeadline": "string",
     "infographicSubpoints": ["string", "string", "string", "string"],
     "generatedSvgDataUrl": "",
-    "recommendedTools": ["Gemini Nano Banana 2.1", "Gemini 3 Pro Image", "OpenAI DALL-E 3"]
+    "recommendedTools": ["Google Gemini Image (Auto-Latest)", "OpenAI Image (Auto-Latest)"]
   },
   "videoOutput": {
     "duration": "string",
@@ -2730,14 +3564,14 @@ ${kbContextString}
     "scenes": [
       { "time": "00:00 - 00:10", "visual": "English/Thai Veo scene prompt", "dialogue": "string", "subtitle": "string", "bRoll": "string" }
     ],
-    "recommendedTools": ["Google Flow", "Google Veo 3.1", "Gemini Omni 1.1 Flash"]
+    "recommendedTools": ["Google Flow", "Google Veo (Auto-Latest)", "Google Gemini Video (Auto-Latest)"]
   },
   "audioOutput": {
     "voiceTone": "string",
-    "narrationScriptWithCues": "\u0E1A\u0E17\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E1C\u0E25\u0E34\u0E15\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E14\u0E49\u0E27\u0E22 Gemini 3.8 Flash TTS",
+    "narrationScriptWithCues": "\u0E1A\u0E17\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E1C\u0E25\u0E34\u0E15\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E14\u0E49\u0E27\u0E22 AI Speech TTS",
     "bgmStyle": "string",
     "soundEffects": ["string"],
-    "recommendedTools": ["Gemini 3.8 Flash TTS", "ElevenLabs", "OpenAI TTS"]
+    "recommendedTools": ["Google Gemini TTS (Auto-Latest)", "ElevenLabs (Auto-Latest)", "OpenAI TTS (Auto-Latest)"]
   },
   "qaOutput": {
     "factCheckScore": 95,
@@ -2796,9 +3630,8 @@ ${kbContextString}
     generatedSvgDataUrl: generatedImageUrl,
     generatedRealImageUrl: generatedImageUrl,
     recommendedTools: parsed.visualOutput?.recommendedTools || [
-      "Gemini Nano Banana 2.1",
-      "Gemini 3 Pro Image",
-      "OpenAI GPT-Image-1"
+      "Google Gemini Image (Auto-Latest)",
+      "OpenAI Image (Auto-Latest)"
     ]
   };
   return {
@@ -2917,7 +3750,7 @@ async function evaluateAndBuildMediaPrompt(params) {
 \u0E2B\u0E19\u0E49\u0E32\u0E17\u0E35\u0E48\u0E02\u0E2D\u0E07\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D:
 1) \u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E04\u0E27\u0E32\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E02\u0E2D\u0E07\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E08\u0E32\u0E01\u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E2B\u0E23\u0E37\u0E2D\u0E44\u0E2D\u0E40\u0E14\u0E35\u0E22\u0E17\u0E35\u0E48\u0E43\u0E2B\u0E49\u0E21\u0E32 \u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E17\u0E35\u0E48\u0E2D\u0E48\u0E32\u0E19\u0E40\u0E02\u0E49\u0E32\u0E43\u0E08\u0E07\u0E48\u0E32\u0E22 \u0E2A\u0E38\u0E20\u0E32\u0E1E \u0E40\u0E2B\u0E21\u0E32\u0E30\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E1C\u0E39\u0E49\u0E1A\u0E23\u0E34\u0E2B\u0E32\u0E23/\u0E1C\u0E39\u0E49\u0E43\u0E2B\u0E0D\u0E48 (assessmentThai) \u0E27\u0E48\u0E32\u0E20\u0E32\u0E1E\u0E19\u0E35\u0E49\u0E04\u0E27\u0E23\u0E08\u0E31\u0E14\u0E2D\u0E07\u0E04\u0E4C\u0E1B\u0E23\u0E30\u0E01\u0E2D\u0E1A \u0E42\u0E17\u0E19\u0E41\u0E2A\u0E07 \u0E41\u0E25\u0E30\u0E2D\u0E32\u0E23\u0E21\u0E13\u0E4C\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E44\u0E23\u0E43\u0E2B\u0E49\u0E19\u0E48\u0E32\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E16\u0E37\u0E2D\u0E41\u0E25\u0E30\u0E14\u0E36\u0E07\u0E14\u0E39\u0E14\u0E2A\u0E32\u0E22\u0E15\u0E32
 2) \u0E2A\u0E23\u0E38\u0E1B\u0E20\u0E32\u0E1E\u0E17\u0E35\u0E48\u0E08\u0E30\u0E44\u0E14\u0E49\u0E40\u0E1B\u0E47\u0E19\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22\u0E2A\u0E31\u0E49\u0E19\u0E46 \u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19 (visualSummaryThai)
-3) \u0E40\u0E02\u0E35\u0E22\u0E19 Full Image Prompt \u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E21\u0E37\u0E2D\u0E2D\u0E32\u0E0A\u0E35\u0E1E (fullPrompt) \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E48\u0E07\u0E43\u0E2B\u0E49 AI Image Agent (Gemini Nano Banana 2.1 / OpenAI GPT-Image-1) \u0E42\u0E14\u0E22\u0E23\u0E30\u0E1A\u0E38\u0E04\u0E23\u0E1A\u0E16\u0E49\u0E27\u0E19: Main Subject, Environment, Composition, Lighting, Color Harmony, Camera Lens / Editorial Photography Style, High Detail, No gibberish text
+3) \u0E40\u0E02\u0E35\u0E22\u0E19 Full Image Prompt \u0E20\u0E32\u0E29\u0E32\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E21\u0E37\u0E2D\u0E2D\u0E32\u0E0A\u0E35\u0E1E (fullPrompt) \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E48\u0E07\u0E43\u0E2B\u0E49 AI Image Agent (Google Gemini Image / OpenAI Image \u0E23\u0E38\u0E48\u0E19\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14) \u0E42\u0E14\u0E22\u0E23\u0E30\u0E1A\u0E38\u0E04\u0E23\u0E1A\u0E16\u0E49\u0E27\u0E19: Main Subject, Environment, Composition, Lighting, Color Harmony, Camera Lens / Editorial Photography Style, High Detail, No gibberish text
 4) \u0E41\u0E19\u0E30\u0E19\u0E33\u0E2A\u0E31\u0E14\u0E2A\u0E48\u0E27\u0E19\u0E20\u0E32\u0E1E (recommendedAspectRatio: "16:9", "1:1" \u0E2B\u0E23\u0E37\u0E2D "9:16") \u0E41\u0E25\u0E30\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E02\u0E48\u0E32\u0E27\u0E17\u0E35\u0E48\u0E40\u0E02\u0E49\u0E32\u0E01\u0E31\u0E1A\u0E20\u0E32\u0E1E\u0E19\u0E35\u0E49 (suggestedPostTitle)
 \u0E15\u0E2D\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19\u0E15\u0E32\u0E21\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E19\u0E35\u0E49:
 {
@@ -4573,10 +5406,11 @@ app.post("/api/ai/video/generate", async (req, res) => {
 });
 app.post("/api/ai/audio/generate", async (req, res) => {
   try {
-    const { text, provider, voice, style, workflowId } = req.body;
+    const { text, provider, model, voice, style, workflowId } = req.body;
     const asset = await generateRealAudio({
       text: String(text || ""),
       provider,
+      model: model ? String(model) : void 0,
       voice,
       style,
       workflowId: workflowId ? Number(workflowId) : null
@@ -4611,7 +5445,7 @@ app.post("/api/ai/flow/projects", async (req, res) => {
       sceneCount = 3,
       aspectRatio = "16:9",
       resolution = "720p",
-      videoEngine = "gemini-omni-1.1-flash",
+      videoEngine = "",
       llmProvider,
       llmModel
     } = req.body;
@@ -4701,7 +5535,7 @@ app.post("/api/ai/flow/projects/:id/scene/:sceneIdx/frame", async (req, res) => 
     const imgAsset = await generateRealImage({
       prompt: promptToUse,
       provider: "gemini",
-      model: imageModel || "gemini-nano-banana-2.1",
+      model: imageModel || void 0,
       aspectRatio: proj.aspectRatio
     });
     if (which === "last") {
@@ -5216,14 +6050,44 @@ app.delete("/api/contacts/:id", (req, res) => {
   db.prepare("DELETE FROM contacts WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true });
 });
+app.get("/api/ai/models", async (req, res) => {
+  try {
+    const forceRefresh = req.query.refresh === "1" || req.query.refresh === "true";
+    const catalog = await fetchAllConfiguredLiveModels(forceRefresh);
+    res.json(catalog);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post("/api/ai/models/provider", async (req, res) => {
+  try {
+    const { provider, apiKey, endpoint, projectId, location } = req.body || {};
+    if (!provider) {
+      res.status(400).json({ error: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38\u0E0A\u0E37\u0E48\u0E2D\u0E04\u0E48\u0E32\u0E22 AI (provider)" });
+      return;
+    }
+    const catalog = await fetchSingleProviderLiveCatalog({
+      provider,
+      apiKey: typeof apiKey === "string" && apiKey !== "__KEEP__" ? apiKey : void 0,
+      endpoint: typeof endpoint === "string" ? endpoint : void 0,
+      projectId: typeof projectId === "string" ? projectId : void 0,
+      location: typeof location === "string" ? location : void 0,
+      forceRefresh: true
+    });
+    res.json(catalog);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.get("/api/settings/ai", (_req, res) => {
   const cfg = getProviderConfigs();
   res.json({
     provider: cfg.defaultProvider,
-    // Google Gemini + Nano Banana + Omni Video + TTS
+    // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
     geminiVideoModel: cfg.gemini.videoModel,
+    geminiTtsModel: cfg.gemini.ttsModel,
     hasGeminiKey: Boolean(cfg.gemini.apiKey),
     geminiKeyMasked: maskSecret(cfg.gemini.apiKey),
     // Anthropic Claude
@@ -5247,6 +6111,7 @@ app.get("/api/settings/ai", (_req, res) => {
     // ElevenLabs & Resend
     hasElevenlabsKey: Boolean(cfg.elevenlabs.apiKey),
     elevenlabsKeyMasked: maskSecret(cfg.elevenlabs.apiKey),
+    elevenlabsModel: cfg.elevenlabs.model,
     elevenlabsVoiceId: cfg.elevenlabs.voiceId,
     hasResendKey: Boolean(cfg.resend.apiKey),
     resendKeyMasked: maskSecret(cfg.resend.apiKey),
@@ -5274,6 +6139,7 @@ app.put("/api/settings/ai", (req, res) => {
   saveStr("gemini_model", b.geminiModel);
   saveStr("gemini_image_model", b.geminiImageModel);
   saveStr("gemini_video_model", b.geminiVideoModel);
+  saveStr("gemini_tts_model", b.geminiTtsModel);
   saveSecret("gemini_api_key", b.geminiApiKey);
   saveStr("claude_model", b.claudeModel);
   saveSecret("claude_api_key", b.claudeApiKey);
@@ -5286,12 +6152,14 @@ app.put("/api/settings/ai", (req, res) => {
   saveStr("vertex_veo_model", b.vertexVeoModel);
   saveSecret("vertex_access_token", b.vertexAccessToken);
   saveSecret("elevenlabs_api_key", b.elevenlabsApiKey);
+  saveStr("elevenlabs_model", b.elevenlabsModel);
   saveStr("elevenlabs_voice_id", b.elevenlabsVoiceId);
   saveSecret("resend_api_key", b.resendApiKey);
   saveStr("resend_from_email", b.resendFromEmail);
   saveStr("local_endpoint", b.localEndpoint);
   saveStr("local_model", b.localModel);
   saveSecret("local_api_key", b.localApiKey);
+  invalidateModelCatalogCache();
   res.json({ ok: true });
 });
 app.post("/api/settings/test-provider", async (req, res) => {

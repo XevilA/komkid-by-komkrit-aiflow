@@ -245,7 +245,7 @@ export function initDatabase() {
       concept TEXT NOT NULL,
       aspect_ratio TEXT NOT NULL DEFAULT '16:9',
       resolution TEXT NOT NULL DEFAULT '720p',
-      video_engine TEXT NOT NULL DEFAULT 'gemini-omni-1.1-flash',
+      video_engine TEXT NOT NULL DEFAULT '',
       scenes_json TEXT NOT NULL DEFAULT '[]',
       master_video_url TEXT DEFAULT '',
       voiceover_audio_url TEXT DEFAULT '',
@@ -280,6 +280,26 @@ export function initDatabase() {
 
   // Strictly purge any legacy simulated / sandbox_ready logs
   db.exec("DELETE FROM publish_logs WHERE mode = 'sandbox_ready' OR response_note LIKE '%จำลอง%'");
+
+  // One-time migration to switch legacy hardcoded model defaults to dynamic API Auto-Latest ('')
+  try {
+    const migrated = db
+      .prepare("SELECT value FROM settings WHERE key = 'dynamic_model_discovery_v1'")
+      .get() as { value: string } | undefined;
+    if (!migrated) {
+      db.exec(`
+        UPDATE settings SET value = ''
+        WHERE key IN (
+          'gemini_model', 'gemini_image_model', 'gemini_video_model',
+          'claude_model', 'deepseek_model', 'openai_model',
+          'vertex_veo_model', 'local_model'
+        );
+        INSERT OR REPLACE INTO settings (key, value) VALUES ('dynamic_model_discovery_v1', '1');
+      `);
+    }
+  } catch {
+    // ignore if settings table is freshly created
+  }
 
   seedIfEmpty();
   seedOmnichannelIfEmpty();
@@ -960,8 +980,9 @@ function seedIfEmpty() {
 
   const setSetting = db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`);
   setSetting.run('ai_provider', 'auto');
-  setSetting.run('gemini_model', 'gemini-3.8-flash');
+  setSetting.run('gemini_model', '');
   setSetting.run('gemini_api_key', process.env.GEMINI_API_KEY || '');
   setSetting.run('local_endpoint', 'http://localhost:1234/v1');
-  setSetting.run('local_model', 'omni-o1x-pro');
+  setSetting.run('local_model', '');
+  setSetting.run('dynamic_model_discovery_v1', '1');
 }

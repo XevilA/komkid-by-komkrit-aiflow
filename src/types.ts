@@ -321,12 +321,46 @@ export interface ContactMessage {
   createdAt: string;
 }
 
+export type DiscoverableProvider =
+  | 'gemini'
+  | 'claude'
+  | 'deepseek'
+  | 'openai'
+  | 'vertex_veo'
+  | 'elevenlabs'
+  | 'openai_compatible';
+
+export interface LiveModelOption {
+  id: string;
+  label: string;
+  createdAt?: string | number;
+  supportedMethods?: string[];
+}
+
+export interface ProviderLiveCatalog {
+  provider: DiscoverableProvider;
+  connected: boolean;
+  fetchedAt: string;
+  error?: string;
+  textModels: LiveModelOption[];
+  imageModels: LiveModelOption[];
+  videoModels: LiveModelOption[];
+  ttsModels: LiveModelOption[];
+  voices?: LiveModelOption[];
+}
+
+export interface UnifiedLiveModelsResponse {
+  fetchedAt: string;
+  providers: Record<DiscoverableProvider, ProviderLiveCatalog>;
+}
+
 export interface AiEngineSettings {
   provider: LlmProviderId;
   // Google Gemini + Media
   geminiModel: string;
   geminiImageModel: string;
   geminiVideoModel: string;
+  geminiTtsModel?: string;
   hasGeminiKey: boolean;
   geminiKeyMasked: string;
   // Anthropic Claude
@@ -350,6 +384,7 @@ export interface AiEngineSettings {
   // ElevenLabs & Resend
   hasElevenlabsKey: boolean;
   elevenlabsKeyMasked: string;
+  elevenlabsModel?: string;
   elevenlabsVoiceId: string;
   hasResendKey: boolean;
   resendKeyMasked: string;
@@ -442,11 +477,7 @@ export interface FlowProject {
   concept: string;
   aspectRatio: '16:9' | '9:16';
   resolution: '360p' | '720p' | '1080p' | '4k';
-  videoEngine:
-    | 'gemini-omni-1.1-flash'
-    | 'veo-3.1-generate-001'
-    | 'veo-3.1-fast-generate-001'
-    | 'veo-3.0-generate-001';
+  videoEngine: string;
   scenes: FlowScene[];
   masterVideoUrl: string;
   voiceoverAudioUrl: string;

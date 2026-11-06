@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { db } from './db.ts';
 import { generateRealImage, getSettingValue } from './mediaEngine.ts';
+import { getGeminiModelMethods, resolveLatestModel } from './modelRegistry.ts';
 
 export type LlmProviderId =
   | 'auto'
@@ -51,37 +52,38 @@ export function getProviderConfigs() {
     defaultProvider: (getSettingValue('ai_provider') || 'auto') as LlmProviderId,
     gemini: {
       apiKey: geminiKey,
-      model: getSettingValue('gemini_model') || 'gemini-3.8-flash',
-      imageModel: getSettingValue('gemini_image_model') || 'gemini-nano-banana-2.1',
-      videoModel: getSettingValue('gemini_video_model') || 'gemini-omni-1.1-flash',
-      ttsModel: 'gemini-3.8-flash-tts',
+      model: getSettingValue('gemini_model'),
+      imageModel: getSettingValue('gemini_image_model'),
+      videoModel: getSettingValue('gemini_video_model'),
+      ttsModel: getSettingValue('gemini_tts_model'),
     },
     claude: {
       apiKey: claudeKey,
-      model: getSettingValue('claude_model') || 'claude-sonnet-4-20250514',
+      model: getSettingValue('claude_model'),
     },
     deepseek: {
       apiKey: deepseekKey,
-      model: getSettingValue('deepseek_model') || 'deepseek-chat',
+      model: getSettingValue('deepseek_model'),
     },
     openai: {
       apiKey: openaiKey,
-      model: getSettingValue('openai_model') || 'gpt-4.1',
+      model: getSettingValue('openai_model'),
     },
     localOpenAi: {
       endpoint: getSettingValue('local_endpoint') || 'http://localhost:1234/v1',
-      model: getSettingValue('local_model') || 'omni-o1x-pro',
+      model: getSettingValue('local_model'),
       apiKey: getSettingValue('local_api_key') || '',
     },
     vertexVeo: {
       projectId: getSettingValue('vertex_project_id', 'GOOGLE_CLOUD_PROJECT'),
       location: getSettingValue('vertex_location', 'GOOGLE_CLOUD_LOCATION') || 'us-central1',
       accessToken: getSettingValue('vertex_access_token', 'GOOGLE_OAUTH_ACCESS_TOKEN'),
-      veoModel: getSettingValue('vertex_veo_model') || 'veo-3.1-generate-001',
+      veoModel: getSettingValue('vertex_veo_model'),
     },
     elevenlabs: {
       apiKey: elevenlabsKey,
-      voiceId: getSettingValue('elevenlabs_voice_id') || 'JBFqnCBsd6RMkjVDRZzb',
+      model: getSettingValue('elevenlabs_model'),
+      voiceId: getSettingValue('elevenlabs_voice_id'),
     },
     resend: {
       apiKey: resendKey,
@@ -169,7 +171,7 @@ export async function callRealLlm(params: {
 
   const startedAt = Date.now();
 
-  // 1. GOOGLE GEMINI (@google/genai v2.31.0 Official Interactions API + generateContent support)
+  // 1. GOOGLE GEMINI (Live Model Discovery + generateContent / Interactions API)
   if (provider === 'gemini') {
     const apiKey = params.apiKeyOverride?.trim() || cfg.gemini.apiKey;
     if (!apiKey) {
@@ -177,14 +179,21 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ Google Gemini API Key — กรุณาไปที่ปุ่ม "เชื่อมต่อคีย์ AI" เพื่อวางคีย์และกดบันทึกก่อนใช้งานครับ'
       );
     }
-    const model = params.model?.trim() || cfg.gemini.model || 'gemini-3.8-flash';
-    const ai = new GoogleGenAI({ apiKey });
 
     try {
-      const isLegacyGen2Model = /^gemini-(2\.|1\.)/i.test(model);
+      const model = await resolveLatestModel({
+        provider: 'gemini',
+        capability: 'text',
+        requestedModel: params.model || cfg.gemini.model,
+        apiKeyOverride: apiKey,
+      });
+      const methods = await getGeminiModelMethods(apiKey, model);
+      const supportsGenerateContent =
+        methods.length === 0 || methods.includes('generateContent');
 
-      if (!isLegacyGen2Model) {
-        // Official @google/genai >= 2.0.0 Interactions API Steps Schema
+      const ai = new GoogleGenAI({ apiKey });
+
+      if (!supportsGenerateContent) {
         const inputPayload =
           params.messages.length === 1 && params.messages[0].role === 'user'
             ? params.messages[0].content
@@ -222,7 +231,6 @@ export async function callRealLlm(params: {
         };
       }
 
-      // Standard Gemini 2.5 Flash / Pro execution via Official @google/genai models.generateContent
       const genResp = await ai.models.generateContent({
         model,
         contents: params.messages.map((m) => ({
@@ -253,7 +261,7 @@ export async function callRealLlm(params: {
     }
   }
 
-  // 2. ANTHROPIC CLAUDE (Official Messages API v1)
+  // 2. ANTHROPIC CLAUDE (Official Messages API v1 + Live Model Discovery)
   if (provider === 'claude') {
     const apiKey = params.apiKeyOverride?.trim() || cfg.claude.apiKey;
     if (!apiKey) {
@@ -261,7 +269,12 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ Anthropic Claude API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
       );
     }
-    const model = params.model?.trim() || cfg.claude.model || 'claude-sonnet-4-20250514';
+    const model = await resolveLatestModel({
+      provider: 'claude',
+      capability: 'text',
+      requestedModel: params.model || cfg.claude.model,
+      apiKeyOverride: apiKey,
+    });
 
     const body: Record<string, any> = {
       model,
@@ -321,7 +334,7 @@ export async function callRealLlm(params: {
     };
   }
 
-  // 3. DEEPSEEK (Official DeepSeek V3 / R1 API)
+  // 3. DEEPSEEK (Official DeepSeek API + Live Model Discovery)
   if (provider === 'deepseek') {
     const apiKey = params.apiKeyOverride?.trim() || cfg.deepseek.apiKey;
     if (!apiKey) {
@@ -329,7 +342,13 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ DeepSeek API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
       );
     }
-    const model = params.model?.trim() || cfg.deepseek.model || 'deepseek-chat';
+    const model = await resolveLatestModel({
+      provider: 'deepseek',
+      capability: 'text',
+      requestedModel: params.model || cfg.deepseek.model,
+      apiKeyOverride: apiKey,
+    });
+    const isReasoner = /reasoner/i.test(model);
 
     const apiMessages: any[] = [];
     if (params.systemInstruction) {
@@ -344,10 +363,10 @@ export async function callRealLlm(params: {
       messages: apiMessages,
       max_tokens: 8192,
     };
-    if (model !== 'deepseek-reasoner' && typeof params.temperature === 'number') {
+    if (!isReasoner && typeof params.temperature === 'number') {
       body.temperature = params.temperature;
     }
-    if (params.jsonMode && model !== 'deepseek-reasoner') {
+    if (params.jsonMode && !isReasoner) {
       body.response_format = { type: 'json_object' };
     }
 
@@ -385,7 +404,7 @@ export async function callRealLlm(params: {
     };
   }
 
-  // 4. OPENAI CHATGPT (Official OpenAI Chat Completions API)
+  // 4. OPENAI CHATGPT (Official OpenAI Chat Completions API + Live Model Discovery)
   if (provider === 'openai') {
     const apiKey = params.apiKeyOverride?.trim() || cfg.openai.apiKey;
     if (!apiKey) {
@@ -393,8 +412,13 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ OpenAI (ChatGPT) API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
       );
     }
-    const model = params.model?.trim() || cfg.openai.model || 'gpt-4.1';
-    const isReasoningModel = /^o[134]/.test(model);
+    const model = await resolveLatestModel({
+      provider: 'openai',
+      capability: 'text',
+      requestedModel: params.model || cfg.openai.model,
+      apiKeyOverride: apiKey,
+    });
+    const isReasoningModel = /^o\d/i.test(model);
 
     const apiMessages: any[] = [];
     if (params.systemInstruction) {
@@ -448,10 +472,15 @@ export async function callRealLlm(params: {
     };
   }
 
-  // 5. CUSTOM / LOCAL OPENAI-COMPATIBLE SERVER (e.g., Ollama / vLLM / LM Studio / Omni Server)
+  // 5. CUSTOM / LOCAL OPENAI-COMPATIBLE SERVER (Live /models discovery)
   const endpoint = cfg.localOpenAi.endpoint.replace(/\/$/, '');
-  const localModel = params.model?.trim() || cfg.localOpenAi.model;
   const localKey = params.apiKeyOverride?.trim() || cfg.localOpenAi.apiKey;
+  const localModel = await resolveLatestModel({
+    provider: 'openai_compatible',
+    capability: 'text',
+    requestedModel: params.model || cfg.localOpenAi.model,
+    apiKeyOverride: localKey,
+  });
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (localKey) {
@@ -646,10 +675,10 @@ export async function generateFlowStoryboardWithLlm(params: {
   const systemInstruction = `คุณคือ AI Film Director สำหรับระบบ Google Flow & Google Veo Filmmaking Studio ของ "คมคิด by KOMKRIT"
 จงออกแบบ Storyboard ภาพยนตร์สั้นจำนวน ${count} ฉาก (Scenes) ที่มีความต่อเนื่องกันทั้งตัวละคร แสง สี และมุมกล้อง
 โดยแต่ละฉากต้องมี:
-- firstFramePrompt (ภาษาอังกฤษ ละเอียดระดับภาพถ่ายภาพยนตร์ สำหรับสร้างภาพ Keyframe ต้นฉากด้วย Gemini Nano Banana 2.1)
+- firstFramePrompt (ภาษาอังกฤษ ละเอียดระดับภาพถ่ายภาพยนตร์ สำหรับสร้างภาพ Keyframe ต้นฉากด้วยโมเดล Google Gemini Image ล่าสุด)
 - lastFramePrompt (ภาษาอังกฤษ สำหรับภาพท้ายฉากเพื่อให้เกิด Smooth Transition หากต้องการ)
-- videoMotionPrompt (ภาษาอังกฤษ ระบุการเคลื่อนกล้อง การขยับของตัวแบบ แสง และเสียงบรรยากาศ สำหรับส่งเข้า Google Veo / Gemini Omni 1.1 Flash)
-- narrationThai (บทพากย์ภาษาไทยสำหรับ Gemini 3.8 Flash TTS ความยาวกระชับพอดีกับเวลาฉาก)
+- videoMotionPrompt (ภาษาอังกฤษ ระบุการเคลื่อนกล้อง การขยับของตัวแบบ แสง และเสียงบรรยากาศ สำหรับส่งเข้า Google Veo / Google Flow Video)
+- narrationThai (บทพากย์ภาษาไทยสำหรับโมเดล Google Gemini TTS ล่าสุด ความยาวกระชับพอดีกับเวลาฉาก)
 ตอบกลับเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON`;
 
   const userPrompt = `ชื่อโปรเจกต์วิดีโอ: ${params.title}
@@ -735,7 +764,7 @@ export async function executeMultiAgentWorkflow(input: RunWorkflowInput) {
   const catLabel = categoryNames[input.category] || 'การศึกษา';
 
   const systemPrompt = `คุณคือระบบ Multi-Agent AI Content Creation Ecosystem ของ "คมคิด by KOMKRIT" (สโลแกน: "คิดต่างอย่างสร้างสรรค์ เพื่อการศึกษา เพื่อสังคม เพื่ออนาคตที่ดีกว่า")
-ประมวลผลการทำงานจริงของทีม AI Agents ทั้งหมด (CEO Agent, 01 Research Agent, 02 Idea & Script Agent, 03 Content Design Agent, 04 Visual Creator Agent, 05 Video Production Agent สำหรับ Google Veo & Flow, 06 Audio Production Agent สำหรับ Gemini 3.8 Flash TTS, 07 QA Agent 4 มิติ และ 08 Analytics & Omnichannel 8 ช่องทาง)
+ประมวลผลการทำงานจริงของทีม AI Agents ทั้งหมด (CEO Agent, 01 Research Agent, 02 Idea & Script Agent, 03 Content Design Agent, 04 Visual Creator Agent, 05 Video Production Agent สำหรับ Google Veo & Flow, 06 Audio Production Agent สำหรับ AI Speech TTS, 07 QA Agent 4 มิติ และ 08 Analytics & Omnichannel 8 ช่องทาง)
 โดยยึดข้อมูลจากฐานความรู้ (Knowledge Base) ด้านล่างอย่างเคร่งครัด เนื้อหาบทความ (fullArticleMarkdown) ต้องเขียนฉบับเต็มอย่างละเอียด ลึกซึ้ง ใช้ Markdown หัวข้อ ## และ ### พร้อมข้อเสนอเชิงปฏิบัติจริง
 ตอบกลับเป็น JSON Object ที่ถูกต้องตามโครงสร้างที่ระบุเท่านั้น ห้ามครอบข้อความอธิบายอื่น`;
 
@@ -788,13 +817,13 @@ ${kbContextString}
   },
   "visualOutput": {
     "imagePrompts": [
-      { "platform": "Gemini Nano Banana 2.1", "prompt": "Detailed English visual prompt..." },
-      { "platform": "OpenAI GPT-Image / DALL-E 3", "prompt": "Detailed English infographic/editorial prompt..." }
+      { "platform": "Google Gemini Image (Auto-Latest)", "prompt": "Detailed English visual prompt..." },
+      { "platform": "OpenAI Image (Auto-Latest)", "prompt": "Detailed English infographic/editorial prompt..." }
     ],
     "infographicHeadline": "string",
     "infographicSubpoints": ["string", "string", "string", "string"],
     "generatedSvgDataUrl": "",
-    "recommendedTools": ["Gemini Nano Banana 2.1", "Gemini 3 Pro Image", "OpenAI DALL-E 3"]
+    "recommendedTools": ["Google Gemini Image (Auto-Latest)", "OpenAI Image (Auto-Latest)"]
   },
   "videoOutput": {
     "duration": "string",
@@ -802,14 +831,14 @@ ${kbContextString}
     "scenes": [
       { "time": "00:00 - 00:10", "visual": "English/Thai Veo scene prompt", "dialogue": "string", "subtitle": "string", "bRoll": "string" }
     ],
-    "recommendedTools": ["Google Flow", "Google Veo 3.1", "Gemini Omni 1.1 Flash"]
+    "recommendedTools": ["Google Flow", "Google Veo (Auto-Latest)", "Google Gemini Video (Auto-Latest)"]
   },
   "audioOutput": {
     "voiceTone": "string",
-    "narrationScriptWithCues": "บทพากย์ภาษาไทยพร้อมผลิตเสียงด้วย Gemini 3.8 Flash TTS",
+    "narrationScriptWithCues": "บทพากย์ภาษาไทยพร้อมผลิตเสียงด้วย AI Speech TTS",
     "bgmStyle": "string",
     "soundEffects": ["string"],
-    "recommendedTools": ["Gemini 3.8 Flash TTS", "ElevenLabs", "OpenAI TTS"]
+    "recommendedTools": ["Google Gemini TTS (Auto-Latest)", "ElevenLabs (Auto-Latest)", "OpenAI TTS (Auto-Latest)"]
   },
   "qaOutput": {
     "factCheckScore": 95,
@@ -880,9 +909,8 @@ ${kbContextString}
     generatedSvgDataUrl: generatedImageUrl,
     generatedRealImageUrl: generatedImageUrl,
     recommendedTools: parsed.visualOutput?.recommendedTools || [
-      'Gemini Nano Banana 2.1',
-      'Gemini 3 Pro Image',
-      'OpenAI GPT-Image-1',
+      'Google Gemini Image (Auto-Latest)',
+      'OpenAI Image (Auto-Latest)',
     ],
   };
 
@@ -1039,7 +1067,7 @@ export async function evaluateAndBuildMediaPrompt(params: {
 หน้าที่ของคุณคือ:
 1) ประเมินความต้องการของผู้ใช้จากบทสนทนาหรือไอเดียที่ให้มา อธิบายเป็นภาษาไทยที่อ่านเข้าใจง่าย สุภาพ เหมาะสำหรับผู้บริหาร/ผู้ใหญ่ (assessmentThai) ว่าภาพนี้ควรจัดองค์ประกอบ โทนแสง และอารมณ์อย่างไรให้น่าเชื่อถือและดึงดูดสายตา
 2) สรุปภาพที่จะได้เป็นภาษาไทยสั้นๆ ชัดเจน (visualSummaryThai)
-3) เขียน Full Image Prompt ภาษาอังกฤษระดับมืออาชีพ (fullPrompt) สำหรับส่งให้ AI Image Agent (Gemini Nano Banana 2.1 / OpenAI GPT-Image-1) โดยระบุครบถ้วน: Main Subject, Environment, Composition, Lighting, Color Harmony, Camera Lens / Editorial Photography Style, High Detail, No gibberish text
+3) เขียน Full Image Prompt ภาษาอังกฤษระดับมืออาชีพ (fullPrompt) สำหรับส่งให้ AI Image Agent (Google Gemini Image / OpenAI Image รุ่นล่าสุด) โดยระบุครบถ้วน: Main Subject, Environment, Composition, Lighting, Color Harmony, Camera Lens / Editorial Photography Style, High Detail, No gibberish text
 4) แนะนำสัดส่วนภาพ (recommendedAspectRatio: "16:9", "1:1" หรือ "9:16") และหัวข้อข่าวที่เข้ากับภาพนี้ (suggestedPostTitle)
 ตอบเป็น JSON เท่านั้นตามโครงสร้างนี้:
 {

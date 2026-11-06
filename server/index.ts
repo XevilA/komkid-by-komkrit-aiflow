@@ -38,6 +38,12 @@ import {
   uploadMediaToCloudBlob,
   deleteMediaFromCloudBlob,
 } from './cloudSync.ts';
+import {
+  DiscoverableProvider,
+  fetchAllConfiguredLiveModels,
+  fetchSingleProviderLiveCatalog,
+  invalidateModelCatalogCache,
+} from './modelRegistry.ts';
 
 initDatabase();
 
@@ -1017,10 +1023,11 @@ app.post('/api/ai/video/generate', async (req, res) => {
 
 app.post('/api/ai/audio/generate', async (req, res) => {
   try {
-    const { text, provider, voice, style, workflowId } = req.body;
+    const { text, provider, model, voice, style, workflowId } = req.body;
     const asset = await generateRealAudio({
       text: String(text || ''),
       provider,
+      model: model ? String(model) : undefined,
       voice,
       style,
       workflowId: workflowId ? Number(workflowId) : null,
@@ -1066,7 +1073,7 @@ app.post('/api/ai/flow/projects', async (req, res) => {
       sceneCount = 3,
       aspectRatio = '16:9',
       resolution = '720p',
-      videoEngine = 'gemini-omni-1.1-flash',
+      videoEngine = '',
       llmProvider,
       llmModel,
     } = req.body;
@@ -1173,7 +1180,7 @@ app.post('/api/ai/flow/projects/:id/scene/:sceneIdx/frame', async (req, res) => 
     const imgAsset = await generateRealImage({
       prompt: promptToUse,
       provider: 'gemini',
-      model: imageModel || 'gemini-nano-banana-2.1',
+      model: imageModel || undefined,
       aspectRatio: proj.aspectRatio,
     });
 
@@ -1795,16 +1802,51 @@ app.delete('/api/contacts/:id', (req, res) => {
 });
 
 // ============================================================================
+// LIVE API MODEL DISCOVERY (ZERO HARDCODED MODELS!)
+// ============================================================================
+app.get('/api/ai/models', async (req, res) => {
+  try {
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const catalog = await fetchAllConfiguredLiveModels(forceRefresh);
+    res.json(catalog);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/ai/models/provider', async (req, res) => {
+  try {
+    const { provider, apiKey, endpoint, projectId, location } = req.body || {};
+    if (!provider) {
+      res.status(400).json({ error: 'กรุณาระบุชื่อค่าย AI (provider)' });
+      return;
+    }
+    const catalog = await fetchSingleProviderLiveCatalog({
+      provider: provider as DiscoverableProvider,
+      apiKey: typeof apiKey === 'string' && apiKey !== '__KEEP__' ? apiKey : undefined,
+      endpoint: typeof endpoint === 'string' ? endpoint : undefined,
+      projectId: typeof projectId === 'string' ? projectId : undefined,
+      location: typeof location === 'string' ? location : undefined,
+      forceRefresh: true,
+    });
+    res.json(catalog);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================================
 // AI ENGINE VAULT & MULTI-PROVIDER SETTINGS (GEMINI, CLAUDE, DEEPSEEK, CHATGPT, VEO)
 // ============================================================================
 app.get('/api/settings/ai', (_req, res) => {
   const cfg = getProviderConfigs();
   res.json({
     provider: cfg.defaultProvider,
-    // Google Gemini + Nano Banana + Omni Video + TTS
+    // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
     geminiVideoModel: cfg.gemini.videoModel,
+    geminiTtsModel: cfg.gemini.ttsModel,
     hasGeminiKey: Boolean(cfg.gemini.apiKey),
     geminiKeyMasked: maskSecret(cfg.gemini.apiKey),
     // Anthropic Claude
@@ -1828,6 +1870,7 @@ app.get('/api/settings/ai', (_req, res) => {
     // ElevenLabs & Resend
     hasElevenlabsKey: Boolean(cfg.elevenlabs.apiKey),
     elevenlabsKeyMasked: maskSecret(cfg.elevenlabs.apiKey),
+    elevenlabsModel: cfg.elevenlabs.model,
     elevenlabsVoiceId: cfg.elevenlabs.voiceId,
     hasResendKey: Boolean(cfg.resend.apiKey),
     resendKeyMasked: maskSecret(cfg.resend.apiKey),
@@ -1857,6 +1900,7 @@ app.put('/api/settings/ai', (req, res) => {
   saveStr('gemini_model', b.geminiModel);
   saveStr('gemini_image_model', b.geminiImageModel);
   saveStr('gemini_video_model', b.geminiVideoModel);
+  saveStr('gemini_tts_model', b.geminiTtsModel);
   saveSecret('gemini_api_key', b.geminiApiKey);
 
   saveStr('claude_model', b.claudeModel);
@@ -1874,6 +1918,7 @@ app.put('/api/settings/ai', (req, res) => {
   saveSecret('vertex_access_token', b.vertexAccessToken);
 
   saveSecret('elevenlabs_api_key', b.elevenlabsApiKey);
+  saveStr('elevenlabs_model', b.elevenlabsModel);
   saveStr('elevenlabs_voice_id', b.elevenlabsVoiceId);
 
   saveSecret('resend_api_key', b.resendApiKey);
@@ -1883,6 +1928,7 @@ app.put('/api/settings/ai', (req, res) => {
   saveStr('local_model', b.localModel);
   saveSecret('local_api_key', b.localApiKey);
 
+  invalidateModelCatalogCache();
   res.json({ ok: true });
 });
 

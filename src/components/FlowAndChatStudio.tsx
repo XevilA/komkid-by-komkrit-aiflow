@@ -23,7 +23,9 @@ import {
   AiEngineSettings,
   AiMediaAsset,
   FlowProject,
+  LiveModelOption,
   LlmProviderId,
+  UnifiedLiveModelsResponse,
 } from '../types';
 import { api } from '../api';
 import { renderRichMarkdown } from './ArticleReaderModal';
@@ -38,36 +40,26 @@ const CHAT_PROVIDERS: {
   id: Exclude<LlmProviderId, 'auto'>;
   name: string;
   badgeColor: string;
-  models: string[];
 }[] = [
   {
     id: 'gemini',
     name: 'Google Gemini',
     badgeColor: 'bg-sky-600',
-    models: ['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.5-flash-lite'],
   },
   {
     id: 'claude',
     name: 'Anthropic Claude',
     badgeColor: 'bg-amber-700',
-    models: [
-      'claude-sonnet-4-20250514',
-      'claude-opus-4-20250514',
-      'claude-3-7-sonnet-latest',
-      'claude-3-5-haiku-latest',
-    ],
   },
   {
     id: 'deepseek',
-    name: 'DeepSeek (V3 & R1)',
+    name: 'DeepSeek',
     badgeColor: 'bg-indigo-600',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
   },
   {
     id: 'openai',
     name: 'OpenAI ChatGPT',
     badgeColor: 'bg-emerald-600',
-    models: ['gpt-4.1', 'gpt-4o', 'gpt-4o-mini', 'o3-mini'],
   },
 ];
 
@@ -78,13 +70,14 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 }) => {
   const [subTab, setSubTab] = useState<'flow' | 'direct_media' | 'chat'>('flow');
   const [settings, setSettings] = useState<AiEngineSettings | null>(null);
+  const [liveModels, setLiveModels] = useState<UnifiedLiveModelsResponse | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
   // ---------------- MULTI-LLM CHAT STATE ----------------
   const [chatProvider, setChatProvider] =
     useState<Exclude<LlmProviderId, 'auto'>>('gemini');
-  const [chatModel, setChatModel] = useState('gemini-3.8-flash');
+  const [chatModel, setChatModel] = useState('');
   const [useKb, setUseKb] = useState(true);
   const [chatMessages, setChatMessages] = useState<AiChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -102,12 +95,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   const [flowScenesCount, setFlowScenesCount] = useState(3);
   const [flowAspect, setFlowAspect] = useState<'16:9' | '9:16'>('16:9');
   const [flowRes, setFlowRes] = useState<'720p' | '1080p' | '4k'>('720p');
-  const [flowEngine, setFlowEngine] = useState<
-    | 'gemini-omni-1.1-flash'
-    | 'veo-3.1-generate-001'
-    | 'veo-3.1-fast-generate-001'
-    | 'veo-3.0-generate-001'
-  >('gemini-omni-1.1-flash');
+  const [flowEngine, setFlowEngine] = useState<string>('');
   const [creatingFlow, setCreatingFlow] = useState(false);
   const [busySceneKey, setBusySceneKey] = useState<string | null>(null);
   const [assemblingFlow, setAssemblingFlow] = useState(false);
@@ -116,12 +104,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   // ---------------- DIRECT VEO / IMAGE / TTS MEDIA LAB STATE ----------------
   const [mediaAssets, setMediaAssets] = useState<AiMediaAsset[]>([]);
   const [directVidPrompt, setDirectVidPrompt] = useState('');
-  const [directVidEngine, setDirectVidEngine] = useState<
-    | 'gemini-omni-1.1-flash'
-    | 'veo-3.1-generate-001'
-    | 'veo-3.1-fast-generate-001'
-    | 'veo-3.0-generate-001'
-  >('gemini-omni-1.1-flash');
+  const [directVidEngine, setDirectVidEngine] = useState<string>('');
   const [directVidAspect, setDirectVidAspect] = useState<'16:9' | '9:16'>('16:9');
   const [directVidDuration, setDirectVidDuration] = useState(6);
   const [directVidRes, setDirectVidRes] = useState<'720p' | '1080p' | '4k'>('720p');
@@ -131,7 +114,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
   const [directImgPrompt, setDirectImgPrompt] = useState('');
   const [directImgProvider, setDirectImgProvider] = useState<'gemini' | 'openai'>('gemini');
-  const [directImgModel, setDirectImgModel] = useState('gemini-nano-banana-2.1');
+  const [directImgModel, setDirectImgModel] = useState('');
   const [directImgAspect, setDirectImgAspect] = useState<'16:9' | '9:16' | '1:1'>('16:9');
   const [directImgLoading, setDirectImgLoading] = useState(false);
 
@@ -145,10 +128,11 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   const sessionId = `komkrit-${chatProvider}`;
 
   const loadStudioData = async () => {
-    const [st, fp, ma] = await Promise.all([
+    const [st, fp, ma, lm] = await Promise.all([
       api.getAiSettings(),
       api.getFlowProjects(),
       api.getMediaAssets(),
+      api.getLiveModels().catch(() => null),
     ]);
     setSettings(st);
     setFlowProjects(fp);
@@ -156,6 +140,9 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       setSelectedFlowId(fp[0].id);
     }
     setMediaAssets(ma);
+    if (lm) {
+      setLiveModels(lm);
+    }
   };
 
   useEffect(() => {
@@ -164,11 +151,24 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
   useEffect(() => {
     api.getChatHistory(sessionId).then(setChatMessages).catch(() => {});
-    const meta = CHAT_PROVIDERS.find((p) => p.id === chatProvider);
-    if (meta) {
-      setChatModel(meta.models[0]);
+    const liveList = liveModels?.providers?.[chatProvider]?.textModels || [];
+    setChatModel(liveList[0]?.id || '');
+  }, [chatProvider, liveModels]);
+
+  const combinedLiveVideoModels: LiveModelOption[] = React.useMemo(() => {
+    const merged: LiveModelOption[] = [];
+    const seen = new Set<string>();
+    for (const m of [
+      ...(liveModels?.providers.gemini?.videoModels || []),
+      ...(liveModels?.providers.vertex_veo?.videoModels || []),
+    ]) {
+      if (!seen.has(m.id)) {
+        seen.add(m.id);
+        merged.push(m);
+      }
     }
-  }, [chatProvider]);
+    return merged;
+  }, [liveModels]);
 
   const activeFlow =
     flowProjects.find((p) => p.id === selectedFlowId) || flowProjects[0] || null;
@@ -208,11 +208,13 @@ export const FlowAndChatStudio: React.FC<Props> = ({
     const promptToTest = chatInput.trim();
 
     const tasks = CHAT_PROVIDERS.map(async (prov) => {
+      const liveFirstModel =
+        liveModels?.providers?.[prov.id]?.textModels?.[0]?.id || undefined;
       try {
         const res = await api.sendChatMessage({
           sessionId: `arena-${prov.id}-${Date.now()}`,
           provider: prov.id,
-          model: prov.models[0],
+          model: liveFirstModel,
           message: promptToTest,
           useKnowledgeBase: useKb,
         });
@@ -225,7 +227,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       } catch (e) {
         return {
           provider: prov.name,
-          engineLabel: `${prov.name} (${prov.models[0]})`,
+          engineLabel: `${prov.name}${liveFirstModel ? ` (${liveFirstModel})` : ''}`,
           reply: '',
           error: (e as Error).message,
         };
@@ -636,25 +638,21 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Video Generation Engine
+                  Video Generation Engine (ดึงจาก API จริง)
                 </label>
                 <select
                   value={flowEngine}
-                  onChange={(e) => setFlowEngine(e.target.value as any)}
+                  onChange={(e) => setFlowEngine(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
                 >
-                  <option value="gemini-omni-1.1-flash">
-                    Gemini Omni 1.1 Flash (Google AI Studio API Key)
+                  <option value="">
+                    ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API)
                   </option>
-                  <option value="veo-3.1-generate-001">
-                    Google Veo 3.1 GA (Vertex AI: veo-3.1-generate-001)
-                  </option>
-                  <option value="veo-3.1-fast-generate-001">
-                    Google Veo 3.1 Fast (Vertex AI: veo-3.1-fast-generate-001)
-                  </option>
-                  <option value="veo-3.0-generate-001">
-                    Google Veo 3.0 GA (Vertex AI: veo-3.0-generate-001)
-                  </option>
+                  {combinedLiveVideoModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1111,18 +1109,17 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               </div>
               <select
                 value={directVidEngine}
-                onChange={(e) => setDirectVidEngine(e.target.value as any)}
+                onChange={(e) => setDirectVidEngine(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
               >
-                <option value="gemini-omni-1.1-flash">
-                  Gemini Omni 1.1 Flash (ใช้ GEMINI_API_KEY)
+                <option value="">
+                  ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API)
                 </option>
-                <option value="veo-3.1-generate-001">
-                  Google Veo 3.1 GA (Vertex AI: veo-3.1-generate-001)
-                </option>
-                <option value="veo-3.1-fast-generate-001">
-                  Google Veo 3.1 Fast (Vertex AI: veo-3.1-fast-generate-001)
-                </option>
+                {combinedLiveVideoModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
               <textarea
                 rows={3}
@@ -1195,7 +1192,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             >
               <div className="flex items-center gap-2 text-sm font-extrabold text-[#0d2546]">
                 <ImageIcon className="w-4 h-4 text-sky-600" />
-                สร้างรูปภาพ .PNG จริง (Nano Banana 2.1 / DALL-E 3)
+                สร้างรูปภาพ .PNG จริง (ดึงโมเดลสดจาก API)
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <select
@@ -1203,9 +1200,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   onChange={(e) => {
                     const p = e.target.value as 'gemini' | 'openai';
                     setDirectImgProvider(p);
-                    setDirectImgModel(
-                      p === 'gemini' ? 'gemini-nano-banana-2.1' : 'dall-e-3'
-                    );
+                    setDirectImgModel('');
                   }}
                   className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold"
                 >
@@ -1217,16 +1212,13 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   onChange={(e) => setDirectImgModel(e.target.value)}
                   className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold"
                 >
-                  {directImgProvider === 'gemini' ? (
-                    <>
-                      <option value="gemini-nano-banana-2.1">gemini-nano-banana-2.1</option>
-                      <option value="gemini-3-pro-image">gemini-3-pro-image</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="dall-e-3">dall-e-3</option>
-                      <option value="gpt-image-1">gpt-image-1</option>
-                    </>
+                  <option value="">✨ อัตโนมัติ (รุ่นใหม่ล่าสุดจาก API)</option>
+                  {(liveModels?.providers?.[directImgProvider]?.imageModels || []).map(
+                    (m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    )
                   )}
                 </select>
               </div>
@@ -1281,9 +1273,9 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   }}
                   className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold"
                 >
-                  <option value="gemini">Gemini 3.8 Flash TTS (รองรับไทย)</option>
-                  <option value="elevenlabs">ElevenLabs Multilingual v2</option>
-                  <option value="openai">OpenAI gpt-4o-mini-tts</option>
+                  <option value="gemini">Google Gemini TTS (รองรับไทย)</option>
+                  <option value="elevenlabs">ElevenLabs Multilingual TTS</option>
+                  <option value="openai">OpenAI TTS (ดึงโมเดลเสียงจาก API)</option>
                 </select>
                 <input
                   type="text"
@@ -1438,11 +1430,10 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 onChange={(e) => setChatModel(e.target.value)}
                 className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-[#0d2546]"
               >
-                {(
-                  CHAT_PROVIDERS.find((p) => p.id === chatProvider)?.models || []
-                ).map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                <option value="">✨ อัตโนมัติ (ใช้รุ่นใหม่ล่าสุดจาก API)</option>
+                {(liveModels?.providers?.[chatProvider]?.textModels || []).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
                   </option>
                 ))}
               </select>
