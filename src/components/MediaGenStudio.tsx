@@ -16,6 +16,7 @@ import {
   Clapperboard,
   X,
   MessageSquare,
+  FilePlus2,
 } from 'lucide-react';
 import {
   AiEngineSettings,
@@ -54,60 +55,61 @@ export const MediaGenStudio: React.FC<Props> = ({
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
-  // ---------------- SHARED AI PROMPT EVALUATOR STATE ----------------
   const [ideaBrief, setIdeaBrief] = useState('');
   const [evaluating, setEvaluating] = useState(false);
   const [assessmentThai, setAssessmentThai] = useState('');
   const [thaiSummary, setThaiSummary] = useState('');
   const [suggestedTitle, setSuggestedTitle] = useState('');
 
-  // ---------------- IMAGE AGENT STATE ----------------
   const [imgFullPrompt, setImgFullPrompt] = useState('');
   const [imgProvider, setImgProvider] = useState<'gemini' | 'openai'>('gemini');
-  const [imgAspect, setImgAspect] = useState<'16:9' | '1:1' | '9:16'>('16:9');
+  const [imgAspect, setImgAspect] = useState<'16:9' | '9:16' | '1:1'>('16:9');
   const [imgGenerating, setImgGenerating] = useState(false);
 
-  // ---------------- VIDEO AGENT STATE ----------------
   const [vidFullPrompt, setVidFullPrompt] = useState('');
   const [vidEngine, setVidEngine] = useState<string>('');
-  const [liveVideoModels, setLiveVideoModels] = useState<LiveModelOption[]>([]);
   const [vidAspect, setVidAspect] = useState<'16:9' | '9:16'>('16:9');
-  const [vidDuration, setVidDuration] = useState<number>(6);
-  const [vidFirstFrameUrl, setVidFirstFrameUrl] = useState<string>('');
-  const [uploadingFrame, setUploadingFrame] = useState(false);
+  const [vidDuration, setVidDuration] = useState(6);
+  const [vidFirstFrameUrl, setVidFirstFrameUrl] = useState('');
   const [vidGenerating, setVidGenerating] = useState(false);
+  const [uploadingFrame, setUploadingFrame] = useState(false);
+  const [liveVideoModels, setLiveVideoModels] = useState<LiveModelOption[]>([]);
 
-  // ---------------- RECHECK & PREVIEW STATE ----------------
-  const [activeRecheckAsset, setActiveRecheckAsset] = useState<AiMediaAsset | null>(null);
+  const [activeRecheckAsset, setActiveRecheckAsset] = useState<AiMediaAsset | null>(
+    null
+  );
   const [zoomAsset, setZoomAsset] = useState<AiMediaAsset | null>(null);
-  const [reviewBusyId, setReviewBusyId] = useState<number | null>(null);
-  const [writingNewsForAssetId, setWritingNewsForAssetId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [reviewBusyId, setReviewBusyId] = useState<number | null>(null);
+  const [writingNewsForAssetId, setWritingNewsForAssetId] = useState<number | null>(
+    null
+  );
 
   const recheckRef = useRef<HTMLDivElement | null>(null);
 
   const showToast = (msg: string) => {
     setSuccessBanner(msg);
-    setTimeout(() => {
-      setSuccessBanner((prev) => (prev === msg ? null : prev));
-    }, 5000);
+    setTimeout(() => setSuccessBanner(null), 5000);
   };
 
   const loadData = async () => {
     try {
-      const [st, ma, liveCatalog] = await Promise.all([
+      const [st, list, lm] = await Promise.all([
         api.getAiSettings(),
         api.getMediaAssets(),
         api.getLiveModels().catch(() => null),
       ]);
       setSettings(st);
-      setAssets(ma);
-      if (liveCatalog) {
+      setAssets(list);
+      if (st && !st.hasGeminiKey && st.hasOpenaiKey) {
+        setImgProvider('openai');
+      }
+      if (lm) {
         const merged: LiveModelOption[] = [];
         const seen = new Set<string>();
         for (const m of [
-          ...(liveCatalog.providers.gemini?.videoModels || []),
-          ...(liveCatalog.providers.vertex_veo?.videoModels || []),
+          ...(lm.providers?.gemini?.videoModels || []),
+          ...(lm.providers?.vertex_veo?.videoModels || []),
         ]) {
           if (!seen.has(m.id)) {
             seen.add(m.id);
@@ -115,19 +117,6 @@ export const MediaGenStudio: React.FC<Props> = ({
           }
         }
         setLiveVideoModels(merged);
-      }
-      // Auto-select default image provider based on configured key
-      if (!st.hasGeminiKey && st.hasOpenaiKey) {
-        setImgProvider('openai');
-      }
-      // Surface newest pending_review item if no active recheck item is open
-      const newestPending = ma.find(
-        (a) =>
-          (a.mediaType === 'image' || a.mediaType === 'video') &&
-          a.reviewStatus === 'pending_review'
-      );
-      if (newestPending && !activeRecheckAsset) {
-        setActiveRecheckAsset(newestPending);
       }
     } catch {
       // ignore
@@ -138,53 +127,50 @@ export const MediaGenStudio: React.FC<Props> = ({
     loadData();
   }, []);
 
-  // Receive Full Prompt Handoff from AI Chat Page!
   useEffect(() => {
-    if (!incomingHandoff) return;
-    setAssessmentThai(incomingHandoff.assessmentThai || '');
-    setThaiSummary(incomingHandoff.thaiSummary || '');
-    setSuggestedTitle(incomingHandoff.suggestedPostTitle || '');
-    if (incomingHandoff.target === 'video') {
-      setActiveTab('video');
-      setVidFullPrompt(incomingHandoff.fullPrompt);
-      setVidAspect(incomingHandoff.aspectRatio === '9:16' ? '9:16' : '16:9');
-    } else {
-      setActiveTab('image');
-      setImgFullPrompt(incomingHandoff.fullPrompt);
-      setImgAspect(incomingHandoff.aspectRatio || '16:9');
+    if (incomingHandoff) {
+      setActiveTab(incomingHandoff.target);
+      setAssessmentThai(incomingHandoff.assessmentThai);
+      setThaiSummary(incomingHandoff.thaiSummary);
+      setSuggestedTitle(incomingHandoff.suggestedPostTitle || '');
+      if (incomingHandoff.target === 'image') {
+        setImgFullPrompt(incomingHandoff.fullPrompt);
+        setImgAspect(incomingHandoff.aspectRatio);
+      } else {
+        setVidFullPrompt(incomingHandoff.fullPrompt);
+        setVidAspect(incomingHandoff.aspectRatio === '9:16' ? '9:16' : '16:9');
+      }
+      showToast(
+        incomingHandoff.target === 'image'
+          ? 'รับข้อมูล Full Prompt จากหน้าสนทนาเรียบร้อยแล้ว พร้อมสั่งสร้างภาพทันที'
+          : 'รับข้อมูล Full Prompt จากหน้าสนทนาเรียบร้อยแล้ว พร้อมสั่งสร้างวิดีโอทันที'
+      );
+      if (onClearHandoff) onClearHandoff();
     }
-    showToast('รับ Full Prompt จากห้องแชท AI เรียบร้อย! ตรวจสอบแล้วกดสั่ง Agent สร้างได้เลยครับ');
-    onClearHandoff?.();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [incomingHandoff]);
 
-  // Step 1: AI Evaluates Thai Brief & Writes Full Prompt
-  const handleEvaluateBrief = async (target: 'image' | 'video') => {
-    const currentPrompt = target === 'image' ? imgFullPrompt : vidFullPrompt;
-    const textToEval = ideaBrief.trim() || currentPrompt.trim();
-    if (!textToEval) {
-      setErrorBanner('กรุณาพิมพ์บอกสิ่งที่อยากได้เป็นภาษาไทยสั้นๆ ในช่องที่ 1 ก่อนครับ');
+  const handleEvaluateIdea = async (target: 'image' | 'video') => {
+    if (!ideaBrief.trim()) {
+      setErrorBanner('กรุณาระบุแนวคิดหรือรายละเอียดสื่อที่ต้องการให้ AI วิเคราะห์');
       return;
     }
     setErrorBanner(null);
     setEvaluating(true);
     try {
       const res = await api.evaluateMediaPrompt({
+        userIdea: ideaBrief.trim(),
         target,
-        ideaText: textToEval,
         aspectRatio: target === 'image' ? imgAspect : vidAspect,
       });
       setAssessmentThai(res.assessmentThai);
-      setThaiSummary(res.visualSummaryThai);
+      setThaiSummary(res.thaiSummary || res.visualSummaryThai || '');
       setSuggestedTitle(res.suggestedPostTitle);
       if (target === 'image') {
         setImgFullPrompt(res.fullPrompt);
-        setImgAspect(res.recommendedAspectRatio || '16:9');
       } else {
         setVidFullPrompt(res.fullPrompt);
-        setVidAspect(res.recommendedAspectRatio === '9:16' ? '9:16' : '16:9');
       }
-      showToast('AI ประเมินแนวคิดและเขียน Full Prompt ระดับมืออาชีพให้แล้ว!');
+      showToast('วิเคราะห์แนวคิดและเรียบเรียง Full Prompt สำเร็จ');
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -192,11 +178,10 @@ export const MediaGenStudio: React.FC<Props> = ({
     }
   };
 
-  // Step 2A: Run Real Image Agent
   const handleGenerateImage = async () => {
     const finalPrompt = imgFullPrompt.trim() || ideaBrief.trim();
     if (!finalPrompt) {
-      setErrorBanner('กรุณาใส่รายละเอียดภาพ หรือกดให้ AI เขียน Full Prompt ก่อนครับ');
+      setErrorBanner('กรุณาระบุคำสั่งสร้างภาพ (Prompt) ก่อนดำเนินการ');
       return;
     }
     setErrorBanner(null);
@@ -211,7 +196,7 @@ export const MediaGenStudio: React.FC<Props> = ({
       setActiveRecheckAsset(created);
       await loadData();
       await onRefreshAll();
-      showToast('สร้างรูปภาพเสร็จแล้ว! กรุณาตรวจดูตัวอย่างด้านล่างว่าชอบหรือไม่');
+      showToast('สร้างภาพประกอบสำเร็จ กรุณาตรวจสอบตัวอย่างผลงาน');
       setTimeout(() => {
         recheckRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 150);
@@ -222,11 +207,10 @@ export const MediaGenStudio: React.FC<Props> = ({
     }
   };
 
-  // Step 2B: Run Real Video Agent
   const handleGenerateVideo = async () => {
     const finalPrompt = vidFullPrompt.trim() || ideaBrief.trim();
     if (!finalPrompt) {
-      setErrorBanner('กรุณาใส่รายละเอียดวิดีโอ หรือกดให้ AI เขียน Full Prompt ก่อนครับ');
+      setErrorBanner('กรุณาระบุคำสั่งสร้างวิดีโอ (Prompt) ก่อนดำเนินการ');
       return;
     }
     setErrorBanner(null);
@@ -244,7 +228,7 @@ export const MediaGenStudio: React.FC<Props> = ({
       setActiveRecheckAsset(created);
       await loadData();
       await onRefreshAll();
-      showToast('สร้างวิดีโอเสร็จแล้ว! กรุณาเปิดเล่นดูตัวอย่างด้านล่างว่าชอบหรือไม่');
+      showToast('สร้างสื่อวิดีโอสำเร็จ กรุณาตรวจสอบตัวอย่างผลงาน');
       setTimeout(() => {
         recheckRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 150);
@@ -263,7 +247,7 @@ export const MediaGenStudio: React.FC<Props> = ({
     try {
       const url = await api.uploadImage(file);
       setVidFirstFrameUrl(url);
-      showToast('อัปโหลดภาพต้นแบบสำหรับฉากเปิดวิดีโอเรียบร้อยแล้ว');
+      showToast('อัปโหลดภาพต้นแบบสำหรับฉากเปิดเรียบร้อยแล้ว');
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -271,7 +255,6 @@ export const MediaGenStudio: React.FC<Props> = ({
     }
   };
 
-  // Step 3: Recheck Preview Actions (Like/Approve, Write News with AI, Revise, Delete)
   const handleApproveAsset = async (asset: AiMediaAsset) => {
     setReviewBusyId(asset.id);
     setErrorBanner(null);
@@ -281,7 +264,7 @@ export const MediaGenStudio: React.FC<Props> = ({
         setActiveRecheckAsset({ ...asset, reviewStatus: 'approved' });
       }
       await loadData();
-      showToast('อนุมัติเก็บผลงานไว้ในคลังเรียบร้อยแล้ว!');
+      showToast('อนุมัติและจัดเก็บผลงานในคลังสื่อเรียบร้อยแล้ว');
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -303,7 +286,7 @@ export const MediaGenStudio: React.FC<Props> = ({
       setConfirmDeleteId(null);
       await loadData();
       await onRefreshAll();
-      showToast('ลบไฟล์ผลงานนี้ออกจากระบบถาวรเรียบร้อยแล้ว');
+      showToast('ลบไฟล์สื่อออกจากระบบเรียบร้อยแล้ว');
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -387,7 +370,7 @@ export const MediaGenStudio: React.FC<Props> = ({
     }
     setThaiSummary(asset.thaiSummary || '');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    showToast('โหลด Full Prompt กลับมาให้แก้ไขด้านบนแล้วครับ ปรับข้อความแล้วกดสั่งสร้างใหม่ได้เลย');
+    showToast('นำคำสั่ง Prompt กลับมาที่แบบฟอร์มแล้ว สามารถปรับแก้และสร้างใหม่ได้ทันที');
   };
 
   const pendingReviewAssets = assets.filter(
@@ -405,89 +388,91 @@ export const MediaGenStudio: React.FC<Props> = ({
   const approvedImages = assets.filter((a) => a.mediaType === 'image');
 
   return (
-    <div className="space-y-6">
-      {/* Top Mode Switcher (3 Large Plain-Thai Buttons) */}
-      <div className="rounded-3xl bg-white border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-5">
+      {/* Studio Header & Segmented Mode Navigation */}
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
           <div>
-            <h2 className="text-xl sm:text-2xl font-extrabold text-[#0d2546]">
-              สตูดิโอสร้างรูปภาพ & วิดีโอ AI (พร้อมระบบตรวจดูตัวอย่างก่อนใช้งาน)
+            <h2 className="text-sm sm:text-base font-bold text-slate-900">
+              สตูดิโอผลิตสื่อภาพนิ่งและวิดีโอด้วย AI
             </h2>
-            <p className="text-sm sm:text-base text-slate-600">
-              ให้ AI ช่วยประเมินและเขียน Full Prompt ระดับมืออาชีพ → สั่ง Agent สร้างจริง → ดูตัวอย่างว่าชอบไหม หรือลบทิ้งได้ทันที
+            <p className="text-xs text-slate-500 mt-0.5">
+              วิเคราะห์คำสั่ง Prompt มาตรฐานองค์กร สร้างสื่อประกอบเนื้อหา และบริหารจัดการคลังสื่อดิจิทัล
             </p>
           </div>
           <button
             type="button"
             onClick={onGoToChat}
-            className="inline-flex items-center gap-2 rounded-2xl border-2 border-[#0d2546] bg-slate-50 px-4 py-2.5 text-sm font-extrabold text-[#0d2546] hover:bg-amber-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer shrink-0"
           >
-            <MessageSquare className="w-4 h-4" />
-            ไปคุยปรึกษาไอเดียในหน้า AI Chat
+            <MessageSquare className="w-3.5 h-3.5 text-slate-500" />
+            เปิดหน้าผู้ช่วย AI (Co-Work Chat)
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => setActiveTab('image')}
-            className={`flex items-center justify-center gap-2.5 rounded-2xl px-5 py-4 text-base font-extrabold border-2 transition cursor-pointer ${
+            className={`flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-xs sm:text-sm font-semibold border transition cursor-pointer ${
               activeTab === 'image'
-                ? 'bg-[#0d2546] text-white border-[#0d2546] shadow-sm'
+                ? 'bg-slate-900 text-white border-slate-900'
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <ImageIcon className="w-5 h-5 text-amber-400" />
-            1. สร้างรูปภาพ AI (Image Gen)
+            <ImageIcon className="w-4 h-4 text-amber-400" />
+            1. สร้างภาพนิ่ง (Image Generation)
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('video')}
-            className={`flex items-center justify-center gap-2.5 rounded-2xl px-5 py-4 text-base font-extrabold border-2 transition cursor-pointer ${
+            className={`flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-xs sm:text-sm font-semibold border transition cursor-pointer ${
               activeTab === 'video'
-                ? 'bg-[#0d2546] text-white border-[#0d2546] shadow-sm'
+                ? 'bg-slate-900 text-white border-slate-900'
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Film className="w-5 h-5 text-amber-400" />
-            2. สร้างวิดีโอ AI (VDO Gen)
+            <Film className="w-4 h-4 text-amber-400" />
+            2. สร้างสื่อวิดีโอ (Video Production)
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('flow')}
-            className={`flex items-center justify-center gap-2.5 rounded-2xl px-5 py-4 text-base font-extrabold border-2 transition cursor-pointer ${
+            className={`flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-xs sm:text-sm font-semibold border transition cursor-pointer ${
               activeTab === 'flow'
-                ? 'bg-[#0d2546] text-white border-[#0d2546] shadow-sm'
+                ? 'bg-slate-900 text-white border-slate-900'
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Clapperboard className="w-5 h-5 text-amber-400" />
-            3. หนังสั้นหลายฉาก (Google Flow)
+            <Clapperboard className="w-4 h-4 text-amber-400" />
+            3. สตอรีบอร์ดหลายฉาก (Multi-Scene Flow)
           </button>
         </div>
       </div>
 
       {/* Notifications */}
       {errorBanner && (
-        <div className="rounded-2xl border-2 border-rose-300 bg-rose-50 p-4 flex flex-wrap items-center justify-between gap-3 text-rose-900">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-6 h-6 text-rose-600 shrink-0 mt-0.5" />
-            <div className="text-sm sm:text-base font-bold">{errorBanner}</div>
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-rose-900">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorBanner}</span>
           </div>
           <div className="flex items-center gap-2">
             {errorBanner.includes('API Key') && (
               <button
+                type="button"
                 onClick={onOpenSettings}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-700 px-4 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-rose-800 cursor-pointer"
+                className="inline-flex items-center gap-1 rounded-md bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-800 cursor-pointer"
               >
-                <KeyRound className="w-4 h-4" /> ตั้งค่าคีย์ AI
+                <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Key
               </button>
             )}
             <button
+              type="button"
               onClick={() => setErrorBanner(null)}
-              className="rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 cursor-pointer"
+              className="text-rose-700 hover:text-rose-900 font-semibold cursor-pointer"
             >
               ปิด
             </button>
@@ -496,500 +481,403 @@ export const MediaGenStudio: React.FC<Props> = ({
       )}
 
       {successBanner && (
-        <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4 flex items-center gap-3 text-emerald-900">
-          <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
-          <div className="text-sm sm:text-base font-extrabold">{successBanner}</div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-center justify-between gap-3 text-xs text-emerald-900">
+          <div className="flex items-center gap-2 font-medium">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{successBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessBanner(null)}
+            className="text-emerald-700 hover:text-emerald-900 font-semibold cursor-pointer"
+          >
+            ปิด
+          </button>
         </div>
       )}
 
       {/* ===================================================================== */}
-      {/* RECHECK & PREVIEW PANEL (SHOWN PROMINENTLY WHENEVER GENERATED!)       */}
+      {/* ACTIVE OUTPUT INSPECTION & QUALITY REVIEW PANEL                       */}
       {/* ===================================================================== */}
       <div ref={recheckRef}>
         {activeRecheckAsset && (
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-7 shadow-sm space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="rounded-lg border border-slate-300 bg-white p-5 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
               <div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-1 text-xs font-extrabold text-emerald-900">
-                  <Eye className="w-4 h-4" /> ตรวจดูตัวอย่างก่อนตัดสินใจ (Recheck & Preview)
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <Eye className="w-3.5 h-3.5 text-amber-600" />
+                  การตรวจสอบคุณภาพผลงาน (Quality Inspection)
                 </span>
-                <h3 className="text-xl sm:text-2xl font-extrabold text-[#0d2546] mt-1">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
                   {activeRecheckAsset.mediaType === 'video'
-                    ? '🎬 วิดีโอสร้างเสร็จแล้ว — ลองกดเล่นดูว่าชอบไหมครับ?'
-                    : '🎨 รูปภาพสร้างเสร็จแล้ว — ตรวจดูความสวยงามว่าชอบไหมครับ?'}
+                    ? 'ตัวอย่างสื่อวิดีโอที่สร้างเสร็จสมบูรณ์'
+                    : 'ตัวอย่างภาพประกอบที่สร้างเสร็จสมบูรณ์'}
                 </h3>
               </div>
 
               <div className="flex items-center gap-2">
                 {activeRecheckAsset.reviewStatus === 'approved' ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-extrabold text-white">
-                    <CheckCircle2 className="w-4 h-4" /> เก็บไว้ในคลังแล้ว
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> อนุมัติเก็บในคลังแล้ว
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-4 py-1.5 text-sm font-extrabold text-amber-900">
-                    รอคุณตัดสินใจ (ชอบ หรือ ลบทิ้ง)
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                    รอการตรวจสอบ
                   </span>
                 )}
                 <button
                   type="button"
                   onClick={() => setActiveRecheckAsset(null)}
-                  className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                  className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 cursor-pointer"
                 >
-                  ซ่อนหน้าต่างนี้
+                  ซ่อนหน้าต่าง
                 </button>
               </div>
             </div>
 
-            {/* Large Preview Stage */}
-            <div className="rounded-2xl bg-slate-950 p-3 sm:p-4 flex items-center justify-center overflow-hidden">
-              {activeRecheckAsset.mediaType === 'video' ? (
-                <video
-                  src={activeRecheckAsset.fileUrl}
-                  controls
-                  autoPlay
-                  className="max-h-[480px] w-auto rounded-xl"
-                />
-              ) : (
-                <img
-                  src={activeRecheckAsset.fileUrl}
-                  alt={activeRecheckAsset.thaiSummary || 'AI Generated Image'}
-                  onClick={() => setZoomAsset(activeRecheckAsset)}
-                  className="max-h-[480px] w-auto object-contain rounded-xl cursor-zoom-in"
-                />
-              )}
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-1">
-              {activeRecheckAsset.thaiSummary && (
-                <div className="text-base font-extrabold text-[#0d2546]">
-                  สรุปผลงาน: {activeRecheckAsset.thaiSummary}
-                </div>
-              )}
-              <div className="text-xs sm:text-sm text-slate-600 line-clamp-2">
-                Prompt ที่ใช้: {activeRecheckAsset.prompt}
-              </div>
-            </div>
-
-            {/* Big Elder-Friendly Decision Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <button
-                type="button"
-                disabled={reviewBusyId === activeRecheckAsset.id}
-                onClick={() => handleApproveAsset(activeRecheckAsset)}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-4 text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50"
-              >
-                <CheckCircle2 className="w-5 h-5" />
-                ชอบ! เก็บไว้ในคลัง
-              </button>
-
-              <button
-                type="button"
-                disabled={writingNewsForAssetId === activeRecheckAsset.id}
-                onClick={() => handleAiWriteNewsWithAsset(activeRecheckAsset)}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-[#0d2546] px-4 py-4 text-base font-extrabold text-white hover:bg-[#163a6b] cursor-pointer shadow-sm disabled:opacity-50"
-              >
-                {writingNewsForAssetId === activeRecheckAsset.id ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin text-amber-300" />
-                    AI กำลังเขียนข่าวให้...
-                  </>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              <div className="lg:col-span-7 rounded-md overflow-hidden bg-slate-950 border border-slate-200 flex items-center justify-center">
+                {activeRecheckAsset.mediaType === 'video' ? (
+                  <video
+                    src={activeRecheckAsset.fileUrl}
+                    controls
+                    autoPlay
+                    playsInline
+                    className="w-full max-h-[420px]"
+                  />
                 ) : (
-                  <>
-                    <Newspaper className="w-5 h-5 text-amber-300" />
-                    ชอบ! ให้ AI เขียนข่าวพร้อมรูป/คลิปนี้
-                  </>
+                  <img
+                    src={activeRecheckAsset.fileUrl}
+                    alt={activeRecheckAsset.thaiSummary || activeRecheckAsset.prompt}
+                    onClick={() => setZoomAsset(activeRecheckAsset)}
+                    className="w-full max-h-[420px] object-contain cursor-zoom-in"
+                  />
                 )}
-              </button>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => handleReviseFromAsset(activeRecheckAsset)}
-                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-amber-400 bg-amber-50 px-4 py-4 text-base font-extrabold text-amber-950 hover:bg-amber-100 cursor-pointer"
-              >
-                <RefreshCw className="w-5 h-5" />
-                ปรับแก้ Prompt สร้างใหม่
-              </button>
+              <div className="lg:col-span-5 space-y-4">
+                <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-1.5 text-xs">
+                  <div className="text-slate-500">
+                    โมเดลประมวลผล:{' '}
+                    <strong className="text-slate-800">
+                      {activeRecheckAsset.engine}
+                    </strong>{' '}
+                    ({activeRecheckAsset.aspectRatio})
+                  </div>
+                  {activeRecheckAsset.thaiSummary && (
+                    <div className="font-semibold text-slate-900">
+                      สรุปเนื้อหา: {activeRecheckAsset.thaiSummary}
+                    </div>
+                  )}
+                  <div className="text-slate-600 line-clamp-3">
+                    Prompt: {activeRecheckAsset.prompt}
+                  </div>
+                </div>
 
-              <button
-                type="button"
-                disabled={reviewBusyId === activeRecheckAsset.id}
-                onClick={() => handleDeleteAsset(activeRecheckAsset)}
-                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-rose-300 bg-rose-50 px-4 py-4 text-base font-extrabold text-rose-700 hover:bg-rose-600 hover:text-white transition cursor-pointer disabled:opacity-50"
-              >
-                <Trash2 className="w-5 h-5" />
-                ไม่ชอบ — ลบทิ้งทันที
-              </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled={writingNewsForAssetId === activeRecheckAsset.id}
+                    onClick={() => handleAiWriteNewsWithAsset(activeRecheckAsset)}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  >
+                    {writingNewsForAssetId === activeRecheckAsset.id ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        กำลังร่างบทความประกอบสื่อ...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        ให้ AI ร่างบทความพร้อมแนบสื่อนี้
+                      </>
+                    )}
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={reviewBusyId === activeRecheckAsset.id}
+                      onClick={() => handleApproveAsset(activeRecheckAsset)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      อนุมัติเก็บในคลัง
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSendAssetToPostEditor(activeRecheckAsset)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <Newspaper className="w-3.5 h-3.5" />
+                      เปิดในหน้าสร้างเนื้อหา
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleReviseFromAsset(activeRecheckAsset)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      แก้ไข Prompt และสร้างใหม่
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={reviewBusyId === activeRecheckAsset.id}
+                      onClick={() => handleDeleteAsset(activeRecheckAsset)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 cursor-pointer disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      ลบไฟล์นี้
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Other Pending Review Queue Strip (if multiple items awaiting decision) */}
-      {pendingReviewAssets.length > 1 && (
-        <div className="rounded-2xl bg-amber-50 border border-amber-300 p-4 space-y-2.5">
-          <div className="text-sm font-extrabold text-amber-950">
-            ผลงานที่รอคุณตรวจดูว่าชอบหรือไม่ ({pendingReviewAssets.length} รายการ):
-          </div>
-          <div className="flex flex-wrap gap-2.5">
-            {pendingReviewAssets.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveRecheckAsset(item)}
-                className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-extrabold border cursor-pointer ${
-                  activeRecheckAsset?.id === item.id
-                    ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                    : 'bg-white text-slate-800 border-amber-300 hover:bg-amber-100'
-                }`}
-              >
-                {item.mediaType === 'video' ? (
-                  <Film className="w-4 h-4" />
-                ) : (
-                  <ImageIcon className="w-4 h-4" />
-                )}
-                {item.thaiSummary?.slice(0, 35) || item.prompt.slice(0, 35)}...
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ===================================================================== */}
-      {/* TAB 1: IMAGE GENERATOR (AI EVALUATOR + FULL PROMPT + REAL AGENT)      */}
+      {/* TAB 1: IMAGE GENERATION STUDIO                                        */}
       {/* ===================================================================== */}
       {activeTab === 'image' && (
-        <div className="rounded-3xl bg-white border border-slate-200 p-5 sm:p-7 shadow-xs space-y-6">
-          {/* Step 1 */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0d2546] text-amber-300 font-extrabold text-sm">
-                1
-              </span>
-              <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
-                บอกรูปภาพที่อยากได้ (พิมพ์ภาษาไทยง่ายๆ ได้เลย)
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          {/* Step 1: Prompt Analysis */}
+          <div className="lg:col-span-5 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+            <div className="border-b border-slate-100 pb-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                ขั้นตอนที่ 1 • การวิเคราะห์แนวคิด
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 mt-0.5">
+                ระบุแนวคิดภาพประกอบเพื่อให้ AI เรียบเรียง Full Prompt
               </h3>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="text"
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                แนวคิดหรือรายละเอียดภาพที่ต้องการ (ภาษาไทยหรือภาษาอังกฤษ)
+              </label>
+              <textarea
+                rows={4}
                 value={ideaBrief}
                 onChange={(e) => setIdeaBrief(e.target.value)}
-                placeholder="เช่น ภาพครูไทยยุคใหม่ใช้แท็บเล็ตสอนเด็กนักเรียนในห้องเรียนที่อบอุ่น ทันสมัย"
-                className="flex-1 rounded-2xl border-2 border-slate-300 px-4 py-3.5 text-base text-slate-800 focus:border-[#0d2546] focus:outline-none"
+                placeholder="เช่น ภาพห้องเรียนยุคใหม่ในประเทศไทย ครูและนักเรียนกำลังใช้แท็บเล็ตเรียนรู้ร่วมกับระบบ AI บรรยากาศอบอุ่นเป็นทางการ"
+                className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
               />
-              <button
-                type="button"
-                onClick={() => handleEvaluateBrief('image')}
-                disabled={evaluating}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-400 px-5 py-3.5 text-base font-extrabold text-[#0d2546] hover:bg-amber-300 transition cursor-pointer shrink-0 disabled:opacity-50"
-              >
-                {evaluating ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    AI กำลังประเมิน...
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-5 h-5" />
-                    ให้ AI ประเมิน & เขียน Full Prompt
-                  </>
-                )}
-              </button>
             </div>
+
+            <button
+              type="button"
+              disabled={evaluating}
+              onClick={() => handleEvaluateIdea('image')}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+            >
+              {evaluating ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  กำลังวิเคราะห์องค์ประกอบภาพ...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                  วิเคราะห์แนวคิดและสร้าง Full Prompt
+                </>
+              )}
+            </button>
+
+            {assessmentThai && (
+              <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-1 text-xs">
+                <div className="font-semibold text-slate-800">
+                  ผลการวิเคราะห์องค์ประกอบภาพ:
+                </div>
+                <p className="text-slate-600 leading-relaxed">{assessmentThai}</p>
+              </div>
+            )}
           </div>
 
-          {/* AI Assessment Display */}
-          {assessmentThai && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-2xl bg-amber-50/70 border border-amber-200 p-4">
-                <div className="text-sm font-extrabold text-amber-950 mb-1">
-                  💡 AI ประเมินแนวคิดภาพ:
-                </div>
-                <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
-                  {assessmentThai}
-                </p>
+          {/* Step 2: Model Configuration & Execution */}
+          <div className="lg:col-span-7 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+            <div className="border-b border-slate-100 pb-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                ขั้นตอนที่ 2 • การตั้งค่าโมเดลและสั่งผลิตภาพ
               </div>
-              {thaiSummary && (
-                <div className="rounded-2xl bg-sky-50/70 border border-sky-200 p-4">
-                  <div className="text-sm font-extrabold text-sky-950 mb-1">
-                    🖼️ ลักษณะภาพที่จะได้:
-                  </div>
-                  <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
-                    {thaiSummary}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 2: Full Prompt & Settings */}
-          <div className="space-y-4 pt-2 border-t border-slate-100">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0d2546] text-amber-300 font-extrabold text-sm">
-                2
-              </span>
-              <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
-                ตรวจดู Full Prompt และเลือกขนาดรูปภาพ
+              <h3 className="text-sm font-bold text-slate-900 mt-0.5">
+                ตรวจสอบ Full Prompt และกำหนดสัดส่วนภาพ
               </h3>
             </div>
 
-            <textarea
-              rows={4}
-              value={imgFullPrompt}
-              onChange={(e) => setImgFullPrompt(e.target.value)}
-              placeholder="Full Prompt สำหรับส่งให้ Agent สร้างรูปภาพ (กดปุ่มสีเหลืองด้านบนเพื่อให้ AI เขียนให้ หรือพิมพ์เองได้เลยครับ)"
-              className="w-full rounded-2xl border-2 border-slate-300 p-4 text-base text-slate-800 focus:border-[#0d2546] focus:outline-none"
-            />
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                คำสั่งสร้างภาพฉบับสมบูรณ์ (Full Prompt)
+              </label>
+              <textarea
+                rows={4}
+                value={imgFullPrompt}
+                onChange={(e) => setImgFullPrompt(e.target.value)}
+                placeholder="Full Prompt จากขั้นตอนที่ 1 จะแสดงที่นี่ หรือสามารถพิมพ์คำสั่งโดยตรงได้ทันที"
+                className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+              />
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
-                <label className="block text-sm font-extrabold text-slate-700 mb-2">
-                  สัดส่วนรูปภาพ:
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  ผู้ให้บริการโมเดลภาพ (Image Provider)
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(
-                    [
-                      { id: '16:9', label: 'แนวนอน 16:9', sub: 'ปกข่าวหน้าเว็บ' },
-                      { id: '1:1', label: 'จัตุรัส 1:1', sub: 'โพสต์โซเชียล' },
-                      { id: '9:16', label: 'แนวตั้ง 9:16', sub: 'จอมือถือ' },
-                    ] as const
-                  ).map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => setImgAspect(a.id)}
-                      className={`rounded-xl p-3 text-left border-2 transition cursor-pointer ${
-                        imgAspect === a.id
-                          ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      <div className="text-sm font-extrabold">{a.label}</div>
-                      <div
-                        className={`text-xs ${
-                          imgAspect === a.id ? 'text-amber-300' : 'text-slate-500'
-                        }`}
-                      >
-                        {a.sub}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                <select
+                  value={imgProvider}
+                  onChange={(e) =>
+                    setImgProvider(e.target.value as 'gemini' | 'openai')
+                  }
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-800"
+                >
+                  <option value="gemini">
+                    Google Gemini Image / Imagen{' '}
+                    {settings?.hasGeminiKey ? '(เชื่อมต่อแล้ว)' : '(ยังไม่ตั้งค่าคีย์)'}
+                  </option>
+                  <option value="openai">
+                    OpenAI Image (gpt-image-1){' '}
+                    {settings?.hasOpenaiKey ? '(เชื่อมต่อแล้ว)' : '(ยังไม่ตั้งค่าคีย์)'}
+                  </option>
+                </select>
               </div>
 
               <div>
-                <label className="block text-sm font-extrabold text-slate-700 mb-2">
-                  ค่าย Agent วาดรูปภาพ:
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  สัดส่วนภาพ (Aspect Ratio)
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setImgProvider('gemini')}
-                    className={`rounded-xl p-3 text-left border-2 transition cursor-pointer ${
-                      imgProvider === 'gemini'
-                        ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="text-sm font-extrabold">Google Gemini</div>
-                    <div
-                      className={`text-xs ${
-                        imgProvider === 'gemini' ? 'text-amber-300' : 'text-slate-500'
-                      }`}
-                    >
-                      Nano Banana 2.1
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setImgProvider('openai')}
-                    className={`rounded-xl p-3 text-left border-2 transition cursor-pointer ${
-                      imgProvider === 'openai'
-                        ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="text-sm font-extrabold">OpenAI Image</div>
-                    <div
-                      className={`text-xs ${
-                        imgProvider === 'openai' ? 'text-amber-300' : 'text-slate-500'
-                      }`}
-                    >
-                      DALL-E 3 / GPT-Image
-                    </div>
-                  </button>
-                </div>
+                <select
+                  value={imgAspect}
+                  onChange={(e) => setImgAspect(e.target.value as any)}
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-800"
+                >
+                  <option value="16:9">16:9 แนวนอน (หน้าปกบทความ / เว็บไซต์)</option>
+                  <option value="1:1">1:1 จัตุรัส (สื่อโซเชียลมีเดีย)</option>
+                  <option value="9:16">9:16 แนวตั้ง (สอตรี / โปสเตอร์)</option>
+                </select>
               </div>
             </div>
 
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={handleGenerateImage}
-                disabled={imgGenerating}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-4 text-lg font-extrabold text-white hover:bg-emerald-700 transition cursor-pointer shadow-md disabled:opacity-50"
-              >
-                {imgGenerating ? (
-                  <>
-                    <RefreshCw className="w-6 h-6 animate-spin" />
-                    Agent กำลังสร้างรูปภาพจริงให้ครับ...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-6 h-6" />
-                    สั่ง Agent สร้างรูปภาพจริง (พร้อมดูตัวอย่างก่อนตัดสินใจ)
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={imgGenerating}
+              onClick={handleGenerateImage}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-5 py-3 text-xs sm:text-sm font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
+            >
+              {imgGenerating ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                  กำลังประมวลผลและสร้างภาพ...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  ดำเนินการสร้างภาพประกอบ
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 2: VIDEO GENERATOR (AI EVALUATOR + FULL PROMPT + GOOGLE VEO/OMNI) */}
+      {/* TAB 2: VIDEO GENERATION STUDIO                                        */}
       {/* ===================================================================== */}
       {activeTab === 'video' && (
-        <div className="rounded-3xl bg-white border border-slate-200 p-5 sm:p-7 shadow-xs space-y-6">
-          {/* Step 1 */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0d2546] text-amber-300 font-extrabold text-sm">
-                1
-              </span>
-              <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
-                บอกคลิปวิดีโอที่อยากได้ (พิมพ์ภาษาไทยง่ายๆ ได้เลย)
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          {/* Step 1: Video Concept Analysis */}
+          <div className="lg:col-span-5 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+            <div className="border-b border-slate-100 pb-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                ขั้นตอนที่ 1 • การออกแบบฉากและมุมกล้อง
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 mt-0.5">
+                ระบุแนวคิดวิดีโอเพื่อให้ AI เรียบเรียง Video Prompt
               </h3>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="text"
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                รายละเอียดฉากและการเคลื่อนไหวที่ต้องการ
+              </label>
+              <textarea
+                rows={4}
                 value={ideaBrief}
                 onChange={(e) => setIdeaBrief(e.target.value)}
-                placeholder="เช่น คลิปเปิดรายการข่าวการศึกษา บรรยากาศห้องสมุดอนาคต มีแสงอุ่นส่องผ่านหน้าต่าง กล้องแพนช้าๆ"
-                className="flex-1 rounded-2xl border-2 border-slate-300 px-4 py-3.5 text-base text-slate-800 focus:border-[#0d2546] focus:outline-none"
+                placeholder="เช่น ภาพมุมกว้างโดรนบินผ่านโรงเรียนทันสมัยในจังหวัดภูเก็ต แสงเช้าตรู่ บรรยากาศสร้างแรงบันดาลใจทางการศึกษา"
+                className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
               />
-              <button
-                type="button"
-                onClick={() => handleEvaluateBrief('video')}
-                disabled={evaluating}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-400 px-5 py-3.5 text-base font-extrabold text-[#0d2546] hover:bg-amber-300 transition cursor-pointer shrink-0 disabled:opacity-50"
-              >
-                {evaluating ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    AI กำลังประเมิน...
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-5 h-5" />
-                    ให้ AI ประเมิน & เขียน Full Video Prompt
-                  </>
-                )}
-              </button>
             </div>
+
+            <button
+              type="button"
+              disabled={evaluating}
+              onClick={() => handleEvaluateIdea('video')}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+            >
+              {evaluating ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  กำลังออกแบบมุมกล้องและแสง...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                  วิเคราะห์แนวคิดและสร้าง Video Prompt
+                </>
+              )}
+            </button>
+
+            {assessmentThai && (
+              <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-1 text-xs">
+                <div className="font-semibold text-slate-800">
+                  ผลการวิเคราะห์การกำกับภาพ:
+                </div>
+                <p className="text-slate-600 leading-relaxed">{assessmentThai}</p>
+              </div>
+            )}
           </div>
 
-          {assessmentThai && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-2xl bg-amber-50/70 border border-amber-200 p-4">
-                <div className="text-sm font-extrabold text-amber-950 mb-1">
-                  💡 AI ประเมินแนวคิดวิดีโอ:
-                </div>
-                <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
-                  {assessmentThai}
-                </p>
+          {/* Step 2: Video Engine & Execution */}
+          <div className="lg:col-span-7 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+            <div className="border-b border-slate-100 pb-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                ขั้นตอนที่ 2 • การตั้งค่าโมเดลวิดีโอและเรนเดอร์
               </div>
-              {thaiSummary && (
-                <div className="rounded-2xl bg-sky-50/70 border border-sky-200 p-4">
-                  <div className="text-sm font-extrabold text-sky-950 mb-1">
-                    🎬 ฉากวิดีโอที่จะได้:
-                  </div>
-                  <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
-                    {thaiSummary}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 2: Full Video Prompt & Options */}
-          <div className="space-y-4 pt-2 border-t border-slate-100">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0d2546] text-amber-300 font-extrabold text-sm">
-                2
-              </span>
-              <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
-                ตรวจดู Full Video Prompt และตั้งค่าคลิปวิดีโอ
+              <h3 className="text-sm font-bold text-slate-900 mt-0.5">
+                ตรวจสอบ Video Prompt และกำหนดค่าการเรนเดอร์
               </h3>
             </div>
 
-            <textarea
-              rows={4}
-              value={vidFullPrompt}
-              onChange={(e) => setVidFullPrompt(e.target.value)}
-              placeholder="Full Video Prompt สำหรับส่งให้ Agent วิดีโอ (กดปุ่มสีเหลืองด้านบนเพื่อให้ AI เขียนให้ หรือพิมพ์เองได้เลยครับ)"
-              className="w-full rounded-2xl border-2 border-slate-300 p-4 text-base text-slate-800 focus:border-[#0d2546] focus:outline-none"
-            />
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                คำสั่งสร้างวิดีโอฉบับสมบูรณ์ (Full Video Prompt)
+              </label>
+              <textarea
+                rows={4}
+                value={vidFullPrompt}
+                onChange={(e) => setVidFullPrompt(e.target.value)}
+                placeholder="Video Prompt จากขั้นตอนที่ 1 จะแสดงที่นี่ หรือสามารถพิมพ์คำสั่งโดยตรงได้"
+                className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
+              />
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-sm font-extrabold text-slate-700 mb-2">
-                  สัดส่วนวิดีโอ:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setVidAspect('16:9')}
-                    className={`rounded-xl p-3 text-left border-2 cursor-pointer ${
-                      vidAspect === '16:9'
-                        ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                        : 'bg-slate-50 text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    <div className="text-sm font-extrabold">แนวนอน 16:9</div>
-                    <div
-                      className={`text-xs ${
-                        vidAspect === '16:9' ? 'text-amber-300' : 'text-slate-500'
-                      }`}
-                    >
-                      ลงเว็บ / YouTube
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVidAspect('9:16')}
-                    className={`rounded-xl p-3 text-left border-2 cursor-pointer ${
-                      vidAspect === '9:16'
-                        ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                        : 'bg-slate-50 text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    <div className="text-sm font-extrabold">แนวตั้ง 9:16</div>
-                    <div
-                      className={`text-xs ${
-                        vidAspect === '9:16' ? 'text-amber-300' : 'text-slate-500'
-                      }`}
-                    >
-                      TikTok / Reels
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-extrabold text-slate-700 mb-2">
-                  ระบบสร้างวิดีโอ (ดึงรายชื่อโมเดลสดจาก API):
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  โมเดลวิดีโอ (Video Engine)
                 </label>
                 <select
                   value={vidEngine}
                   onChange={(e) => setVidEngine(e.target.value)}
-                  className="w-full rounded-xl border-2 border-slate-300 px-3.5 py-3 text-sm font-extrabold text-[#0d2546] bg-white"
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium text-slate-800"
                 >
-                  <option value="">
-                    ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API ที่เชื่อมต่อ)
-                  </option>
+                  <option value="">อัตโนมัติ (ใช้รุ่นล่าสุดจาก API)</option>
                   {liveVideoModels.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.label}
@@ -999,49 +887,44 @@ export const MediaGenStudio: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-extrabold text-slate-700 mb-2">
-                  ความยาวคลิป:
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  สัดส่วนวิดีโอ
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[5, 6, 8].map((sec) => (
-                    <button
-                      key={sec}
-                      type="button"
-                      onClick={() => setVidDuration(sec)}
-                      className={`rounded-xl py-3 text-sm font-extrabold border-2 cursor-pointer ${
-                        vidDuration === sec
-                          ? 'bg-[#0d2546] text-white border-[#0d2546]'
-                          : 'bg-slate-50 text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      {sec} วินาที
-                    </button>
-                  ))}
-                </div>
+                <select
+                  value={vidAspect}
+                  onChange={(e) => setVidAspect(e.target.value as any)}
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium text-slate-800"
+                >
+                  <option value="16:9">16:9 แนวนอน (YouTube / เว็บไซต์)</option>
+                  <option value="9:16">9:16 แนวตั้ง (Reels / TikTok)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  ความยาวคลิป
+                </label>
+                <select
+                  value={vidDuration}
+                  onChange={(e) => setVidDuration(Number(e.target.value))}
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium text-slate-800"
+                >
+                  <option value={4}>4 วินาที</option>
+                  <option value={6}>6 วินาที (มาตรฐาน)</option>
+                  <option value={8}>8 วินาที</option>
+                </select>
               </div>
             </div>
 
-            {/* Optional Starting Image (Image-to-Video!) */}
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3">
+            {/* Optional Starting Frame */}
+            <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-extrabold text-[#0d2546]">
-                  ภาพต้นแบบฉากแรก (ไม่บังคับ — ถ้าใส่ AI จะสร้างวิดีโอเคลื่อนไหวต่อจากภาพนี้):
-                </div>
-                {vidFirstFrameUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setVidFirstFrameUrl('')}
-                    className="text-xs font-extrabold text-rose-600 hover:underline cursor-pointer"
-                  >
-                    เอาภาพต้นแบบออก
-                  </button>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300 bg-white px-4 py-2.5 text-sm font-extrabold text-[#0d2546] hover:bg-slate-100 cursor-pointer">
-                  <Upload className="w-4 h-4" />
-                  {uploadingFrame ? 'กำลังอัปโหลด...' : 'เลือกรูปจากเครื่อง'}
+                <label className="text-xs font-semibold text-slate-700">
+                  ภาพต้นแบบสำหรับฉากเปิด (Image-to-Video • ไม่บังคับ)
+                </label>
+                <label className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  {uploadingFrame ? 'กำลังอัปโหลด...' : 'อัปโหลดภาพต้นแบบ'}
                   <input
                     type="file"
                     accept="image/*"
@@ -1049,279 +932,276 @@ export const MediaGenStudio: React.FC<Props> = ({
                     className="hidden"
                   />
                 </label>
-
-                {approvedImages.slice(0, 5).map((img) => (
-                  <button
-                    key={img.id}
-                    type="button"
-                    onClick={() => setVidFirstFrameUrl(img.fileUrl)}
-                    title="ใช้รูป AI นี้เป็นภาพเริ่มต้นวิดีโอ"
-                    className={`h-12 w-20 rounded-xl overflow-hidden border-2 cursor-pointer ${
-                      vidFirstFrameUrl === img.fileUrl
-                        ? 'border-amber-500 ring-2 ring-amber-400'
-                        : 'border-slate-200 opacity-80 hover:opacity-100'
-                    }`}
-                  >
-                    <img
-                      src={img.fileUrl}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  </button>
-                ))}
               </div>
 
-              {vidFirstFrameUrl && (
-                <div className="flex items-center gap-3 pt-1">
-                  <img
-                    src={vidFirstFrameUrl}
-                    alt="Selected first frame"
-                    className="h-20 w-36 object-cover rounded-xl border border-slate-300"
-                  />
-                  <span className="text-xs sm:text-sm font-bold text-emerald-700">
-                    ✓ เลือกภาพต้นแบบสำหรับสร้างวิดีโอแล้ว
-                  </span>
-                </div>
-              )}
+              <select
+                value={vidFirstFrameUrl}
+                onChange={(e) => setVidFirstFrameUrl(e.target.value)}
+                className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+              >
+                <option value="">-- ไม่ใช้ภาพต้นแบบ (สร้างจากข้อความล้วน) --</option>
+                {approvedImages.slice(0, 15).map((img) => (
+                  <option key={img.id} value={img.fileUrl}>
+                    ภาพจากคลัง #{img.id}: {(img.thaiSummary || img.prompt).slice(0, 60)}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={handleGenerateVideo}
-                disabled={vidGenerating}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-4 text-lg font-extrabold text-white hover:bg-emerald-700 transition cursor-pointer shadow-md disabled:opacity-50"
-              >
-                {vidGenerating ? (
-                  <>
-                    <RefreshCw className="w-6 h-6 animate-spin" />
-                    Agent กำลังสร้างวิดีโอจริง (รอประมาณ 30-90 วินาที)...
-                  </>
-                ) : (
-                  <>
-                    <Film className="w-6 h-6" />
-                    สั่ง Agent สร้างวิดีโอจริง (พร้อมดูตัวอย่างก่อนตัดสินใจ)
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={vidGenerating}
+              onClick={handleGenerateVideo}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-5 py-3 text-xs sm:text-sm font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
+            >
+              {vidGenerating ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                  กำลังเรนเดอร์ไฟล์วิดีโอ .MP4 (ใช้เวลาประมาณ 20–60 วินาที)...
+                </>
+              ) : (
+                <>
+                  <Film className="w-4 h-4 text-amber-400" />
+                  ดำเนินการเรนเดอร์วิดีโอ
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 3: MULTI-SCENE GOOGLE FLOW FILMMAKING STUDIO                      */}
+      {/* TAB 3: MULTI-SCENE STORYBOARD FLOW STUDIO                             */}
       {/* ===================================================================== */}
       {activeTab === 'flow' && (
         <FlowAndChatStudio
-          onRefreshAll={async () => {
-            await loadData();
-            await onRefreshAll();
-          }}
+          onRefreshAll={onRefreshAll}
           onOpenSettings={onOpenSettings}
           onOpenPost={onPreviewPost}
         />
       )}
 
       {/* ===================================================================== */}
-      {/* SAVED MEDIA GALLERY (RE-PREVIEW, USE IN NEWS, DOWNLOAD, OR DELETE)    */}
+      {/* MEDIA ASSET REGISTRY & ARCHIVE                                        */}
       {/* ===================================================================== */}
-      {activeTab !== 'flow' && (
-        <div className="rounded-3xl bg-white border border-slate-200 p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
-                คลังรูปภาพและวิดีโอ AI ของคุณ ({approvedAssets.length} รายการ)
-              </h3>
-              <p className="text-sm text-slate-500">
-                กดเปิดดูตัวอย่างใหญ่ นำไปใช้ตั้งเป็นปกข่าว/ลงบทความ หรือลบรูปและคลิปที่ไม่ต้องการทิ้งได้ทุกเมื่อ
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {(
-                [
-                  { id: 'all', label: 'ทั้งหมด' },
-                  { id: 'image', label: 'รูปภาพ' },
-                  { id: 'video', label: 'วิดีโอ' },
-                ] as const
-              ).map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setGalleryFilter(f.id)}
-                  className={`rounded-xl px-4 py-2 text-sm font-extrabold cursor-pointer ${
-                    galleryFilter === f.id
-                      ? 'bg-[#0d2546] text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
+      <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900">
+              คลังสื่อดิจิทัลที่สร้างด้วย AI ({approvedAssets.length} รายการ)
+            </h3>
+            <p className="text-xs text-slate-500">
+              จัดการไฟล์ภาพนิ่งและวิดีโอสำหรับนำไปประกอบบทความหรือเผยแพร่บนโซเชียลมีเดีย
+              {pendingReviewAssets.length > 0 &&
+                ` • รอการตรวจสอบ ${pendingReviewAssets.length} รายการ`}
+            </p>
           </div>
 
-          {approvedAssets.length === 0 ? (
-            <div className="rounded-2xl bg-slate-50 border border-dashed border-slate-300 p-10 text-center text-base text-slate-500">
-              ยังไม่มีรูปภาพหรือวิดีโอในคลัง ลองสั่ง Agent สร้างผลงานชิ้นแรกด้านบนได้เลยครับ
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {approvedAssets.map((item) => (
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md">
+            {[
+              { id: 'all', label: 'ทั้งหมด' },
+              { id: 'image', label: 'เฉพาะรูปภาพ' },
+              { id: 'video', label: 'เฉพาะวิดีโอ' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setGalleryFilter(f.id as any)}
+                className={`rounded px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+                  galleryFilter === f.id
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {approvedAssets.length === 0 ? (
+          <div className="rounded-md bg-slate-50 border border-slate-200 p-8 text-center text-xs text-slate-500">
+            ยังไม่มีไฟล์สื่อในคลังสำหรับหมวดหมู่นี้
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {approvedAssets.map((item) => {
+              const isPending = item.reviewStatus === 'pending_review';
+              const isConfirmingDel = confirmDeleteId === item.id;
+
+              return (
                 <div
                   key={item.id}
-                  className="rounded-2xl border border-slate-200 bg-slate-50/60 overflow-hidden flex flex-col justify-between"
+                  className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col justify-between shadow-2xs"
                 >
                   <div>
-                    <div className="relative aspect-video bg-slate-900 flex items-center justify-center overflow-hidden">
+                    <div className="relative aspect-video bg-slate-950 overflow-hidden">
                       {item.mediaType === 'video' ? (
                         <video
                           src={item.fileUrl}
                           controls
-                          className="h-full w-full object-contain"
+                          playsInline
+                          className="h-full w-full object-cover"
                         />
                       ) : (
                         <img
                           src={item.fileUrl}
                           alt={item.thaiSummary || item.prompt}
                           onClick={() => setZoomAsset(item)}
-                          className="h-full w-full object-cover cursor-zoom-in"
+                          className="h-full w-full object-cover cursor-zoom-in hover:scale-[1.01] transition"
                         />
                       )}
-                      <span
-                        className={`absolute top-2.5 left-2.5 rounded-full px-2.5 py-0.5 text-[11px] font-extrabold text-white ${
-                          item.mediaType === 'video' ? 'bg-indigo-600' : 'bg-amber-600'
-                        }`}
-                      >
-                        {item.mediaType === 'video' ? 'วิดีโอ AI' : 'รูปภาพ AI'}
-                      </span>
-                      {item.reviewStatus === 'pending_review' && (
-                        <span className="absolute top-2.5 right-2.5 rounded-full bg-amber-400 px-2.5 py-0.5 text-[11px] font-extrabold text-[#0d2546]">
-                          รอตรวจ
+                      <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                        <span className="rounded bg-slate-900/85 px-2 py-0.5 text-[10px] font-semibold text-white">
+                          {item.mediaType === 'video' ? 'VIDEO' : 'IMAGE'} •{' '}
+                          {item.aspectRatio}
                         </span>
-                      )}
+                        {isPending && (
+                          <span className="rounded bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-slate-950">
+                            รอตรวจสอบ
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="p-3.5 space-y-1">
-                      <div className="text-sm font-extrabold text-[#0d2546] line-clamp-1">
-                        {item.thaiSummary || item.prompt}
+                      <div className="text-[11px] text-slate-400">
+                        {item.engine} • {formatThaiDate(item.createdAt)}
                       </div>
-                      <div className="text-xs text-slate-500">
-                        {formatThaiDate(item.createdAt)} • {item.aspectRatio || '16:9'}
+                      <div className="text-xs font-semibold text-slate-900 line-clamp-2">
+                        {item.thaiSummary || item.prompt}
                       </div>
                     </div>
                   </div>
 
-                  <div className="p-3 pt-0 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveRecheckAsset(item);
-                          recheckRef.current?.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                        className="flex items-center justify-center gap-1.5 rounded-xl bg-white border border-slate-300 px-3 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-100 cursor-pointer"
-                      >
-                        <Eye className="w-4 h-4" /> ดูตัวอย่าง
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleSendAssetToPostEditor(item)}
-                        className="flex items-center justify-center gap-1.5 rounded-xl bg-[#0d2546] px-3 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-[#163a6b] cursor-pointer"
-                      >
-                        <Newspaper className="w-4 h-4 text-amber-300" /> นำไปลงข่าว
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <a
-                        href={item.fileUrl}
-                        download
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-[#0d2546]"
-                      >
-                        <Download className="w-3.5 h-3.5" /> ดาวน์โหลดไฟล์
-                      </a>
-
-                      {confirmDeleteId === item.id ? (
-                        <div className="flex items-center gap-1.5">
+                  <div className="p-3.5 pt-0 space-y-1.5">
+                    {isConfirmingDel ? (
+                      <div className="rounded bg-rose-50 border border-rose-200 p-2 flex items-center justify-between text-xs">
+                        <span className="font-semibold text-rose-800">
+                          ยืนยันลบไฟล์นี้?
+                        </span>
+                        <div className="flex gap-1.5">
                           <button
                             type="button"
-                            disabled={reviewBusyId === item.id}
                             onClick={() => handleDeleteAsset(item)}
-                            className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-extrabold text-white cursor-pointer"
+                            className="rounded bg-rose-600 px-2.5 py-1 font-semibold text-white cursor-pointer"
                           >
-                            ยืนยันลบ
+                            ยืนยัน
                           </button>
                           <button
                             type="button"
                             onClick={() => setConfirmDeleteId(null)}
-                            className="rounded-lg bg-slate-200 px-2 py-1 text-xs font-bold text-slate-700 cursor-pointer"
+                            className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-600 cursor-pointer"
                           >
                             ยกเลิก
                           </button>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(item.id)}
-                          className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:underline cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> ลบทิ้ง
-                        </button>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            disabled={writingNewsForAssetId === item.id}
+                            onClick={() => handleAiWriteNewsWithAsset(item)}
+                            className="inline-flex items-center justify-center gap-1 rounded bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-400" />
+                            {writingNewsForAssetId === item.id
+                              ? 'กำลังร่าง...'
+                              : 'AI ร่างบทความ'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSendAssetToPostEditor(item)}
+                            className="inline-flex items-center justify-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          >
+                            <FilePlus2 className="w-3 h-3" />
+                            แนบลงเนื้อหา
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[11px]">
+                          <div className="flex items-center gap-2">
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => handleApproveAsset(item)}
+                                className="font-semibold text-emerald-700 hover:underline cursor-pointer"
+                              >
+                                อนุมัติ
+                              </button>
+                            )}
+                            <a
+                              href={item.fileUrl}
+                              download
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900"
+                            >
+                              <Download className="w-3 h-3" /> ดาวน์โหลด
+                            </a>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(item.id)}
+                            className="text-rose-600 hover:text-rose-800 cursor-pointer p-1"
+                            title="ลบไฟล์"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-      {/* Fullscreen Image Zoom Lightbox */}
+      {/* Fullscreen Lightbox Modal */}
       {zoomAsset && (
         <div
+          className="fixed inset-0 z-50 bg-slate-950/85 flex items-center justify-center p-4"
           onClick={() => setZoomAsset(null)}
-          className="fixed inset-0 z-50 bg-slate-950/85 p-4 flex flex-col items-center justify-center"
         >
           <div
+            className="max-w-4xl w-full space-y-3"
             onClick={(e) => e.stopPropagation()}
-            className="max-w-5xl w-full flex flex-col items-center gap-4"
           >
             <img
               src={zoomAsset.fileUrl}
-              alt={zoomAsset.thaiSummary || 'Preview'}
-              className="max-h-[80vh] w-auto rounded-2xl shadow-2xl"
+              alt={zoomAsset.thaiSummary || zoomAsset.prompt}
+              className="w-full max-h-[78vh] object-contain rounded-lg bg-black border border-slate-800"
             />
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setZoomAsset(null);
-                  handleSendAssetToPostEditor(zoomAsset);
-                }}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
-              >
-                <Newspaper className="w-4 h-4" /> ชอบ! นำรูปนี้ไปลงข่าว
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteAsset(zoomAsset)}
-                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-extrabold text-white hover:bg-rose-700 cursor-pointer"
-              >
-                <Trash2 className="w-4 h-4" /> ไม่ชอบ — ลบทิ้งทันที
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoomAsset(null)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-white px-5 py-2.5 text-sm font-extrabold text-slate-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" /> ปิดหน้าต่าง
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-xs text-white">
+              <span className="truncate max-w-lg text-slate-300">
+                {zoomAsset.thaiSummary || zoomAsset.prompt}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = zoomAsset;
+                    setZoomAsset(null);
+                    handleSendAssetToPostEditor(target);
+                  }}
+                  className="rounded bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-700 cursor-pointer"
+                >
+                  นำไปสร้างเนื้อหา
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoomAsset(null)}
+                  className="rounded bg-slate-800 px-3 py-1.5 font-semibold text-slate-200 hover:bg-slate-700 cursor-pointer"
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
             </div>
           </div>
         </div>

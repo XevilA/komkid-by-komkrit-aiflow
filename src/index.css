@@ -2,20 +2,20 @@
 
 @layer base {
   body {
-    font-family: 'Prompt', 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Prompt', 'Sarabun', 'Sukhumvit Set', 'Thonburi', -apple-system, BlinkMacSystemFont, sans-serif;
   }
 }
 
 .font-body {
-  font-family: 'Sarabun', 'Prompt', sans-serif;
+  font-family: 'Sarabun', 'Prompt', 'Sukhumvit Set', 'Thonburi', sans-serif;
 }
 
 .font-brush {
-  font-family: 'Sriracha', 'Prompt', cursive;
+  font-family: 'Sriracha', 'Prompt', 'Sukhumvit Set', cursive, sans-serif;
 }
 
 .font-signature {
-  font-family: 'Charm', cursive;
+  font-family: 'Charm', 'Sriracha', 'Sukhumvit Set', cursive, serif;
 }
 
 .no-scrollbar::-webkit-scrollbar {

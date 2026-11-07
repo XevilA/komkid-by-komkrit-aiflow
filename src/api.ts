@@ -209,6 +209,13 @@ export const api = {
       counts: Record<string, number>;
       data: Record<string, any[]>;
     }>('/api/admin/export-json'),
+  exportDatabaseBackup: () =>
+    request<{
+      version: string;
+      exportedAt: string;
+      counts: Record<string, number>;
+      data: Record<string, any[]>;
+    }>('/api/admin/export-json'),
   importCmsBackup: (payload: {
     data: Record<string, any[]>;
     mode?: 'merge' | 'replace';
@@ -220,6 +227,19 @@ export const api = {
         body: JSON.stringify(payload),
       }
     ),
+  importDatabaseBackup: (payload: {
+    data: Record<string, any[]>;
+    mode?: 'merge' | 'replace';
+  }) =>
+    request<{
+      ok: boolean;
+      importedPosts: number;
+      restoredPosts?: number;
+      importedKnowledge: number;
+    }>('/api/admin/import-json', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   uploadFile: async (file: File): Promise<string> => {
     const fd = new FormData();
@@ -231,6 +251,18 @@ export const api = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'อัปโหลดไฟล์ไม่สำเร็จ');
+    return data.url as string;
+  },
+  uploadVideo: async (file: File): Promise<string> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || 'อัปโหลดวิดีโอไม่สำเร็จ');
     return data.url as string;
   },
   uploadImage: async (file: File): Promise<string> => {
@@ -335,13 +367,17 @@ export const api = {
     target: 'image' | 'video';
     sessionId?: string;
     ideaText?: string;
+    userIdea?: string;
     aspectRatio?: '16:9' | '9:16' | '1:1';
     provider?: LlmProviderId;
     model?: string;
   }) =>
     request<AiEvaluatedPrompt>('/api/ai/evaluate-prompt', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        ideaText: payload.ideaText || payload.userIdea,
+      }),
     }),
   draftContentFromChat: (payload: {
     sessionId?: string;
@@ -578,6 +614,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  updateContactStatus: (id: number, status: 'unread' | 'read') =>
+    request<{ ok: boolean }>(`/api/contacts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    }),
   markContactRead: (id: number) =>
     request<{ ok: boolean }>(`/api/contacts/${id}/read`, { method: 'PUT' }),
   deleteContact: (id: number) =>
@@ -586,7 +627,12 @@ export const api = {
   // Multi-Provider AI Engine Settings, Live Model Discovery & Live Connection Tester
   getAiSettings: () => request<AiEngineSettings>('/api/settings/ai'),
   saveAiSettings: (payload: Record<string, any>) =>
-    request<{ ok: boolean }>('/api/settings/ai', {
+    request<AiEngineSettings & { ok: boolean }>('/api/settings/ai', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  updateAiSettings: (payload: Record<string, any>) =>
+    request<AiEngineSettings & { ok: boolean }>('/api/settings/ai', {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
@@ -599,16 +645,31 @@ export const api = {
     apiKey?: string;
     endpoint?: string;
     projectId?: string;
+    vertexProjectId?: string;
     location?: string;
+    vertexLocation?: string;
   }) =>
     request<ProviderLiveCatalog>('/api/ai/models/provider', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        projectId: payload.projectId || payload.vertexProjectId,
+        location: payload.location || payload.vertexLocation,
+      }),
     }),
   testAiProvider: (payload: {
-    provider: 'gemini' | 'claude' | 'deepseek' | 'openai' | 'openai_compatible';
+    provider:
+      | 'gemini'
+      | 'claude'
+      | 'deepseek'
+      | 'openai'
+      | 'openai_compatible'
+      | 'vertex_veo'
+      | 'elevenlabs';
     model?: string;
     apiKey?: string;
+    vertexProjectId?: string;
+    vertexLocation?: string;
   }) =>
     request<{
       ok: boolean;
@@ -617,6 +678,7 @@ export const api = {
       engineLabel: string;
       latencyMs: number;
       sampleReply: string;
+      detail?: string;
     }>('/api/settings/test-provider', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -636,6 +698,11 @@ export const api = {
 
   // Omnichannel Publish & Distribute (8 Channels)
   getChannels: () => request<ChannelConfig[]>('/api/channels'),
+  testChannelConnection: (key: ChannelKey) =>
+    request<{ ok: boolean; channelName?: string; mode?: string; detail: string }>(
+      `/api/channels/${key}/test`,
+      { method: 'POST' }
+    ),
   updateChannel: (
     key: ChannelKey,
     payload: {
@@ -681,6 +748,19 @@ export const api = {
 
   // Audience Surveys & School Feedback
   getSurveys: () => request<AudienceSurvey[]>('/api/surveys'),
+  createSurvey: (payload: {
+    respondentName: string;
+    respondentRole: string;
+    schoolOrOrg?: string;
+    preferredChannel?: string;
+    requestedTopic: string;
+    satisfactionScore: number;
+    feedbackDetail?: string;
+  }) =>
+    request<{ id: number; ok: boolean }>('/api/surveys', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   submitSurvey: (payload: {
     respondentName: string;
     respondentRole: string;

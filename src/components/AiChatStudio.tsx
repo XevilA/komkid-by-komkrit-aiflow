@@ -1687,7 +1687,7 @@ export const AiChatStudio: React.FC<Props> = ({
                   anyApiKeyConfigured ? 'text-emerald-500' : 'text-amber-500'
                 }`}
               >
-                {anyApiKeyConfigured ? '🔒 คีย์เข้ารหัสพร้อมใช้' : 'คลิกตั้งค่าคีย์ AI'}
+                {anyApiKeyConfigured ? 'ตั้งค่าคีย์ API แล้ว' : 'คลิกตั้งค่าคีย์ AI'}
               </div>
             </div>
           </button>
@@ -1860,7 +1860,7 @@ export const AiChatStudio: React.FC<Props> = ({
                         }`}
                       >
                         <option value="">
-                          ✨ อัตโนมัติ (ใช้รุ่นใหม่ล่าสุดจาก API)
+                          อัตโนมัติ (ใช้รุ่นใหม่ล่าสุดจาก API)
                         </option>
                         {currentTextModels.map((m) => (
                           <option key={m.id} value={m.id}>
@@ -2060,11 +2060,11 @@ export const AiChatStudio: React.FC<Props> = ({
               >
                 <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm font-bold">
                   <span
-                    className={`font-extrabold ${
+                    className={`font-semibold ${
                       isDark ? 'text-emerald-300' : 'text-emerald-950'
                     }`}
                   >
-                    🤖 ทีม Agent ทำงานร่วมกัน:
+                    ระบบ Multi-Agent อัตโนมัติ:
                   </span>
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -2307,19 +2307,19 @@ export const AiChatStudio: React.FC<Props> = ({
                 <div ref={actionPanelRef} className="space-y-5">
                   {/* 0) LIVE MULTI-AGENT TEAM PROGRESS CARD */}
                   {teamSteps.length > 0 && (
-                    <div className="rounded-3xl border-2 border-emerald-500 bg-white text-slate-900 p-5 shadow-lg space-y-3">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className="rounded-lg border border-slate-200 bg-white text-slate-900 p-5 shadow-xs space-y-3">
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                         <div className="flex items-center gap-2">
-                          <Layers className="w-5 h-5 text-emerald-600" />
-                          <h3 className="text-base sm:text-lg font-extrabold text-[#0d2546]">
-                            สถานะการทำงานร่วมกันของทีม AI Agent
+                          <Layers className="w-4 h-4 text-slate-700" />
+                          <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                            สถานะการประมวลผลของระบบ Multi-Agent
                           </h3>
                         </div>
                         {!teamRunning && (
                           <button
                             type="button"
                             onClick={() => setTeamSteps([])}
-                            className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                            className="text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
                           >
                             ซ่อนสถานะ
                           </button>
@@ -2330,31 +2330,31 @@ export const AiChatStudio: React.FC<Props> = ({
                         {teamSteps.map((st) => (
                           <div
                             key={st.id}
-                            className={`rounded-2xl border px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs sm:text-sm ${
+                            className={`rounded-md border px-3.5 py-2.5 flex items-start justify-between gap-3 text-xs ${
                               st.status === 'done'
                                 ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950'
                                 : st.status === 'running'
-                                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                                ? 'border-amber-200 bg-amber-50/70 text-amber-950'
                                 : st.status === 'error'
                                 ? 'border-rose-200 bg-rose-50 text-rose-900'
                                 : 'border-slate-200 bg-slate-50 text-slate-600'
                             }`}
                           >
                             <div className="space-y-0.5">
-                              <div className="font-extrabold flex items-center gap-2">
+                              <div className="font-semibold flex items-center gap-2">
                                 {st.status === 'running' && (
-                                  <RefreshCw className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600 shrink-0" />
                                 )}
                                 {st.status === 'done' && (
-                                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                 )}
                                 {st.status === 'error' && (
-                                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                                 )}
                                 <span>{st.label}</span>
                               </div>
                               {st.detail && (
-                                <div className="text-xs opacity-85 pl-6">{st.detail}</div>
+                                <div className="text-xs opacity-85 pl-5">{st.detail}</div>
                               )}
                             </div>
                           </div>
@@ -2365,70 +2365,70 @@ export const AiChatStudio: React.FC<Props> = ({
 
                   {/* 1) AI PROMPT EVALUATION & DISPATCH TO IMAGE/VDO AGENT */}
                   {evaluatedPrompt && (
-                    <div className="rounded-3xl border-2 border-amber-400 bg-white text-slate-900 p-5 sm:p-6 shadow-xl space-y-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
+                    <div className="rounded-lg border border-slate-200 bg-white text-slate-900 p-5 shadow-xs space-y-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3.5">
                         <div className="space-y-1">
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
-                            <Wand2 className="w-4 h-4" />
-                            AI ประเมินแนวคิดและเขียน Full Prompt เสร็จแล้ว ({evaluatedPrompt.engineUsed})
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                            ผลการวิเคราะห์คำสั่งสร้างสื่อ ({evaluatedPrompt.engineUsed})
                           </span>
-                          <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546]">
+                          <h3 className="text-sm sm:text-base font-bold text-slate-900">
                             {evaluatedPrompt.target === 'image'
-                              ? '🎨 ส่ง Full Prompt ให้ Agent วาดรูปภาพ (และใส่เข้า Content ได้ทันที)'
-                              : '🎬 ส่ง Full Prompt ให้ Agent สร้างวิดีโอ (และใส่เข้า Content ได้ทันที)'}
+                              ? 'ตรวจสอบ Full Prompt สำหรับสร้างภาพประกอบ'
+                              : 'ตรวจสอบ Full Prompt สำหรับสร้างสื่อวิดีโอ'}
                           </h3>
                         </div>
                         <button
                           type="button"
                           onClick={() => setEvaluatedPrompt(null)}
-                          className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 cursor-pointer"
                         >
-                          <X className="w-4 h-4" /> ปิดกล่องนี้
+                          <X className="w-3.5 h-3.5" /> ปิดหน้าต่าง
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="rounded-2xl bg-amber-50/70 border border-amber-200 p-4 space-y-1.5">
-                          <div className="text-sm font-extrabold text-amber-950">
-                            💡 ผลการประเมินแนวคิดโดย AI:
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                        <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-1">
+                          <div className="text-xs font-semibold text-slate-800">
+                            ผลการวิเคราะห์แนวคิด:
                           </div>
-                          <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
+                          <p className="text-xs text-slate-600 leading-relaxed">
                             {evaluatedPrompt.assessmentThai}
                           </p>
                         </div>
-                        <div className="rounded-2xl bg-sky-50/70 border border-sky-200 p-4 space-y-1.5">
-                          <div className="text-sm font-extrabold text-sky-950">
-                            🖼️ ภาพ/ฉากที่จะได้จาก Prompt นี้:
+                        <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-1">
+                          <div className="text-xs font-semibold text-slate-800">
+                            องค์ประกอบภาพและฉากที่จะได้รับ:
                           </div>
-                          <p className="text-sm sm:text-base text-slate-800 leading-relaxed">
+                          <p className="text-xs text-slate-600 leading-relaxed">
                             {evaluatedPrompt.visualSummaryThai}
                           </p>
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="block text-sm font-extrabold text-[#0d2546]">
-                          เลือกสัดส่วนผลงาน:
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-semibold text-slate-700">
+                          สัดส่วนสื่อ (Aspect Ratio)
                         </label>
                         <div className="flex flex-wrap gap-2">
                           {(evaluatedPrompt.target === 'video'
                             ? ([
-                                { id: '16:9', label: 'แนวนอน 16:9 (ลงเว็บ / YouTube)' },
-                                { id: '9:16', label: 'แนวตั้ง 9:16 (คลิปสั้น มือถือ)' },
+                                { id: '16:9', label: 'แนวนอน 16:9 (เว็บไซต์ / YouTube)' },
+                                { id: '9:16', label: 'แนวตั้ง 9:16 (วิดีโอสั้น)' },
                               ] as const)
                             : ([
-                                { id: '16:9', label: 'แนวนอน 16:9 (ภาพปก/ประกอบบนเว็บ)' },
-                                { id: '1:1', label: 'จัตุรัส 1:1 (Facebook / LINE)' },
-                                { id: '9:16', label: 'แนวตั้ง 9:16 (จอมือถือ)' },
+                                { id: '16:9', label: 'แนวนอน 16:9 (ภาพปกบทความ)' },
+                                { id: '1:1', label: 'จัตุรัส 1:1 (โซเชียลมีเดีย)' },
+                                { id: '9:16', label: 'แนวตั้ง 9:16' },
                               ] as const)
                           ).map((opt) => (
                             <button
                               key={opt.id}
                               type="button"
                               onClick={() => setSelectedAspect(opt.id)}
-                              className={`rounded-xl px-4 py-2 text-xs sm:text-sm font-extrabold border-2 transition cursor-pointer ${
+                              className={`rounded-md px-3 py-1.5 text-xs font-semibold border transition cursor-pointer ${
                                 selectedAspect === opt.id
-                                  ? 'bg-[#0d2546] text-white border-[#0d2546]'
+                                  ? 'bg-slate-900 text-white border-slate-900'
                                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                               }`}
                             >
@@ -2438,42 +2438,42 @@ export const AiChatStudio: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="block text-sm font-extrabold text-[#0d2546]">
-                          Full Prompt สำหรับส่งให้ Agent (แก้ไขได้):
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-semibold text-slate-700">
+                          คำสั่งฉบับสมบูรณ์ (Full Prompt)
                         </label>
                         <textarea
-                          rows={4}
+                          rows={3}
                           value={editableFullPrompt}
                           onChange={(e) => setEditableFullPrompt(e.target.value)}
-                          className="w-full rounded-2xl border-2 border-slate-300 p-3.5 text-sm sm:text-base text-slate-800 focus:border-[#0d2546] focus:outline-none"
+                          className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm text-slate-800 focus:border-slate-900 focus:outline-none"
                         />
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2.5">
                         <button
                           type="button"
                           onClick={handleRunMediaAgentNow}
                           disabled={agentGenerating || !editableFullPrompt.trim()}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 transition cursor-pointer shadow-sm disabled:opacity-50"
+                          className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
                         >
                           {agentGenerating ? (
                             <>
-                              <RefreshCw className="w-5 h-5 animate-spin" />
+                              <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
                               {evaluatedPrompt.target === 'image'
-                                ? 'Agent กำลังวาดรูปภาพจริง...'
-                                : 'Agent กำลังสร้างวิดีโอจริง (30-90 วินาที)...'}
+                                ? 'กำลังประมวลผลสร้างรูปภาพ...'
+                                : 'กำลังเรนเดอร์วิดีโอ (30-90 วินาที)...'}
                             </>
                           ) : (
                             <>
-                              <Sparkles className="w-5 h-5" />
+                              <Sparkles className="w-4 h-4 text-amber-400" />
                               {evaluatedPrompt.target === 'image'
                                 ? draftPost
-                                  ? 'สร้างรูปภาพแล้วใส่เข้า Content ด้านล่างทันที'
-                                  : 'ส่งให้ Agent สร้างรูปภาพทันที'
+                                  ? 'สร้างรูปภาพและแทรกลงเนื้อหา'
+                                  : 'ดำเนินการสร้างรูปภาพ'
                                 : draftPost
-                                ? 'สร้างวิดีโอแล้วใส่เข้า Content ด้านล่างทันที'
-                                : 'ส่งให้ Agent สร้างวิดีโอทันที'}
+                                ? 'สร้างวิดีโอและแทรกลงเนื้อหา'
+                                : 'ดำเนินการสร้างวิดีโอ'}
                             </>
                           )}
                         </button>
@@ -2490,10 +2490,10 @@ export const AiChatStudio: React.FC<Props> = ({
                               suggestedPostTitle: evaluatedPrompt.suggestedPostTitle,
                             })
                           }
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-[#0d2546] bg-white px-4 py-3 text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 transition cursor-pointer"
+                          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
                         >
-                          เปิดในสตูดิโอรูป/วิดีโอเต็ม
-                          <ArrowRight className="w-4 h-4" />
+                          เปิดในสตูดิโอผลิตสื่อ
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -2501,65 +2501,65 @@ export const AiChatStudio: React.FC<Props> = ({
 
                   {/* 2) RECHECK & PREVIEW BOX FOR GENERATED IMAGE OR VIDEO */}
                   {previewAsset && (
-                    <div className="rounded-2xl border border-slate-200/90 bg-white text-slate-900 p-5 sm:p-6 shadow-md space-y-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="rounded-lg border border-slate-200 bg-white text-slate-900 p-5 shadow-xs space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
                         <div>
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3.5 py-1 text-xs font-extrabold text-emerald-900">
-                            <Eye className="w-4 h-4" /> ตรวจดูตัวอย่างผลงานก่อนนำไปใส่ Content
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            <Eye className="w-3.5 h-3.5 text-amber-600" /> ตรวจสอบตัวอย่างผลงาน
                           </span>
-                          <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546] mt-1">
-                            ผลงาน{previewAsset.mediaType === 'video' ? 'วิดีโอ AI' : 'รูปภาพ AI'}เสร็จแล้ว — กดส่งเข้า Content ได้เลย!
+                          <h3 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
+                            ตัวอย่าง{previewAsset.mediaType === 'video' ? 'สื่อวิดีโอ' : 'ภาพประกอบ'}ที่สร้างเสร็จสมบูรณ์
                           </h3>
                         </div>
                         <button
                           type="button"
                           onClick={() => setPreviewAsset(null)}
-                          className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 cursor-pointer"
                         >
-                          ซ่อนกรอบนี้
+                          ซ่อนหน้าต่าง
                         </button>
                       </div>
 
-                      <div className="rounded-2xl bg-slate-950 p-3 flex items-center justify-center overflow-hidden">
+                      <div className="rounded-md bg-slate-950 p-3 flex items-center justify-center overflow-hidden border border-slate-200">
                         {previewAsset.mediaType === 'video' ? (
                           <video
                             src={previewAsset.fileUrl}
                             controls
                             autoPlay
-                            className="max-h-[420px] w-auto rounded-xl"
+                            className="max-h-[400px] w-auto rounded"
                           />
                         ) : (
                           <img
                             src={previewAsset.fileUrl}
                             alt={previewAsset.thaiSummary || 'AI Generated'}
-                            className="max-h-[420px] w-auto object-contain rounded-xl"
+                            className="max-h-[400px] w-auto object-contain rounded"
                           />
                         )}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {draftPost ? (
                           <>
                             <button
                               type="button"
                               disabled={reviewBusy}
                               onClick={() => handleInsertAssetIntoDraft(previewAsset, 'both')}
-                              className="flex items-center justify-center gap-2 rounded-2xl bg-[#0d2546] px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-[#163a6b] cursor-pointer"
+                              className="flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
                             >
-                              <Newspaper className="w-5 h-5 text-amber-300" />
+                              <Newspaper className="w-4 h-4 text-amber-400" />
                               {previewAsset.mediaType === 'video'
-                                ? 'แนบ & แทรกวิดีโอเข้า Content ด้านล่าง'
-                                : 'ตั้งเป็นปก & แทรกรูปเข้า Content ด้านล่าง'}
+                                ? 'แนบและแทรกวิดีโอลงเนื้อหา'
+                                : 'ตั้งเป็นภาพปกและแทรกลงเนื้อหา'}
                             </button>
 
                             <button
                               type="button"
                               disabled={reviewBusy}
                               onClick={handleApproveKeepAsset}
-                              className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
+                              className="flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-700 cursor-pointer"
                             >
-                              <CheckCircle2 className="w-5 h-5" />
-                              อนุมัติเก็บไว้ในคลัง AI
+                              <CheckCircle2 className="w-4 h-4" />
+                              อนุมัติเก็บในคลังสื่อ
                             </button>
                           </>
                         ) : (
@@ -2568,17 +2568,17 @@ export const AiChatStudio: React.FC<Props> = ({
                               type="button"
                               disabled={writingAroundAsset}
                               onClick={() => handleWriteContentAroundAsset(previewAsset)}
-                              className="flex items-center justify-center gap-2 rounded-2xl bg-[#0d2546] px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-[#163a6b] cursor-pointer disabled:opacity-50"
+                              className="flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                             >
                               {writingAroundAsset ? (
                                 <>
-                                  <RefreshCw className="w-5 h-5 animate-spin text-amber-300" />
-                                  Agent กำลังเขียน Content พร้อมใส่สื่อนี้...
+                                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                                  กำลังร่างบทความประกอบสื่อ...
                                 </>
                               ) : (
                                 <>
-                                  <Newspaper className="w-5 h-5 text-amber-300" />
-                                  ให้ Agent เขียน Content พร้อมใส่รูป/วิดีโอนี้เลย!
+                                  <Newspaper className="w-4 h-4 text-amber-400" />
+                                  ให้ AI ร่างบทความพร้อมแนบสื่อนี้
                                 </>
                               )}
                             </button>
@@ -2587,10 +2587,10 @@ export const AiChatStudio: React.FC<Props> = ({
                               type="button"
                               disabled={reviewBusy}
                               onClick={handleApproveKeepAsset}
-                              className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
+                              className="flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
                             >
-                              <CheckCircle2 className="w-5 h-5" />
-                              ชอบ! เก็บไว้ในคลัง
+                              <CheckCircle2 className="w-4 h-4" />
+                              อนุมัติเก็บในคลังสื่อ
                             </button>
                           </>
                         )}
@@ -2602,7 +2602,7 @@ export const AiChatStudio: React.FC<Props> = ({
                             setEvaluatedPrompt({
                               target: previewAsset.mediaType === 'video' ? 'video' : 'image',
                               assessmentThai:
-                                'ปรับแก้รายละเอียด Full Prompt ด้านบนแล้วกดสั่งสร้างใหม่ได้เลยครับ',
+                                'ปรับแก้รายละเอียด Full Prompt ด้านบนแล้วกดสั่งสร้างใหม่ได้ทันที',
                               visualSummaryThai: previewAsset.thaiSummary || '',
                               fullPrompt: previewAsset.prompt,
                               recommendedAspectRatio:
@@ -2611,22 +2611,22 @@ export const AiChatStudio: React.FC<Props> = ({
                               engineUsed: previewAsset.model,
                             });
                             setEditableFullPrompt(previewAsset.prompt);
-                            showToast('เปิด Full Prompt ให้แก้ไขด้านบนแล้วครับ');
+                            showToast('เปิด Full Prompt ให้แก้ไขด้านบนแล้ว');
                           }}
-                          className="flex items-center justify-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-950 hover:bg-amber-100 cursor-pointer"
+                          className="flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                         >
-                          <RefreshCw className="w-4 h-4" />
-                          ปรับแก้ Prompt แล้วสร้างใหม่
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          แก้ไข Prompt และสร้างใหม่
                         </button>
 
                         <button
                           type="button"
                           disabled={reviewBusy}
                           onClick={handleRejectDeleteAsset}
-                          className="flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 hover:bg-rose-600 hover:text-white transition cursor-pointer disabled:opacity-50"
+                          className="flex items-center justify-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer disabled:opacity-50"
                         >
-                          <Trash2 className="w-4 h-4" />
-                          ไม่ชอบ — ลบทิ้งทันที
+                          <Trash2 className="w-3.5 h-3.5" />
+                          ลบไฟล์นี้
                         </button>
                       </div>
                     </div>
@@ -2634,14 +2634,14 @@ export const AiChatStudio: React.FC<Props> = ({
 
                   {/* 3) UNIFIED CONTENT + IMAGE + VIDEO STUDIO CARD */}
                   {draftPost && (
-                    <div className="rounded-2xl border border-slate-200/90 bg-white text-slate-900 p-5 sm:p-6 shadow-md space-y-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                    <div className="rounded-lg border border-slate-200 bg-white text-slate-900 p-5 shadow-xs space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
                         <div>
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3.5 py-1 text-xs font-extrabold text-amber-950">
-                            <Newspaper className="w-4 h-4" /> สตูดิโอประกอบร่าง Content + รูปภาพ + วิดีโอ (ในจุดเดียว)
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            <Newspaper className="w-3.5 h-3.5 text-amber-600" /> ร่างเนื้อหาและสื่อประกอบ
                           </span>
-                          <h3 className="text-lg sm:text-xl font-extrabold text-[#0d2546] mt-1">
-                            ตรวจดูเนื้อหา รูปปก รูปประกอบ และวิดีโอ — พร้อมกดลงหน้าเว็บได้ทันที!
+                          <h3 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
+                            ตรวจสอบเนื้อหา ภาพหน้าปก และสื่อวิดีโอก่อนเผยแพร่
                           </h3>
                         </div>
 
@@ -2653,39 +2653,39 @@ export const AiChatStudio: React.FC<Props> = ({
                                 m === 'preview' ? 'edit' : 'preview'
                               )
                             }
-                            className="inline-flex items-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                           >
-                            <Edit3 className="w-4 h-4" />
+                            <Edit3 className="w-3.5 h-3.5" />
                             {draftPreviewMode === 'preview'
-                              ? 'แก้ไขข้อความเอง'
-                              : 'ดูตัวอย่างหน้าอ่านจริง'}
+                              ? 'แก้ไขข้อความ'
+                              : 'ดูตัวอย่างการแสดงผล'}
                           </button>
                           <button
                             type="button"
                             onClick={() => setDraftPost(null)}
-                            className="inline-flex items-center gap-1 rounded-xl bg-rose-50 px-3 py-2 text-xs sm:text-sm font-extrabold text-rose-700 hover:bg-rose-100 cursor-pointer"
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 cursor-pointer"
                           >
-                            <Trash2 className="w-4 h-4" /> ลบร่างนี้
+                            <Trash2 className="w-3.5 h-3.5" /> ยกเลิกร่างนี้
                           </button>
                         </div>
                       </div>
 
                       {/* COLLABORATIVE MEDIA BAR RIGHT ON THE CONTENT DRAFT */}
-                      <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-4">
+                      <div className="rounded-md bg-slate-50 border border-slate-200 p-4 space-y-3.5">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                           {/* Cover Image Preview */}
                           <div className="flex items-center gap-3">
                             <img
                               src={draftCoverUrl}
                               alt="Cover preview"
-                              className="w-32 h-20 object-cover rounded-xl border border-slate-300 shrink-0 bg-[#0d2546]"
+                              className="w-28 h-16 object-cover rounded border border-slate-300 shrink-0 bg-slate-900"
                             />
-                            <div className="text-xs space-y-1">
-                              <div className="font-extrabold text-[#0d2546]">
-                                🖼️ รูปหน้าปก Content
+                            <div className="text-xs space-y-0.5">
+                              <div className="font-semibold text-slate-900">
+                                ภาพหน้าปกเนื้อหา (Cover Image)
                               </div>
                               <div className="text-slate-500">
-                                แสดงเป็นภาพปกบนหน้าแรกของเว็บ
+                                แสดงผลเป็นภาพปกบนหน้าเว็บไซต์หลัก
                               </div>
                             </div>
                           </div>
@@ -2698,46 +2698,46 @@ export const AiChatStudio: React.FC<Props> = ({
                                   src={draftVideoUrl}
                                   controls
                                   playsInline
-                                  className="w-36 h-20 object-cover rounded-xl border border-indigo-300 bg-black shrink-0"
+                                  className="w-32 h-16 object-cover rounded border border-slate-300 bg-black shrink-0"
                                 />
                                 <div className="text-xs space-y-1">
-                                  <div className="font-extrabold text-indigo-950">
-                                    🎬 แนบวิดีโอ AI แล้ว!
+                                  <div className="font-semibold text-slate-900">
+                                    แนบไฟล์วิดีโอหลักแล้ว
                                   </div>
                                   <button
                                     type="button"
                                     onClick={() => setDraftVideoUrl('')}
-                                    className="text-rose-600 font-bold hover:underline cursor-pointer"
+                                    className="text-rose-600 font-semibold hover:underline cursor-pointer"
                                   >
-                                    เอาวิดีโอหลักออก
+                                    นำวิดีโอหลักออก
                                   </button>
                                 </div>
                               </>
                             ) : (
-                              <div className="text-xs text-slate-500 bg-white border border-dashed border-slate-300 rounded-xl px-3.5 py-3 w-full">
-                                ยังไม่มีวิดีโอหลัก — กดปุ่ม <strong>“สร้างวิดีโอใส่ Content นี้”</strong> หรือเลือกจากคลัง AI ด้านล่างได้เลยครับ
+                              <div className="text-xs text-slate-500 bg-white border border-dashed border-slate-300 rounded px-3 py-2.5 w-full">
+                                ยังไม่มีวิดีโอหลัก — สามารถสั่งสร้างวิดีโอประกอบหรือเลือกจากคลังสื่อด้านล่าง
                               </div>
                             )}
                           </div>
                         </div>
 
                         {/* 1-CLICK AGENT COLLABORATION BUTTONS FOR THIS CONTENT */}
-                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200">
+                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
                           <button
                             type="button"
                             onClick={handleGenerateCoverForDraft}
                             disabled={generatingDraftCover}
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-amber-300 cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                           >
                             {generatingDraftCover ? (
                               <>
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                กำลังวาดรูปปก...
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                กำลังสร้างภาพปก...
                               </>
                             ) : (
                               <>
-                                <ImageIcon className="w-4 h-4" />
-                                สั่ง Agent วาดรูปปก
+                                <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                                สร้างภาพปกใหม่
                               </>
                             )}
                           </button>
@@ -2746,17 +2746,17 @@ export const AiChatStudio: React.FC<Props> = ({
                             type="button"
                             onClick={handleGenerateInlineImageForDraft}
                             disabled={generatingDraftInlineImg}
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                           >
                             {generatingDraftInlineImg ? (
                               <>
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                กำลังวาดรูปแทรกเนื้อหา...
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                กำลังสร้างภาพแทรกเนื้อหา...
                               </>
                             ) : (
                               <>
-                                <Sparkles className="w-4 h-4 text-amber-200" />
-                                สั่ง Agent วาดรูปแทรกในเนื้อหา
+                                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                สร้างภาพแทรกในเนื้อหา
                               </>
                             )}
                           </button>
@@ -2765,17 +2765,17 @@ export const AiChatStudio: React.FC<Props> = ({
                             type="button"
                             onClick={handleGenerateVideoForDraft}
                             disabled={generatingDraftVideo}
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-indigo-700 cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                           >
                             {generatingDraftVideo ? (
                               <>
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                กำลังสร้างวิดีโอใส่เนื้อหา...
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                กำลังเรนเดอร์วิดีโอ...
                               </>
                             ) : (
                               <>
-                                <Film className="w-4 h-4" />
-                                สั่ง Agent สร้างวิดีโอใส่ Content นี้
+                                <Film className="w-3.5 h-3.5 text-slate-600" />
+                                สร้างวิดีโอประกอบเนื้อหา
                               </>
                             )}
                           </button>
@@ -2783,31 +2783,31 @@ export const AiChatStudio: React.FC<Props> = ({
                           <button
                             type="button"
                             onClick={() => setShowDraftMediaTray((v) => !v)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#0d2546] bg-white px-3.5 py-2 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-100 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                           >
-                            <FolderOpen className="w-4 h-4 text-amber-600" />
-                            เลือกจากคลังรูป & วิดีโอ AI ({mediaAssets.length})
+                            <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
+                            เลือกจากคลังสื่อ ({mediaAssets.length})
                           </button>
                         </div>
 
-                        {/* SHARED AI MEDIA TRAY (1-Click drop any generated image or video into Content) */}
+                        {/* SHARED AI MEDIA TRAY */}
                         {showDraftMediaTray && (
                           <div className="pt-2 border-t border-slate-200 space-y-2">
-                            <div className="text-xs font-extrabold text-[#0d2546]">
-                              คลิกรูปภาพหรือวิดีโอที่ AI Agent เคยสร้างไว้ เพื่อนำไปใส่ใน Content นี้ทันที:
+                            <div className="text-xs font-semibold text-slate-700">
+                              คลิกเลือกสื่อจากคลังเพื่อนำไปใช้ในเนื้อหานี้:
                             </div>
                             {mediaAssets.length === 0 ? (
-                              <div className="text-xs text-slate-500 py-3">
-                                ยังไม่มีรูปภาพหรือวิดีโอในคลัง กดปุ่มสั่ง Agent สร้างด้านบนได้เลยครับ
+                              <div className="text-xs text-slate-500 py-2">
+                                ยังไม่มีไฟล์สื่อในคลัง
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1">
                                 {mediaAssets.slice(0, 12).map((item) => (
                                   <div
                                     key={item.id}
-                                    className="rounded-xl border border-slate-200 bg-white p-2 space-y-1.5"
+                                    className="rounded-md border border-slate-200 bg-white p-2 space-y-1.5"
                                   >
-                                    <div className="relative aspect-video rounded-lg bg-slate-900 overflow-hidden">
+                                    <div className="relative aspect-video rounded bg-slate-900 overflow-hidden">
                                       {item.mediaType === 'video' ? (
                                         <video
                                           src={item.fileUrl}
@@ -2822,17 +2822,11 @@ export const AiChatStudio: React.FC<Props> = ({
                                           className="h-full w-full object-cover"
                                         />
                                       )}
-                                      <span
-                                        className={`absolute top-1 left-1 rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white ${
-                                          item.mediaType === 'video'
-                                            ? 'bg-indigo-600'
-                                            : 'bg-amber-600'
-                                        }`}
-                                      >
-                                        {item.mediaType === 'video' ? 'VDO' : 'รูป AI'}
+                                      <span className="absolute top-1 left-1 rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                        {item.mediaType === 'video' ? 'VIDEO' : 'IMAGE'}
                                       </span>
                                     </div>
-                                    <div className="text-[11px] font-bold text-slate-700 line-clamp-1">
+                                    <div className="text-[11px] font-medium text-slate-700 line-clamp-1">
                                       {item.thaiSummary || item.prompt}
                                     </div>
                                     <div className="flex gap-1">
@@ -2841,18 +2835,18 @@ export const AiChatStudio: React.FC<Props> = ({
                                         onClick={() =>
                                           handleInsertAssetIntoDraft(item, 'cover_or_main')
                                         }
-                                        className="flex-1 rounded-lg bg-[#0d2546] px-2 py-1 text-[11px] font-extrabold text-white hover:bg-[#193d6e] cursor-pointer"
+                                        className="flex-1 rounded bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 cursor-pointer"
                                       >
                                         {item.mediaType === 'video'
-                                          ? 'ตั้งเป็น VDO หลัก'
-                                          : 'ตั้งเป็นปก'}
+                                          ? 'ตั้งเป็นวิดีโอหลัก'
+                                          : 'ตั้งเป็นภาพปก'}
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() =>
                                           handleInsertAssetIntoDraft(item, 'inline_body')
                                         }
-                                        className="flex-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
+                                        className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                                       >
                                         + แทรกในเนื้อหา
                                       </button>
@@ -2866,11 +2860,11 @@ export const AiChatStudio: React.FC<Props> = ({
                       </div>
 
                       {draftPreviewMode === 'edit' ? (
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-3.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                             <div>
-                              <label className="block text-sm font-extrabold text-slate-700 mb-1">
-                                หัวข้อข่าว / ชื่อเรื่อง
+                              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                หัวข้อเนื้อหา
                               </label>
                               <input
                                 type="text"
@@ -2878,12 +2872,12 @@ export const AiChatStudio: React.FC<Props> = ({
                                 onChange={(e) =>
                                   setDraftPost({ ...draftPost, title: e.target.value })
                                 }
-                                className="w-full rounded-xl border-2 border-slate-300 px-3.5 py-2 text-sm sm:text-base font-bold"
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm font-semibold"
                               />
                             </div>
                             <div>
-                              <label className="block text-sm font-extrabold text-slate-700 mb-1">
-                                หมวดหมู่ข่าว
+                              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                หมวดหมู่
                               </label>
                               <select
                                 value={draftPost.category}
@@ -2893,7 +2887,7 @@ export const AiChatStudio: React.FC<Props> = ({
                                     category: e.target.value as CategoryId,
                                   })
                                 }
-                                className="w-full rounded-xl border-2 border-slate-300 px-3.5 py-2 text-sm sm:text-base font-bold bg-white"
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm bg-white"
                               >
                                 {CATEGORIES.map((c) => (
                                   <option key={c.id} value={c.id}>
@@ -2905,7 +2899,7 @@ export const AiChatStudio: React.FC<Props> = ({
                           </div>
 
                           <div>
-                            <label className="block text-sm font-extrabold text-slate-700 mb-1">
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
                               คำโปรยรอง
                             </label>
                             <input
@@ -2914,13 +2908,13 @@ export const AiChatStudio: React.FC<Props> = ({
                               onChange={(e) =>
                                 setDraftPost({ ...draftPost, subtitle: e.target.value })
                               }
-                              className="w-full rounded-xl border-2 border-slate-300 px-3.5 py-2 text-sm sm:text-base"
+                              className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm"
                             />
                           </div>
 
                           <div>
-                            <label className="block text-sm font-extrabold text-slate-700 mb-1">
-                              เนื้อหาฉบับเต็ม (รองรับโค้ดรูป ![คำอธิบาย](url) และวิดีโอ ![วิดีโอ: คำอธิบาย](url))
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              เนื้อหาฉบับเต็ม (Markdown)
                             </label>
                             <textarea
                               rows={10}
@@ -2928,49 +2922,49 @@ export const AiChatStudio: React.FC<Props> = ({
                               onChange={(e) =>
                                 setDraftPost({ ...draftPost, content: e.target.value })
                               }
-                              className="w-full rounded-2xl border-2 border-slate-300 p-3.5 text-sm sm:text-base leading-relaxed"
+                              className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm leading-relaxed"
                             />
                           </div>
                         </div>
                       ) : (
-                        <div className="rounded-2xl border border-slate-200 bg-[#fcfdff] p-5 space-y-3">
-                          <span className="inline-block rounded-full bg-[#0d2546] px-3 py-1 text-xs font-extrabold text-amber-300">
-                            หมวด:{' '}
+                        <div className="rounded-md border border-slate-200 bg-slate-50/40 p-4 space-y-2.5">
+                          <span className="inline-block rounded bg-slate-900 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+                            หมวดหมู่:{' '}
                             {CATEGORIES.find((c) => c.id === draftPost.category)?.nameTh ||
                               'การศึกษา'}
                           </span>
-                          <h4 className="text-xl font-extrabold text-[#0d2546]">
+                          <h4 className="text-base sm:text-lg font-bold text-slate-900">
                             {draftPost.title}
                           </h4>
                           {draftPost.subtitle && (
-                            <p className="text-sm sm:text-base font-bold text-slate-600">
+                            <p className="text-xs sm:text-sm font-medium text-slate-600">
                               {draftPost.subtitle}
                             </p>
                           )}
-                          <div className="pt-2 border-t border-slate-100 prose prose-slate max-w-none text-sm sm:text-base leading-relaxed">
+                          <div className="pt-2 border-t border-slate-200/80 prose prose-slate max-w-none text-xs sm:text-sm leading-relaxed">
                             {renderRichMarkdown(draftPost.content)}
                           </div>
                         </div>
                       )}
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                         <button
                           type="button"
                           disabled={publishingDraft}
                           onClick={() => handlePublishDraft('published')}
-                          className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50"
+                          className="flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
                         >
-                          <CheckCircle2 className="w-5 h-5" />
-                          {publishingDraft ? 'กำลังบันทึก...' : 'ชอบ! ลงหน้าเว็บทันที'}
+                          <CheckCircle2 className="w-4 h-4" />
+                          {publishingDraft ? 'กำลังบันทึก...' : 'อนุมัติและเผยแพร่ขึ้นเว็บไซต์'}
                         </button>
 
                         <button
                           type="button"
                           disabled={publishingDraft}
                           onClick={() => handlePublishDraft('draft')}
-                          className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-300 bg-white px-4 py-3.5 text-sm sm:text-base font-extrabold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                          className="flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                         >
-                          เก็บเป็นฉบับร่างไว้ก่อน
+                          บันทึกเป็นฉบับร่าง
                         </button>
 
                         <button
@@ -2988,10 +2982,10 @@ export const AiChatStudio: React.FC<Props> = ({
                               tags: draftPost.tags,
                             })
                           }
-                          className="flex items-center justify-center gap-2 rounded-2xl border-2 border-[#0d2546] bg-white px-4 py-3.5 text-sm sm:text-base font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
+                          className="flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                         >
-                          <Edit3 className="w-5 h-5" />
-                          เปิดในหน้าจัดการข่าวเต็ม
+                          <Edit3 className="w-4 h-4" />
+                          เปิดในหน้าจัดการเนื้อหา
                         </button>
                       </div>
                     </div>

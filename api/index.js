@@ -4883,8 +4883,10 @@ function getAuthSecret() {
   return `komkrit-admin-hmac-${process.env.VERCEL_PROJECT_ID || "local-secret-key-2026"}`;
 }
 function getAdminCredentials() {
-  const username = getSettingValue("admin_username", "ADMIN_USERNAME") || "admin";
-  const password = getSettingValue("admin_password", "ADMIN_PASSWORD") || "komkrit2026";
+  const rawUser = getSettingValue("admin_username", "ADMIN_USERNAME");
+  const rawPass = getSettingValue("admin_password", "ADMIN_PASSWORD");
+  const username = rawUser && rawUser !== "change-me-admin" ? rawUser : "admin";
+  const password = rawPass && rawPass !== "change-me-strong-password" ? rawPass : "komkrit2026";
   return { username, password };
 }
 function safeEqual(a, b) {

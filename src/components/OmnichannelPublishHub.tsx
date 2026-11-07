@@ -44,44 +44,44 @@ const CHANNEL_STYLE: Record<
   { badgeBg: string; shortIcon: string; hint: string }
 > = {
   youtube: {
-    badgeBg: 'bg-[#ef4444]',
-    shortIcon: '▶',
-    hint: 'YouTube Data API v3 (อัปโหลดไฟล์วิดีโอ .MP4 จริงด้วย OAuth2 Bearer Token หรือส่งผ่าน Webhook)',
+    badgeBg: 'bg-slate-900',
+    shortIcon: 'YT',
+    hint: 'YouTube Data API v3 (อัปโหลดไฟล์วิดีโอ .MP4 ด้วย OAuth2 Bearer Token หรือส่งผ่าน Webhook)',
   },
   facebook: {
-    badgeBg: 'bg-[#1877f2]',
-    shortIcon: 'f',
-    hint: 'Facebook Graph API v21.0 (ใส่ Page ID + Page Access Token เพื่อโพสต์ข้อความ/รูป/วิดีโอจริงทันที)',
+    badgeBg: 'bg-slate-900',
+    shortIcon: 'FB',
+    hint: 'Facebook Graph API v21.0 (กำหนด Page ID + Page Access Token เพื่อเผยแพร่ข้อความ รูปภาพ หรือวิดีโอ)',
   },
   tiktok: {
     badgeBg: 'bg-slate-900',
-    shortIcon: '♪',
-    hint: 'TikTok Content Posting API v2 (อัปโหลดคลิป .MP4 จริงด้วย User Access Token หรือผ่าน Webhook)',
+    shortIcon: 'TT',
+    hint: 'TikTok Content Posting API v2 (อัปโหลดคลิป .MP4 ด้วย User Access Token หรือผ่าน Webhook)',
   },
   line_oa: {
-    badgeBg: 'bg-[#06c755]',
+    badgeBg: 'bg-slate-900',
     shortIcon: 'LINE',
-    hint: 'LINE Messaging API Broadcast (/v2/bot/message/broadcast — ใส่ Channel Access Token ยิงจริงทันที)',
+    hint: 'LINE Messaging API Broadcast (/v2/bot/message/broadcast — ระบุ Channel Access Token)',
   },
   x_twitter: {
-    badgeBg: 'bg-black',
-    shortIcon: '𝕏',
-    hint: 'X API v2 (/2/tweets — ใส่ OAuth2 User Bearer Token ที่มีสิทธิ์ tweet.write เพื่อโพสต์จริง)',
+    badgeBg: 'bg-slate-900',
+    shortIcon: 'X',
+    hint: 'X API v2 (/2/tweets — ระบุ OAuth2 User Bearer Token ที่มีสิทธิ์ tweet.write)',
   },
   instagram: {
-    badgeBg: 'bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600',
+    badgeBg: 'bg-slate-900',
     shortIcon: 'IG',
-    hint: 'Instagram Graph API (2-Step Media Container + Publish — ใส่ IG Business Account ID + Token + URL รูป/วิดีโอ)',
+    hint: 'Instagram Graph API (ระบุ IG Business Account ID + Access Token)',
   },
   website_blog: {
-    badgeBg: 'bg-[#0d2546]',
-    shortIcon: '🌐',
-    hint: 'เชื่อมต่อฐานข้อมูล SQLite เว็บไซต์หลัก คมคิด by KOMKRIT 100% (เผยแพร่ขึ้นหน้าเว็บจริงทันที)',
+    badgeBg: 'bg-slate-900',
+    shortIcon: 'WEB',
+    hint: 'เชื่อมต่อฐานข้อมูลเว็บไซต์หลัก (คมคิด by KOMKRIT) โดยตรง',
   },
   email_newsletter: {
-    badgeBg: 'bg-sky-600',
-    shortIcon: '✉️',
-    hint: 'Resend Email API (api.resend.com/emails) ส่งอีเมลจริงถึงสมาชิก Subscribers ทั้งหมดในระบบ',
+    badgeBg: 'bg-slate-900',
+    shortIcon: 'MAIL',
+    hint: 'ส่งจดหมายข่าวไปยังฐานข้อมูลสมาชิกทางอีเมลผ่าน SMTP / Webhook',
   },
 };
 
@@ -96,33 +96,47 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [logs, setLogs] = useState<PublishLog[]>([]);
   const [surveys, setSurveys] = useState<AudienceSurvey[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Composer State
-  const [selectedSource, setSelectedSource] = useState<string>('custom');
+  const [selectedSource, setSelectedSource] = useState<string>('');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [coverImage, setCoverImage] = useState('/images/thumb-ai-edu.jpg');
   const [videoUrl, setVideoUrl] = useState('');
-  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [selectedChannels, setSelectedChannels] = useState<ChannelKey[]>([
     'website_blog',
+    'facebook',
+    'youtube',
+    'line_oa',
   ]);
   const [scheduleMode, setScheduleMode] = useState<'now' | 'schedule'>('now');
-  const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduledAt, setScheduledAt] = useState(
+    new Date(Date.now() + 3600 * 1000).toISOString().slice(0, 16)
+  );
   const [dispatching, setDispatching] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [dispatchNotice, setDispatchNotice] = useState<{
     ok: boolean;
     text: string;
   } | null>(null);
-  const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  // Channel Config Modal
-  const [editingChannel, setEditingChannel] = useState<ChannelConfig | null>(null);
+  const [editingChannel, setEditingChannel] = useState<ChannelConfig | null>(
+    null
+  );
   const [tokenInput, setTokenInput] = useState('');
+  const [testingChannelKey, setTestingChannelKey] =
+    useState<ChannelKey | null>(null);
+  const [channelTestMsg, setChannelTestMsg] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
 
-  // Survey Add / Edit Modal
   const [surveyModalOpen, setSurveyModalOpen] = useState(false);
   const [editingSurveyId, setEditingSurveyId] = useState<number | null>(null);
+  const [confirmDeleteSurveyId, setConfirmDeleteSurveyId] = useState<
+    number | null
+  >(null);
+  const [triggeringTopic, setTriggeringTopic] = useState<string | null>(null);
   const [surveyForm, setSurveyForm] = useState({
     respondentName: '',
     respondentRole: 'ครู / บุคลากรทางการศึกษา',
@@ -132,72 +146,54 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
     satisfactionScore: 5,
     feedbackDetail: '',
   });
-  const [loopLoadingId, setLoopLoadingId] = useState<number | null>(null);
 
-  const loadHub = async (autoSelectConfigured = false) => {
-    const [ch, lg, sv] = await Promise.all([
-      api.getChannels(),
-      api.getPublishLogs(),
-      api.getSurveys(),
-    ]);
-    setChannels(ch);
-    setLogs(lg);
-    setSurveys(sv);
-    if (autoSelectConfigured) {
-      const readyKeys = ch
-        .filter(
-          (c) =>
-            c.channelKey === 'website_blog' ||
-            c.hasAccessToken ||
-            Boolean(c.webhookUrl)
-        )
-        .map((c) => c.channelKey);
-      if (readyKeys.length > 0) {
-        setSelectedChannels(readyKeys);
-      }
+  const loadHub = async () => {
+    setLoading(true);
+    try {
+      const [ch, lg, sv] = await Promise.all([
+        api.getChannels(),
+        api.getPublishLogs(),
+        api.getSurveys(),
+      ]);
+      setChannels(ch);
+      setLogs(lg);
+      setSurveys(sv);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadHub(true);
+    loadHub();
   }, []);
 
   const handleSelectSource = (val: string) => {
     setSelectedSource(val);
-    if (val.startsWith('wf:')) {
-      const wfId = Number(val.slice(3));
-      const wf = workflows.find((w) => w.id === wfId);
-      if (wf) {
-        setTitle(wf.scriptOutput?.selectedTitle || wf.topic);
-        setContent(
-          wf.omnichannelOutput?.facebook?.post ||
-            wf.scriptOutput?.excerpt ||
-            wf.scriptOutput?.fullArticleMarkdown ||
-            ''
-        );
-        setCoverImage(
-          wf.visualOutput?.generatedRealImageUrl ||
-            wf.visualOutput?.generatedSvgDataUrl ||
-            '/images/thumb-ai-edu.jpg'
-        );
-        setVideoUrl(wf.videoOutput?.generatedVideoUrl || '');
-      }
-    } else if (val.startsWith('post:')) {
-      const pId = Number(val.slice(5));
-      const p = posts.find((x) => x.id === pId);
+    if (val.startsWith('post:')) {
+      const id = Number(val.slice(5));
+      const p = posts.find((x) => x.id === id);
       if (p) {
         setTitle(p.title);
-        setContent(`${p.excerpt}\n\n${p.content.slice(0, 600)}`);
-        setCoverImage(p.coverImage || '/images/thumb-ai-edu.jpg');
+        setContent(p.excerpt + '\n\n' + p.content.slice(0, 600));
+        setCoverImage(p.coverImage);
         setVideoUrl(p.videoUrl || '');
       }
+    } else if (val.startsWith('wf:')) {
+      const id = Number(val.slice(3));
+      const w = workflows.find((x) => x.id === id);
+      if (w) {
+        setTitle(w.scriptOutput?.headlines?.[0] || w.topic);
+        setContent(
+          w.publishingOutput?.facebookPost || w.scriptOutput?.hook || w.topic
+        );
+        setCoverImage(
+          w.visualOutput?.generatedRealImageUrl ||
+            w.visualOutput?.suggestedCoverImage ||
+            '/images/thumb-ai-edu.jpg'
+        );
+        setVideoUrl(w.videoOutput?.generatedVideoUrl || '');
+      }
     }
-  };
-
-  const toggleChannelSelection = (key: ChannelKey) => {
-    setSelectedChannels((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
   };
 
   const handleUploadBroadcasterVideo = async (
@@ -206,14 +202,25 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingVideo(true);
+    setDispatchNotice(null);
     try {
-      const url = await api.uploadFile(file);
+      const url = await api.uploadVideo(file);
       setVideoUrl(url);
+      setDispatchNotice({
+        ok: true,
+        text: `อัปโหลดไฟล์วิดีโอ (${url}) เรียบร้อยแล้ว`,
+      });
     } catch (err) {
       setDispatchNotice({ ok: false, text: (err as Error).message });
     } finally {
       setUploadingVideo(false);
     }
+  };
+
+  const toggleSelectChannel = (key: ChannelKey) => {
+    setSelectedChannels((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
   };
 
   const handleDispatch = async (e: React.FormEvent) => {
@@ -250,17 +257,17 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
       if (scheduleMode === 'schedule') {
         setDispatchNotice({
           ok: true,
-          text: `ตั้งเวลาเผยแพร่ล่วงหน้าครบ ${res.dispatched.length} ช่องทางเรียบร้อยแล้ว!`,
+          text: `บันทึกตารางเวลาเผยแพร่ล่วงหน้าจำนวน ${res.dispatched.length} ช่องทางเรียบร้อยแล้ว`,
         });
       } else if (failedCnt > 0) {
         setDispatchNotice({
           ok: publishedCnt > 0,
-          text: `เผยแพร่จริงสำเร็จ ${publishedCnt} ช่องทาง • ยังไม่สำเร็จ ${failedCnt} ช่องทาง (ดูเหตุผลและตั้งค่า API Token ได้ในประวัติทางขวา)`,
+          text: `เผยแพร่สำเร็จ ${publishedCnt} ช่องทาง • ไม่สำเร็จ ${failedCnt} ช่องทาง (กรุณาตรวจสอบผลการส่งด้านขวา)`,
         });
       } else {
         setDispatchNotice({
           ok: true,
-          text: `ยิง API เผยแพร่จริงสำเร็จครบทั้ง ${publishedCnt} ช่องทาง!`,
+          text: `เผยแพร่เนื้อหาสำเร็จครบทั้ง ${publishedCnt} ช่องทาง`,
         });
       }
       await loadHub();
@@ -307,7 +314,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
     if (editingSurveyId) {
       await api.updateSurvey(editingSurveyId, surveyForm);
     } else {
-      await api.submitSurvey(surveyForm);
+      await api.createSurvey(surveyForm);
     }
     setSurveyModalOpen(false);
     setEditingSurveyId(null);
@@ -321,85 +328,115 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
       feedbackDetail: '',
     });
     await loadHub();
+    await onRefreshAll();
   };
 
+  const handleAiProduceFromSurvey = async (sv: AudienceSurvey) => {
+    setTriggeringTopic(sv.requestedTopic);
+    try {
+      await onTriggerAiFromFeedback(sv.requestedTopic, sv.respondentRole);
+    } finally {
+      setTriggeringTopic(null);
+    }
+  };
+
+  const connectedChannelsCount = channels.filter(
+    (c) =>
+      c.channelKey === 'website_blog' ||
+      c.hasAccessToken ||
+      Boolean(c.webhookUrl)
+  ).length;
+
   return (
-    <div className="space-y-6">
-      {/* HEADER BANNER MATCHING THE RED HIGHLIGHTED BOX IN IMAGE 1 */}
-      <div className="rounded-2xl bg-gradient-to-r from-[#0d2546] via-[#173968] to-[#0d2546] p-5 sm:p-6 text-white shadow-md border-2 border-rose-500/80">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3 py-0.5 text-[11px] font-extrabold text-white">
-              <Share2 className="w-3.5 h-3.5" />
-              PUBLISH & DISTRIBUTE • ระบบเผยแพร่สู่ทุกช่องทางอัตโนมัติ (8 CHANNELS)
-            </span>
-            <h2 className="mt-2 text-xl sm:text-2xl font-extrabold">
-              ศูนย์กระจายคอนเทนต์ 8 แพลตฟอร์ม & วงจรเสียงสะท้อนผู้ชม (Audience Feedback Loop)
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
-              เผยแพร่ทันทีหรือตั้งเวลาล่วงหน้าสู่ YouTube, Facebook, TikTok, LINE OA, X, Instagram, Website/Blog และ Email Newsletter พร้อมรับ Feedback ส่งกลับให้ทีม AI พัฒนาต่อ
-            </p>
+    <div className="space-y-5">
+      {/* Header Summary Card */}
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+        <div>
+          <h2 className="text-sm sm:text-base font-bold text-slate-900">
+            ระบบบริหารช่องทางเผยแพร่ (Omnichannel Publishing)
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            เชื่อมต่อ API ช่องทางโซเชียลมีเดีย กระจายข่าวสารพร้อมกัน และติดตามประวัติการส่งข้อมูล
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-1.5">
+            พร้อมเชื่อมต่อ API:{' '}
+            <strong className="text-slate-900">
+              {connectedChannelsCount} / {channels.length}
+            </strong>{' '}
+            ช่องทาง
           </div>
-          <button
-            onClick={() => setSurveyModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2.5 text-xs font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer shrink-0"
-          >
-            <MessageSquareHeart className="w-4 h-4" />
-            + บันทึกแบบสำรวจผู้เรียน/โรงเรียน
-          </button>
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-1.5">
+            เผยแพร่สำเร็จสะสม:{' '}
+            <strong className="text-emerald-700">
+              {logs.filter((l) => l.status === 'published').length}
+            </strong>{' '}
+            รายการ
+          </div>
         </div>
       </div>
 
-      {/* 8 CHANNELS CONNECTOR GRID (Exact 8 Platforms — 100% Real Status Badges!) */}
+      {/* 8-Channel Configuration Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         {channels.map((ch) => {
-          const st = CHANNEL_STYLE[ch.channelKey] || CHANNEL_STYLE.website_blog;
-          const isDbLive = ch.channelKey === 'website_blog';
-          const statusLabel = isDbLive
-            ? '● เชื่อมต่อฐานข้อมูลเว็บจริง'
-            : ch.hasAccessToken
-            ? '● เชื่อมต่อ Live API Token แล้ว'
-            : ch.webhookUrl
-            ? '● เชื่อมต่อ Webhook จริงแล้ว'
-            : '○ รอใส่ API Token / Webhook';
-          const statusColor =
-            isDbLive || ch.hasAccessToken
-              ? 'text-emerald-700'
+          const st =
+            CHANNEL_STYLE[ch.channelKey] || CHANNEL_STYLE.website_blog;
+          const isReady =
+            ch.channelKey === 'website_blog' ||
+            ch.hasAccessToken ||
+            Boolean(ch.webhookUrl);
+
+          const statusLabel =
+            ch.channelKey === 'website_blog'
+              ? 'เชื่อมต่อฐานข้อมูลหลัก'
+              : ch.hasAccessToken
+              ? `ตั้งค่า API Token แล้ว (${ch.accessTokenMasked})`
               : ch.webhookUrl
-              ? 'text-sky-700'
-              : 'text-amber-700';
+              ? 'เชื่อมต่อ Webhook แล้ว'
+              : 'ยังไม่ได้ตั้งค่า Token';
 
           return (
             <div
-              key={ch.channelKey}
-              className="rounded-2xl bg-white border border-slate-200/90 p-4 shadow-2xs flex flex-col justify-between"
+              key={ch.id}
+              className={`rounded-lg bg-white border p-4 shadow-2xs flex flex-col justify-between transition ${
+                ch.enabled
+                  ? 'border-slate-200'
+                  : 'border-slate-200 bg-slate-50 opacity-70'
+              }`}
             >
               <div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <div
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl text-white text-xs font-extrabold shadow-xs ${st.badgeBg}`}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md text-white text-[11px] font-bold shrink-0 ${st.badgeBg}`}
                     >
                       {st.shortIcon}
                     </div>
-                    <div>
-                      <div className="font-extrabold text-sm text-[#0d2546]">
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-900 truncate">
                         {ch.channelName}
                       </div>
-                      <div className={`text-[10.5px] font-bold ${statusColor}`}>
+                      <div
+                        className={`text-[11px] font-medium truncate ${
+                          isReady ? 'text-emerald-700' : 'text-amber-700'
+                        }`}
+                      >
                         {statusLabel}
                       </div>
                     </div>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
                       setEditingChannel({ ...ch });
                       setTokenInput('');
                     }}
-                    className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
-                    title="ตั้งค่า API Token / Webhook จริง"
+                    className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 transition cursor-pointer shrink-0"
+                    title="ตั้งค่าการเชื่อมต่อ"
                   >
-                    <Settings2 className="w-4 h-4" />
+                    <Settings2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
                 <p className="mt-2.5 text-[11px] text-slate-500 line-clamp-2">
@@ -408,12 +445,12 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               </div>
 
               <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                <span className="truncate text-slate-400 max-w-[150px]">
+                <span className="truncate text-slate-400 max-w-[140px]">
                   {ch.handleOrUrl || 'พร้อมเชื่อมต่อ'}
                 </span>
                 <span
-                  className={`font-bold ${
-                    ch.enabled ? 'text-[#0d2546]' : 'text-slate-400'
+                  className={`font-semibold ${
+                    ch.enabled ? 'text-slate-900' : 'text-slate-400'
                   }`}
                 >
                   {ch.enabled ? 'เปิดใช้งาน' : 'ปิดไว้'}
@@ -424,41 +461,40 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
         })}
       </div>
 
-      {/* OMNICHANNEL COMPOSER & SCHEDULER + PUBLISH LOGS */}
+      {/* Broadcaster Form & Dispatch History */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Left: Broadcaster Form */}
         <form
           onSubmit={handleDispatch}
-          className="lg:col-span-6 rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-4"
+          className="lg:col-span-6 rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4"
         >
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-extrabold text-[#0d2546] flex items-center gap-2">
-              <Send className="w-4 h-4 text-rose-600" />
-              กระจายคอนเทนต์สู่ทุกช่องทาง (Omnichannel Broadcaster)
+          <div className="border-b border-slate-100 pb-3">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <Send className="w-4 h-4 text-slate-700" />
+              ส่งเนื้อหาออกสู่หลายช่องทาง (Omnichannel Broadcaster)
             </h3>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              ดึงเนื้อหาจากแคมเปญ AI หรือโพสต์ที่มีอยู่ (หรือพิมพ์ใหม่ด้านล่าง)
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              ดึงข้อมูลจากเนื้อหาที่มีอยู่หรือแคมเปญ AI
             </label>
             <select
               value={selectedSource}
               onChange={(e) => handleSelectSource(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold focus:border-[#f59e0b] focus:outline-none"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 focus:border-slate-900 focus:outline-none"
             >
-              <option value="custom">-- พิมพ์ข้อความประกาศ/คอนเทนต์ใหม่ด้วยตนเอง --</option>
-              <optgroup label="แคมเปญจากทีม AI Multi-Agent">
+              <option value="">-- กำหนดเนื้อหาเองด้านล่าง หรือเลือกจากรายการ --</option>
+              <optgroup label="แคมเปญจากระบบเวิร์กโฟลว์ AI">
                 {workflows.map((w) => (
                   <option key={`wf:${w.id}`} value={`wf:${w.id}`}>
-                    🤖 [AI Campaign] {w.scriptOutput?.selectedTitle || w.topic}
+                    [AI #{w.id}] {w.topic}
                   </option>
                 ))}
               </optgroup>
-              <optgroup label="บทความและข่าวสารในระบบ CRUD">
+              <optgroup label="เนื้อหาบนเว็บไซต์">
                 {posts.map((p) => (
                   <option key={`post:${p.id}`} value={`post:${p.id}`}>
-                    📄 [Post #{p.id}] {p.title}
+                    [Post #{p.id}] {p.title}
                   </option>
                 ))}
               </optgroup>
@@ -466,43 +502,42 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              หัวข้อหลักสำหรับการเผยแพร่ *
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              หัวข้อ / พาดหัวหลัก <span className="text-rose-600">*</span>
             </label>
             <input
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="เช่น สรุป 5 แนวทางพัฒนาการศึกษายุค AI โดย คมคิด by KOMKRIT"
-              className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold focus:border-[#f59e0b] focus:outline-none"
+              placeholder="ระบุหัวข้อที่ต้องการเผยแพร่"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              เนื้อหา / แคปชัน / ข้อความ Broadcast *
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              เนื้อหาแคปชัน / ข้อความประชาสัมพันธ์
             </label>
             <textarea
               rows={4}
-              required
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="รายละเอียดเนื้อหา ลิงก์ หรือข้อคิดสำคัญ..."
-              className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-body focus:border-[#f59e0b] focus:outline-none"
+              placeholder="พิมพ์เนื้อหาที่ต้องการส่งออกไปยังช่องทางที่เลือก..."
+              className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
             />
           </div>
 
-          {/* Optional Video File (.MP4 for YouTube / TikTok / Facebook / IG) */}
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-extrabold text-[#0d2546] flex items-center gap-1">
-                <Film className="w-3.5 h-3.5 text-purple-600" />
-                ไฟล์วิดีโอ .MP4 แนบโพสต์ (สำหรับ YouTube / TikTok / Facebook / Website)
+          {/* Video Attachment */}
+          <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <Film className="w-3.5 h-3.5 text-slate-500" />
+                ไฟล์วิดีโอแนบ (สำหรับ YouTube, TikTok, Facebook, Instagram)
               </label>
-              <label className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 hover:underline cursor-pointer">
+              <label className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                 <Upload className="w-3 h-3" />
-                {uploadingVideo ? 'อัปโหลด...' : 'อัปโหลด .MP4'}
+                {uploadingVideo ? 'กำลังอัปโหลด...' : 'อัปโหลด .MP4'}
                 <input
                   type="file"
                   accept="video/*"
@@ -515,354 +550,325 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               type="text"
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
-              placeholder="/uploads/videos/... หรือ URL ไฟล์วิดีโอ .mp4 (ไม่บังคับ)"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+              placeholder="URL วิดีโอ หรือไฟล์ /uploads/..."
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
             />
           </div>
 
-          {/* Select Target Channels */}
+          {/* Channel Selection */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-extrabold text-[#0d2546]">
-                เลือกช่องทางที่ต้องการเผยแพร่ ({selectedChannels.length}/8 ช่องทาง)
-              </label>
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedChannels(
-                    selectedChannels.length === 8
-                      ? []
-                      : (channels.map((c) => c.channelKey) as ChannelKey[])
-                  )
-                }
-                className="text-[11px] font-bold text-[#d97706] hover:underline cursor-pointer"
-              >
-                {selectedChannels.length === 8 ? 'ยกเลิกทั้งหมด' : 'เลือกครบทั้ง 8 ช่องทาง'}
-              </button>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              เลือกช่องทางเป้าหมาย ({selectedChannels.length} ช่องทาง)
+            </label>
+            <div className="flex flex-wrap gap-1.5">
               {channels.map((ch) => {
-                const checked = selectedChannels.includes(ch.channelKey);
-                const st = CHANNEL_STYLE[ch.channelKey];
+                const active = selectedChannels.includes(ch.channelKey);
                 return (
                   <button
                     key={ch.channelKey}
                     type="button"
-                    onClick={() => toggleChannelSelection(ch.channelKey)}
-                    className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-xs font-bold transition cursor-pointer ${
-                      checked
-                        ? 'border-[#0d2546] bg-[#0d2546]/5 text-[#0d2546]'
-                        : 'border-slate-200 text-slate-400 opacity-70'
+                    onClick={() => toggleSelectChannel(ch.channelKey)}
+                    className={`rounded-md px-2.5 py-1.5 text-xs font-semibold border transition cursor-pointer ${
+                      active
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    <span
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-[9px] font-extrabold text-white ${st.badgeBg}`}
-                    >
-                      {checked ? '✓' : st.shortIcon.slice(0, 2)}
-                    </span>
-                    <span className="truncate">{ch.channelName}</span>
+                    {ch.channelName}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Publish Now vs Schedule */}
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-2.5">
-            <div className="flex items-center gap-4 text-xs font-bold">
-              <label className="flex items-center gap-1.5 cursor-pointer">
+          {/* Schedule Mode */}
+          <div className="rounded-md bg-slate-50 border border-slate-200 p-3 space-y-2">
+            <div className="flex items-center gap-4 text-xs font-semibold text-slate-700">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
                 <input
                   type="radio"
                   checked={scheduleMode === 'now'}
                   onChange={() => setScheduleMode('now')}
-                  className="accent-[#0d2546]"
+                  className="accent-slate-900"
                 />
-                เผยแพร่ทันที (Publish Now)
+                เผยแพร่ทันที
               </label>
-              <label className="flex items-center gap-1.5 cursor-pointer">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
                 <input
                   type="radio"
                   checked={scheduleMode === 'schedule'}
                   onChange={() => setScheduleMode('schedule')}
-                  className="accent-[#0d2546]"
+                  className="accent-slate-900"
                 />
-                <CalendarClock className="w-3.5 h-3.5 text-amber-600" />
-                ตั้งเวลาเผยแพร่ล่วงหน้า
+                กำหนดเวลาเผยแพร่ล่วงหน้า
               </label>
             </div>
+
             {scheduleMode === 'schedule' && (
               <input
                 type="datetime-local"
-                required
                 value={scheduledAt}
                 onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs"
               />
             )}
           </div>
 
           {dispatchNotice && (
             <div
-              className={`rounded-xl px-4 py-2.5 text-xs font-bold flex items-center gap-2 ${
+              className={`rounded-md p-3 text-xs font-medium ${
                 dispatchNotice.ok
                   ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
-                  : 'bg-amber-50 border border-amber-200 text-amber-950'
+                  : 'bg-amber-50 border border-amber-200 text-amber-900'
               }`}
             >
-              {dispatchNotice.ok ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              ) : (
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              )}
-              <span>{dispatchNotice.text}</span>
+              {dispatchNotice.text}
             </div>
           )}
 
           <button
             type="submit"
             disabled={dispatching || selectedChannels.length === 0}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-[#e88d14] py-3 text-sm font-extrabold text-white shadow-sm hover:brightness-105 transition cursor-pointer disabled:opacity-50"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 py-2.5 text-xs sm:text-sm font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
           >
-            <Send className="w-4 h-4" />
-            {dispatching
-              ? 'กำลังยิง API เผยแพร่จริง...'
-              : scheduleMode === 'schedule'
-              ? `บันทึกคิวตั้งเวลาเผยแพร่จริง (${selectedChannels.length} ช่องทาง)`
-              : `ยิง API เผยแพร่จริงสู่ ${selectedChannels.length} ช่องทางทันที`}
+            {scheduleMode === 'schedule' ? (
+              <>
+                <CalendarClock className="w-4 h-4 text-amber-400" />
+                บันทึกตารางเวลาเผยแพร่ ({selectedChannels.length} ช่องทาง)
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4 text-amber-400" />
+                {dispatching
+                  ? 'กำลังส่งข้อมูลไปยัง API...'
+                  : `ดำเนินการเผยแพร่ทันที (${selectedChannels.length} ช่องทาง)`}
+              </>
+            )}
           </button>
         </form>
 
-        {/* Right: Distribution History & Queue Logs */}
-        <div className="lg:col-span-6 rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-extrabold text-[#0d2546]">
-              ประวัติการยิง API เผยแพร่จริง & คิวตั้งเวลา ({logs.length})
+        {/* Right: Publish Logs */}
+        <div className="lg:col-span-6 rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="text-sm font-bold text-slate-900">
+              ประวัติการเผยแพร่และตารางเวลา ({logs.length})
             </h3>
             <button
-              onClick={() => loadHub()}
-              className="text-xs font-bold text-slate-500 hover:text-[#0d2546] inline-flex items-center gap-1 cursor-pointer"
+              type="button"
+              onClick={loadHub}
+              className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> รีเฟรช
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+              />
+              รีเฟรช
             </button>
           </div>
 
-          <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+          <div className="space-y-2.5 max-h-[540px] overflow-y-auto pr-1">
             {logs.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">
-                ยังไม่มีประวัติการเผยแพร่ — เลือกช่องทางด้านซ้ายแล้วกดยิง API จริงได้เลยครับ
-              </div>
+              <p className="text-xs text-slate-400 text-center py-8">
+                ยังไม่มีประวัติการเผยแพร่
+              </p>
             ) : (
-              logs.map((log) => {
-                const st =
-                  CHANNEL_STYLE[log.channelKey] || CHANNEL_STYLE.website_blog;
-                return (
-                  <div
-                    key={log.id}
-                    className={`rounded-xl border p-3 text-xs ${
-                      log.status === 'failed'
-                        ? 'border-rose-200 bg-rose-50/40'
-                        : 'border-slate-200/80 bg-slate-50/50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`rounded-md px-2 py-0.5 text-[10.5px] font-extrabold text-white ${st.badgeBg}`}
-                        >
-                          {log.channelName}
+              logs.map((lg) => (
+                <div
+                  key={lg.id}
+                  className="rounded-md border border-slate-200 bg-slate-50/50 p-3.5 flex flex-col gap-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="rounded bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                          {lg.channelName}
                         </span>
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            log.status === 'scheduled'
-                              ? 'bg-amber-100 text-amber-900'
-                              : log.status === 'failed'
-                              ? 'bg-rose-100 text-rose-900'
-                              : 'bg-emerald-100 text-emerald-900'
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            lg.status === 'published'
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : lg.status === 'scheduled'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : 'bg-rose-50 text-rose-800 border border-rose-200'
                           }`}
                         >
-                          {log.status === 'scheduled'
-                            ? `⏰ ตั้งเวลา: ${log.scheduledAt}`
-                            : log.status === 'failed'
-                            ? '✗ ยังไม่สำเร็จ / รอตั้งค่าคีย์'
-                            : `✓ เผยแพร่จริงสำเร็จ (${log.mode})`}
+                          {lg.status === 'published'
+                            ? 'สำเร็จ'
+                            : lg.status === 'scheduled'
+                            ? `รอส่ง: ${lg.scheduledAt?.replace('T', ' ')}`
+                            : 'ไม่สำเร็จ'}
                         </span>
                       </div>
+                      <div className="mt-1 font-semibold text-xs text-slate-900">
+                        {lg.title}
+                      </div>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">
+                        {lg.contentSnippet}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {lg.status === 'published' && lg.postId && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenPost(lg.postId!)}
+                          className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                        >
+                          ดูโพสต์
+                        </button>
+                      )}
+                      {lg.status === 'published' &&
+                        lg.publishedUrl &&
+                        lg.publishedUrl.startsWith('http') && (
+                          <a
+                            href={lg.publishedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            ลิงก์ปลายทาง <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
                       <button
+                        type="button"
                         onClick={async () => {
-                          await api.deletePublishLog(log.id);
+                          await api.deletePublishLog(lg.id);
                           await loadHub();
                         }}
-                        className="text-slate-300 hover:text-rose-600 cursor-pointer"
+                        className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="mt-1.5 font-extrabold text-[#0d2546]">
-                      {log.title}
-                    </div>
-                    <p
-                      className={`mt-0.5 text-[11px] ${
-                        log.status === 'failed'
-                          ? 'text-rose-700 font-medium'
-                          : 'text-slate-600'
-                      }`}
-                    >
-                      {log.responseNote}
-                    </p>
-                    <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-slate-400">
-                      <span>{formatThaiDate(log.createdAt)}</span>
-                      <div className="flex items-center gap-2">
-                        {log.postId && (
-                          <button
-                            onClick={() => onOpenPost(log.postId!)}
-                            className="font-bold text-[#0d2546] hover:underline inline-flex items-center gap-0.5 cursor-pointer"
-                          >
-                            <Globe className="w-3 h-3" /> เปิดดูโพสต์บนเว็บ
-                          </button>
-                        )}
-                        {log.externalUrl && log.externalUrl.startsWith('http') && (
-                          <a
-                            href={log.externalUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-bold text-sky-700 hover:underline inline-flex items-center gap-0.5"
-                          >
-                            <ExternalLink className="w-3 h-3" /> เปิดลิงก์ช่องทางจริง
-                          </a>
-                        )}
-                      </div>
-                    </div>
                   </div>
-                );
-              })
+
+                  {lg.errorDetail && (
+                    <div className="rounded bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[11px] text-rose-800 flex items-center justify-between gap-2">
+                      <span>สาเหตุ: {lg.errorDetail}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const found = channels.find(
+                            (c) => c.channelKey === lg.channelKey
+                          );
+                          if (found) {
+                            setEditingChannel({ ...found });
+                            setTokenInput('');
+                          }
+                        }}
+                        className="rounded bg-rose-700 px-2 py-0.5 text-[10px] font-semibold text-white shrink-0 cursor-pointer"
+                      >
+                        ตั้งค่า Token
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))
             )}
           </div>
         </div>
       </div>
 
-      {/* CLOSED-LOOP AUDIENCE FEEDBACK & SCHOOL SURVEYS -> 08 ANALYTICS -> CEO AGENT */}
-      <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Audience Survey & Feedback Loop */}
+      <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
           <div>
-            <span className="rounded-full bg-purple-100 px-3 py-0.5 text-[10.5px] font-extrabold text-purple-900">
-              AUDIENCE FEEDBACK → 08 ANALYTICS AGENT → CEO AGENT
-            </span>
-            <h3 className="mt-1 text-lg font-extrabold text-[#0d2546]">
-              เสียงสะท้อน แบบสำรวจ และการตอบรับจากผู้เรียน / ครู / โรงเรียน ({surveys.length})
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <MessageSquareHeart className="w-4 h-4 text-slate-700" />
+              ข้อมูลสำรวจความต้องการของผู้ติดตาม (Audience Feedback)
             </h3>
-            <p className="text-xs text-slate-500">
-              คลิกปุ่ม <strong>"ส่งโจทย์ให้ CEO Agent สร้างคอนเทนต์"</strong> เพื่อหมุนวงจร Feedback กลับไปสร้างบทความและสื่อการสอนใหม่อัตโนมัติ
+            <p className="text-xs text-slate-500 mt-0.5">
+              รวบรวมหัวข้อที่ผู้เรียนและบุคลากรทางการศึกษาสนใจ เพื่อส่งต่อให้ระบบเวิร์กโฟลว์ AI ผลิตเนื้อหา
             </p>
           </div>
           <button
-            onClick={() => setSurveyModalOpen(true)}
-            className="rounded-xl bg-[#0d2546] px-4 py-2 text-xs font-extrabold text-white hover:bg-[#193d6e] cursor-pointer"
+            type="button"
+            onClick={() => {
+              setEditingSurveyId(null);
+              setSurveyForm({
+                respondentName: '',
+                respondentRole: 'ครู / บุคลากรทางการศึกษา',
+                schoolOrOrg: '',
+                preferredChannel: 'LINE OA',
+                requestedTopic: '',
+                satisfactionScore: 5,
+                feedbackDetail: '',
+              });
+              setSurveyModalOpen(true);
+            }}
+            className="rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
           >
-            + เพิ่มข้อมูลแบบสำรวจผู้เรียน
+            + บันทึกข้อมูลสำรวจใหม่
           </button>
         </div>
 
-        {feedbackError && (
-          <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-900 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span className="font-semibold">{feedbackError}</span>
-            </div>
-            {onOpenSettings && (
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="inline-flex items-center gap-1 rounded-lg bg-[#0d2546] px-3 py-1.5 text-[11px] font-extrabold text-amber-300 hover:bg-[#193d6e] cursor-pointer"
-              >
-                <KeyRound className="w-3.5 h-3.5" /> ไปตั้งค่า API Keys
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {surveys.map((sv) => (
             <div
               key={sv.id}
-              className="rounded-xl border border-purple-200/80 bg-purple-50/30 p-4 flex flex-col justify-between gap-3"
+              className="rounded-md border border-slate-200 p-4 flex flex-col justify-between bg-slate-50/40"
             >
               <div>
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="font-extrabold text-sm text-[#0d2546]">
-                      {sv.respondentName}
-                    </span>
-                    <span className="ml-2 rounded-full bg-purple-100 px-2.5 py-0.5 text-[10.5px] font-bold text-purple-900">
-                      {sv.respondentRole}
-                    </span>
-                  </div>
-                  <span className="text-xs font-extrabold text-amber-600">
-                    ★ {sv.satisfactionScore}/5
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="rounded bg-slate-200/80 px-2 py-0.5 font-semibold text-slate-800">
+                    {sv.respondentRole}
+                  </span>
+                  <span className="text-slate-500">
+                    ความพึงพอใจ {sv.satisfactionScore}/5
                   </span>
                 </div>
-                {sv.schoolOrOrg && (
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    สังกัด/โรงเรียน: {sv.schoolOrOrg} • ช่องทางที่ติดตาม: {sv.preferredChannel}
-                  </div>
-                )}
-                <div className="mt-2 rounded-lg bg-white p-2.5 border border-purple-100">
-                  <div className="text-[10.5px] font-extrabold text-purple-900">
-                    โจทย์/หัวข้อที่ผู้เรียนและโรงเรียนอยากให้ผลิตเพิ่ม:
-                  </div>
-                  <div className="text-xs font-bold text-[#0d2546] mt-0.5">
-                    “{sv.requestedTopic}”
-                  </div>
+
+                <div className="mt-2 font-bold text-xs sm:text-sm text-slate-900">
+                  “{sv.requestedTopic}”
                 </div>
-                {sv.feedbackDetail && (
-                  <p className="mt-2 text-xs text-slate-600 font-body">
-                    ข้อเสนอแนะ: {sv.feedbackDetail}
-                  </p>
-                )}
+                <p className="mt-1 text-xs text-slate-600 line-clamp-2">
+                  {sv.feedbackDetail}
+                </p>
               </div>
 
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-purple-100">
-                <button
-                  disabled={loopLoadingId === sv.id}
-                  onClick={async () => {
-                    setLoopLoadingId(sv.id);
-                    setFeedbackError(null);
-                    try {
-                      await onTriggerAiFromFeedback(
-                        sv.requestedTopic,
-                        sv.respondentRole
-                      );
-                    } catch (err) {
-                      setFeedbackError((err as Error).message);
-                    } finally {
-                      setLoopLoadingId(null);
-                    }
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#0d2546] to-purple-900 px-3.5 py-2 text-xs font-extrabold text-amber-300 hover:brightness-110 transition cursor-pointer disabled:opacity-50"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  {loopLoadingId === sv.id
-                    ? 'กำลังสั่งงานทีม AI...'
-                    : 'ส่งโจทย์ให้ CEO Agent สร้างคอนเทนต์ทันที'}
-                </button>
-                <div className="flex items-center gap-1">
+              <div className="mt-4 pt-2.5 border-t border-slate-200/80 flex items-center justify-between gap-2">
+                <div className="text-[11px] text-slate-500 truncate">
+                  {sv.respondentName} ({sv.schoolOrOrg || sv.preferredChannel})
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    disabled={triggeringTopic === sv.requestedTopic}
+                    onClick={() => handleAiProduceFromSurvey(sv)}
+                    className="inline-flex items-center gap-1 rounded bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    {triggeringTopic === sv.requestedTopic
+                      ? 'กำลังส่ง...'
+                      : 'สั่ง AI ผลิต'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => openEditSurvey(sv)}
-                    className="p-1.5 text-slate-500 hover:text-[#0d2546] cursor-pointer"
-                    title="แก้ไขแบบสำรวจนี้"
+                    className="p-1 text-slate-400 hover:text-slate-800 cursor-pointer"
                   >
-                    <Edit3 className="w-4 h-4" />
+                    <Edit3 className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    onClick={async () => {
-                      await api.deleteSurvey(sv.id);
-                      await loadHub();
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"
-                    title="ลบแบบสำรวจนี้"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {confirmDeleteSurveyId === sv.id ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await api.deleteSurvey(sv.id);
+                        setConfirmDeleteSurveyId(null);
+                        await loadHub();
+                      }}
+                      className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-semibold text-white cursor-pointer"
+                    >
+                      ยืนยันลบ
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteSurveyId(sv.id)}
+                      className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -870,32 +876,32 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* CHANNEL API & WEBHOOK SETTINGS MODAL */}
+      {/* Channel Configuration Modal */}
       {editingChannel && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-          onClick={() => setEditingChannel(null)}
-        >
-          <div
-            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-lg text-[#0d2546]">
-                ตั้งค่าการเชื่อมต่อช่องทาง: {editingChannel.channelName}
-              </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  CHANNEL API CONFIGURATION
+                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  ตั้งค่าการเชื่อมต่อ {editingChannel.channelName}
+                </h3>
+              </div>
               <button
+                type="button"
                 onClick={() => setEditingChannel(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                className="p-1 rounded-md hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveChannelConfig} className="space-y-3">
+            <form onSubmit={handleSaveChannelConfig} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-bold mb-1">
-                  ชื่อบัญชี / URL ช่องทาง (Handle / Page URL)
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  ชื่อบัญชี / URL ช่องทาง
                 </label>
                 <input
                   type="text"
@@ -906,124 +912,195 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                       handleOrUrl: e.target.value,
                     })
                   }
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1">
-                  Page ID / Channel ID / Business Account ID (สำหรับ Facebook / IG / YouTube)
+              {editingChannel.channelKey !== 'website_blog' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Target ID (Page ID / Channel ID / Business Account ID)
+                    </label>
+                    <input
+                      type="text"
+                      value={editingChannel.targetId || ''}
+                      onChange={(e) =>
+                        setEditingChannel({
+                          ...editingChannel,
+                          targetId: e.target.value,
+                        })
+                      }
+                      placeholder="ระบุรหัสเพจหรือบัญชีปลายทาง"
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      API Access Token / Bearer Token
+                    </label>
+                    <input
+                      type="password"
+                      value={tokenInput}
+                      onChange={(e) => setTokenInput(e.target.value)}
+                      placeholder={
+                        editingChannel.hasAccessToken
+                          ? `บันทึกไว้แล้ว (${editingChannel.accessTokenMasked}) — พิมพ์ใหม่หากต้องการเปลี่ยน`
+                          : 'วาง Access Token ที่นี่'
+                      }
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Webhook URL (Make / Zapier / n8n • ไม่บังคับ)
+                    </label>
+                    <input
+                      type="url"
+                      value={editingChannel.webhookUrl || ''}
+                      onChange={(e) =>
+                        setEditingChannel({
+                          ...editingChannel,
+                          webhookUrl: e.target.value,
+                        })
+                      }
+                      placeholder="https://hook.eu1.make.com/..."
+                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-2 pt-1">
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingChannel.enabled}
+                    onChange={(e) =>
+                      setEditingChannel({
+                        ...editingChannel,
+                        enabled: e.target.checked,
+                      })
+                    }
+                    className="accent-slate-900"
+                  />
+                  เปิดใช้งานช่องทางนี้
                 </label>
-                <input
-                  type="text"
-                  value={editingChannel.targetId}
-                  onChange={(e) =>
-                    setEditingChannel({
-                      ...editingChannel,
-                      targetId: e.target.value,
-                    })
-                  }
-                  placeholder="เช่น Facebook Page ID..."
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
-                />
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1 flex items-center gap-1">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                  API Access Token (เช่น LINE Channel Access Token / FB Page Token)
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingChannel.autoPublishOnApprove}
+                    onChange={(e) =>
+                      setEditingChannel({
+                        ...editingChannel,
+                        autoPublishOnApprove: e.target.checked,
+                      })
+                    }
+                    className="accent-slate-900"
+                  />
+                  เผยแพร่อัตโนมัติเมื่ออนุมัติแคมเปญจากระบบเวิร์กโฟลว์ AI
                 </label>
-                <input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder={
-                    editingChannel.hasAccessToken
-                      ? `บันทึกไว้แล้ว (${editingChannel.accessTokenMasked}) เว้นว่างหากไม่เปลี่ยน`
-                      : 'วาง Access Token เพื่อยิง API จริง (ไม่บังคับ)'
-                  }
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
-                />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold mb-1 flex items-center gap-1">
-                  <Webhook className="w-3.5 h-3.5 text-sky-600" />
-                  Automation Webhook URL (รองรับ n8n / Make.com / Zapier)
-                </label>
-                <input
-                  type="text"
-                  value={editingChannel.webhookUrl}
-                  onChange={(e) =>
-                    setEditingChannel({
-                      ...editingChannel,
-                      webhookUrl: e.target.value,
-                    })
-                  }
-                  placeholder="https://hook.make.com/... หรือ https://n8n.../webhook/..."
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
-                />
-              </div>
-
-              <label className="flex items-center gap-2 text-xs font-bold text-[#0d2546] pt-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editingChannel.enabled}
-                  onChange={(e) =>
-                    setEditingChannel({
-                      ...editingChannel,
-                      enabled: e.target.checked,
-                    })
-                  }
-                  className="accent-[#0d2546]"
-                />
-                เปิดใช้งานช่องทางนี้ในระบบกระจายคอนเทนต์อัตโนมัติ
-              </label>
-
-              <div className="pt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingChannel(null)}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold"
+              {channelTestMsg && (
+                <div
+                  className={`rounded-md p-2.5 text-xs font-medium ${
+                    channelTestMsg.ok
+                      ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-900 border border-rose-200'
+                  }`}
                 >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-[#0d2546] px-5 py-2 text-xs font-extrabold text-white cursor-pointer"
-                >
-                  บันทึกการเชื่อมต่อ
-                </button>
+                  {channelTestMsg.text}
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap justify-between gap-2">
+                {editingChannel.channelKey !== 'website_blog' ? (
+                  <button
+                    type="button"
+                    disabled={testingChannelKey === editingChannel.channelKey}
+                    onClick={async () => {
+                      setTestingChannelKey(editingChannel.channelKey);
+                      setChannelTestMsg(null);
+                      try {
+                        await api.updateChannel(editingChannel.channelKey, {
+                          handleOrUrl: editingChannel.handleOrUrl,
+                          enabled: editingChannel.enabled,
+                          autoPublishOnApprove:
+                            editingChannel.autoPublishOnApprove,
+                          targetId: editingChannel.targetId,
+                          webhookUrl: editingChannel.webhookUrl,
+                          accessToken: tokenInput.trim()
+                            ? tokenInput.trim()
+                            : '__KEEP__',
+                        });
+                        const res = await api.testChannelConnection(
+                          editingChannel.channelKey
+                        );
+                        setChannelTestMsg({ ok: res.ok, text: res.detail });
+                        await loadHub();
+                      } catch (e) {
+                        setChannelTestMsg({
+                          ok: false,
+                          text: (e as Error).message,
+                        });
+                      } finally {
+                        setTestingChannelKey(null);
+                      }
+                    }}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                  >
+                    {testingChannelKey === editingChannel.channelKey
+                      ? 'กำลังทดสอบ...'
+                      : 'ทดสอบการเชื่อมต่อ'}
+                  </button>
+                ) : (
+                  <div />
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingChannel(null);
+                      setChannelTestMsg(null);
+                    }}
+                    className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                  >
+                    บันทึกการตั้งค่า
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* SURVEY MODAL */}
+      {/* Survey Modal */}
       {surveyModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-          onClick={() => setSurveyModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-lg text-[#0d2546]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-900">
                 {editingSurveyId
-                  ? 'แก้ไขข้อมูลแบบสำรวจผู้เรียน / ครู / โรงเรียน'
-                  : 'แบบสำรวจความต้องการผู้เรียน / ครู / โรงเรียน'}
+                  ? 'แก้ไขข้อมูลแบบสำรวจ'
+                  : 'บันทึกข้อมูลสำรวจความต้องการใหม่'}
               </h3>
               <button
-                onClick={() => {
-                  setSurveyModalOpen(false);
-                  setEditingSurveyId(null);
-                }}
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                type="button"
+                onClick={() => setSurveyModalOpen(false)}
+                className="p-1 rounded-md hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
             <form onSubmit={handleCreateSurvey} className="space-y-3">
@@ -1033,85 +1110,65 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   required
                   value={surveyForm.respondentName}
                   onChange={(e) =>
-                    setSurveyForm({ ...surveyForm, respondentName: e.target.value })
+                    setSurveyForm({
+                      ...surveyForm,
+                      respondentName: e.target.value,
+                    })
                   }
-                  placeholder="ชื่อผู้ตอบแบบสำรวจ *"
-                  className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                  placeholder="ชื่อผู้ให้ข้อมูล"
+                  className="rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm"
                 />
-                <select
-                  value={surveyForm.respondentRole}
-                  onChange={(e) =>
-                    setSurveyForm({ ...surveyForm, respondentRole: e.target.value })
-                  }
-                  className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
-                >
-                  <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
-                  <option value="นักเรียน / นักศึกษา">นักเรียน / นักศึกษา</option>
-                  <option value="ผู้ปกครอง">ผู้ปกครอง</option>
-                  <option value="ผู้บริหารโรงเรียน">ผู้บริหารโรงเรียน</option>
-                  <option value="ผู้สนใจทั่วไป">ผู้สนใจทั่วไป</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
                   type="text"
                   value={surveyForm.schoolOrOrg}
                   onChange={(e) =>
-                    setSurveyForm({ ...surveyForm, schoolOrOrg: e.target.value })
-                  }
-                  placeholder="ชื่อโรงเรียน / หน่วยงาน"
-                  className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
-                />
-                <select
-                  value={surveyForm.preferredChannel}
-                  onChange={(e) =>
                     setSurveyForm({
                       ...surveyForm,
-                      preferredChannel: e.target.value,
+                      schoolOrOrg: e.target.value,
                     })
                   }
-                  className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
-                >
-                  <option>LINE OA</option>
-                  <option>YouTube</option>
-                  <option>Facebook</option>
-                  <option>TikTok</option>
-                  <option>Website / Blog</option>
-                  <option>Email / Newsletter</option>
-                </select>
+                  placeholder="หน่วยงาน / สถานศึกษา"
+                  className="rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm"
+                />
               </div>
               <input
                 type="text"
                 required
                 value={surveyForm.requestedTopic}
                 onChange={(e) =>
-                  setSurveyForm({ ...surveyForm, requestedTopic: e.target.value })
+                  setSurveyForm({
+                    ...surveyForm,
+                    requestedTopic: e.target.value,
+                  })
                 }
-                placeholder="หัวข้อความรู้หรือปัญหาที่อยากให้ คมคิด นำเสนอ *"
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold"
+                placeholder="หัวข้อหรือประเด็นที่ต้องการให้ผลิตเนื้อหา"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm"
               />
               <textarea
                 rows={3}
                 value={surveyForm.feedbackDetail}
                 onChange={(e) =>
-                  setSurveyForm({ ...surveyForm, feedbackDetail: e.target.value })
+                  setSurveyForm({
+                    ...surveyForm,
+                    feedbackDetail: e.target.value,
+                  })
                 }
-                placeholder="ข้อเสนอแนะเพิ่มเติม..."
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                placeholder="รายละเอียดหรือข้อเสนอแนะเพิ่มเติม..."
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm"
               />
               <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setSurveyModalOpen(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold"
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 cursor-pointer"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-[#0d2546] px-5 py-2 text-xs font-extrabold text-white cursor-pointer"
+                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
                 >
-                  บันทึกแบบสำรวจ
+                  บันทึกข้อมูล
                 </button>
               </div>
             </form>

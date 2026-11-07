@@ -24,7 +24,9 @@ import {
   Download,
   CheckSquare,
   Square,
-  ArrowUpDown,
+  RefreshCw,
+  FolderOpen,
+  X,
 } from 'lucide-react';
 import {
   AiMediaAsset,
@@ -49,18 +51,18 @@ interface Props {
 }
 
 const PRESET_IMAGES = [
-  { label: 'ภาพการศึกษา & AI', url: '/images/thumb-ai-edu.jpg' },
-  { label: 'ภาพอาจารย์คมกฤชบรรยาย', url: '/images/featured-speaker.jpg' },
-  { label: 'ภาพห้องเรียน & โรงเรียน', url: '/images/thumb-school.jpg' },
-  { label: 'ภาพเมืองภูเก็ต & การเรียนรู้', url: '/images/thumb-phuket.jpg' },
-  { label: 'ภาพเทคโนโลยีอนาคต', url: '/images/thumb-agentic.jpg' },
+  { label: 'การศึกษาและเทคโนโลยี AI', url: '/images/thumb-ai-edu.jpg' },
+  { label: 'การบรรยายพิเศษโดยผู้บริหาร', url: '/images/featured-speaker.jpg' },
+  { label: 'การพัฒนาสถานศึกษา', url: '/images/thumb-school.jpg' },
+  { label: 'การเรียนรู้ตลอดชีวิต', url: '/images/thumb-phuket.jpg' },
+  { label: 'นวัตกรรมดิจิทัล', url: '/images/thumb-agentic.jpg' },
 ];
 
 const CONTENT_TYPES: { id: ContentType; label: string; icon: React.ReactNode }[] = [
-  { id: 'news', label: 'ข่าวประชาสัมพันธ์', icon: <Newspaper className="w-4 h-4" /> },
-  { id: 'article', label: 'บทความ / ความรู้', icon: <FileText className="w-4 h-4" /> },
-  { id: 'video', label: 'คลิปวิดีโอ', icon: <Video className="w-4 h-4" /> },
-  { id: 'course', label: 'คอร์ส / งานอบรม', icon: <GraduationCap className="w-4 h-4" /> },
+  { id: 'news', label: 'ข่าวประชาสัมพันธ์', icon: <Newspaper className="w-3.5 h-3.5" /> },
+  { id: 'article', label: 'บทความวิชาการ', icon: <FileText className="w-3.5 h-3.5" /> },
+  { id: 'video', label: 'สื่อวิดีโอ', icon: <Video className="w-3.5 h-3.5" /> },
+  { id: 'course', label: 'หลักสูตรอบรม', icon: <GraduationCap className="w-3.5 h-3.5" /> },
 ];
 
 export const PostCrudManager: React.FC<Props> = ({
@@ -74,53 +76,66 @@ export const PostCrudManager: React.FC<Props> = ({
   onOpenSettings,
 }) => {
   const [search, setSearch] = useState('');
-  const [quickFilter, setQuickFilter] = useState<'all' | 'published' | 'draft' | 'video'>('all');
+  const [quickFilter, setQuickFilter] = useState<
+    'all' | 'published' | 'draft' | 'featured' | 'video'
+  >('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'views_desc' | 'updated_desc' | 'title_asc'>('newest');
-  const [pageSize, setPageSize] = useState<number>(20);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [sortBy, setSortBy] = useState<
+    'newest' | 'oldest' | 'views_desc' | 'title_asc'
+  >('newest');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [bulkCategoryTarget, setBulkCategoryTarget] = useState<CategoryId>('education');
-  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
-
-  // Full-page clean editor mode (no accidental close on outside click!)
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [importingBackup, setImportingBackup] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [showExtraFields, setShowExtraFields] = useState(false);
-  const [previewContentRich, setPreviewContentRich] = useState(false);
-  const [aiMediaAssets, setAiMediaAssets] = useState<AiMediaAsset[]>([]);
-
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [saving, setSaving] = useState(false);
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [generatingAiImage, setGeneratingAiImage] = useState(false);
+  const [aiImagePrompt, setAiImagePrompt] = useState('');
+  const [writingWithAi, setWritingWithAi] = useState(false);
+  const [aiWritePrompt, setAiWritePrompt] = useState('');
+  const [showAiWriterBox, setShowAiWriterBox] = useState(false);
+  const [showAiGalleryPicker, setShowAiGalleryPicker] = useState(false);
+  const [aiMediaLibrary, setAiMediaLibrary] = useState<AiMediaAsset[]>([]);
+  const [showAdvancedFields, setShowAdvancedFields] = useState(false);
+  const [editorPreviewMode, setEditorPreviewMode] = useState<'write' | 'preview'>(
+    'write'
+  );
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const [form, setForm] = useState({
     title: '',
     subtitle: '',
     excerpt: '',
     content: '',
-    category: 'education' as CategoryId,
+    category: 'ai-tech' as CategoryId,
     contentType: 'news' as ContentType,
     coverImage: '/images/thumb-ai-edu.jpg',
     videoUrl: '',
     audioUrl: '',
-    tagsText: 'คมคิด by KOMKRIT, การศึกษา',
+    tagsInput: 'คมคิด by KOMKRIT, การศึกษาไทย',
     author: 'คมกฤช (Komkrit)',
     status: 'published' as PostStatus,
     isFeatured: false,
   });
 
-  const loadSharedAiMedia = async () => {
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 4000);
+  };
+
+  const loadAiMediaLibrary = async () => {
     try {
-      const items = await api.getMediaAssets();
-      setAiMediaAssets(
-        items.filter((m) => m.mediaType === 'image' || m.mediaType === 'video')
+      const list = await api.getMediaAssets();
+      setAiMediaLibrary(
+        list.filter((a) => a.mediaType === 'image' || a.mediaType === 'video')
       );
     } catch {
       // ignore
@@ -129,71 +144,72 @@ export const PostCrudManager: React.FC<Props> = ({
 
   useEffect(() => {
     if (editorOpen) {
-      loadSharedAiMedia();
+      loadAiMediaLibrary();
     }
   }, [editorOpen]);
 
   useEffect(() => {
     if (initialEditPost) {
       openEdit(initialEditPost);
-      onClearInitialEdit?.();
-    } else if (prefillNewPost) {
-      setEditingId(null);
+      if (onClearInitialEdit) onClearInitialEdit();
+    }
+  }, [initialEditPost]);
+
+  useEffect(() => {
+    if (prefillNewPost) {
+      setEditingPost(null);
       setErrorMsg(null);
-      setPreviewContentRich(false);
-      setShowExtraFields(Boolean(prefillNewPost.videoUrl || prefillNewPost.subtitle));
+      setAiImagePrompt('');
+      setEditorPreviewMode('write');
       setForm({
         title: prefillNewPost.title || '',
         subtitle: prefillNewPost.subtitle || '',
         excerpt: prefillNewPost.excerpt || '',
         content: prefillNewPost.content || '',
-        category: prefillNewPost.category || 'education',
-        contentType:
-          prefillNewPost.contentType ||
-          (prefillNewPost.videoUrl ? 'video' : 'news'),
+        category: (prefillNewPost.category as CategoryId) || 'ai-tech',
+        contentType: (prefillNewPost.contentType as ContentType) || 'news',
         coverImage: prefillNewPost.coverImage || '/images/thumb-ai-edu.jpg',
         videoUrl: prefillNewPost.videoUrl || '',
         audioUrl: prefillNewPost.audioUrl || '',
-        tagsText:
-          Array.isArray(prefillNewPost.tags) && prefillNewPost.tags.length > 0
-            ? prefillNewPost.tags.join(', ')
-            : 'คมคิด by KOMKRIT, ข่าวการศึกษา',
+        tagsInput: (
+          prefillNewPost.tags || ['คมคิด by KOMKRIT', 'การศึกษาไทย']
+        ).join(', '),
         author: prefillNewPost.author || 'คมกฤช (Komkrit)',
-        status: prefillNewPost.status || 'published',
+        status: (prefillNewPost.status as PostStatus) || 'published',
         isFeatured: Boolean(prefillNewPost.isFeatured),
       });
       setEditorOpen(true);
+      if (onClearInitialEdit) onClearInitialEdit();
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      onClearInitialEdit?.();
-    } else if (openCreateImmediately) {
-      openCreate();
-      onClearInitialEdit?.();
     }
-  }, [initialEditPost, prefillNewPost, openCreateImmediately]);
+  }, [prefillNewPost]);
 
-  const showToast = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => {
-      setSuccessMsg((prev) => (prev === msg ? null : prev));
-    }, 4500);
-  };
+  useEffect(() => {
+    if (openCreateImmediately && !initialEditPost) {
+      openCreate();
+      if (onClearInitialEdit) onClearInitialEdit();
+    }
+  }, [openCreateImmediately]);
 
   const openCreate = () => {
-    setEditingId(null);
+    setEditingPost(null);
     setErrorMsg(null);
-    setShowExtraFields(false);
-    setPreviewContentRich(false);
+    setAiImagePrompt('');
+    setAiWritePrompt('');
+    setShowAiWriterBox(false);
+    setShowAdvancedFields(false);
+    setEditorPreviewMode('write');
     setForm({
       title: '',
       subtitle: '',
       excerpt: '',
       content: '',
-      category: 'education',
+      category: 'ai-tech',
       contentType: 'news',
       coverImage: '/images/thumb-ai-edu.jpg',
       videoUrl: '',
       audioUrl: '',
-      tagsText: 'คมคิด by KOMKRIT, ข่าวการศึกษา',
+      tagsInput: 'คมคิด by KOMKRIT, การศึกษาไทย',
       author: 'คมกฤช (Komkrit)',
       status: 'published',
       isFeatured: false,
@@ -203,10 +219,13 @@ export const PostCrudManager: React.FC<Props> = ({
   };
 
   const openEdit = (p: Post) => {
-    setEditingId(p.id);
+    setEditingPost(p);
     setErrorMsg(null);
-    setPreviewContentRich(false);
-    setShowExtraFields(Boolean(p.videoUrl || p.subtitle));
+    setAiImagePrompt('');
+    setAiWritePrompt('');
+    setShowAiWriterBox(false);
+    setShowAdvancedFields(Boolean(p.subtitle || p.audioUrl));
+    setEditorPreviewMode('write');
     setForm({
       title: p.title,
       subtitle: p.subtitle || '',
@@ -217,7 +236,7 @@ export const PostCrudManager: React.FC<Props> = ({
       coverImage: p.coverImage || '/images/thumb-ai-edu.jpg',
       videoUrl: p.videoUrl || '',
       audioUrl: p.audioUrl || '',
-      tagsText: (p.tags || []).join(', '),
+      tagsInput: (p.tags || []).join(', '),
       author: p.author || 'คมกฤช (Komkrit)',
       status: p.status,
       isFeatured: p.isFeatured,
@@ -248,66 +267,67 @@ export const PostCrudManager: React.FC<Props> = ({
     }));
     showToast(
       asset.mediaType === 'video'
-        ? 'แทรกวิดีโอ AI เข้าไปในเนื้อหาบทความเรียบร้อยแล้ว!'
-        : 'แทรกรูปภาพ AI เข้าไปในเนื้อหาบทความเรียบร้อยแล้ว!'
+        ? 'แทรกวิดีโอลงในเนื้อหาเรียบร้อยแล้ว'
+        : 'แทรกรูปภาพลงในเนื้อหาเรียบร้อยแล้ว'
     );
   };
 
-  const savePostWithStatus = async (targetStatus: PostStatus) => {
+  const handleSave = async (overrideStatus?: PostStatus) => {
     if (!form.title.trim()) {
-      setErrorMsg('กรุณาพิมพ์ "หัวข้อข่าว / ชื่อเรื่อง" ก่อนกดบันทึกครับ');
+      setErrorMsg('กรุณาระบุหัวข้อเนื้อหาก่อนบันทึก');
       return;
     }
-    if (!form.content.trim()) {
-      setErrorMsg('กรุณาพิมพ์ "เนื้อหาข่าว / บทความ" ก่อนกดบันทึกครับ');
-      return;
-    }
-
     setSaving(true);
     setErrorMsg(null);
+    const finalStatus = overrideStatus || form.status;
     try {
-      const cleanPlain = form.content
-        .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
-        .replace(/[#>*_`]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const autoExcerpt =
+        form.excerpt.trim() ||
+        form.content
+          .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+          .replace(/[#>*_`]/g, '')
+          .trim()
+          .slice(0, 170) ||
+        form.title.trim();
+
       const payload: Partial<Post> = {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
-        excerpt: form.excerpt.trim() || cleanPlain.slice(0, 170),
-        content: form.content,
+        excerpt: autoExcerpt,
+        content: form.content.trim() || form.title.trim(),
         category: form.category,
         contentType: form.contentType,
-        coverImage: form.coverImage || '/images/thumb-ai-edu.jpg',
+        coverImage: form.coverImage.trim() || '/images/thumb-ai-edu.jpg',
         videoUrl: form.videoUrl.trim(),
         audioUrl: form.audioUrl.trim(),
-        tags: form.tagsText
+        tags: form.tagsInput
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
         author: form.author.trim() || 'คมกฤช (Komkrit)',
-        status: targetStatus,
+        status: finalStatus,
         isFeatured: form.isFeatured,
       };
 
-      if (editingId) {
-        await api.updatePost(editingId, payload);
-        await onRefresh();
-        setEditorOpen(false);
-        showToast('บันทึกการแก้ไขข่าวเรียบร้อยแล้ว! ข้อมูลอัปเดตบนหน้าเว็บทันที');
+      if (editingPost) {
+        await api.updatePost(editingPost.id, payload);
+        showToast(
+          finalStatus === 'published'
+            ? 'บันทึกและเผยแพร่เนื้อหาเรียบร้อยแล้ว'
+            : 'บันทึกเป็นฉบับร่างเรียบร้อยแล้ว'
+        );
       } else {
         await api.createPost(payload);
-        await onRefresh();
-        setEditorOpen(false);
         showToast(
-          targetStatus === 'published'
-            ? 'ลงข่าวใหม่เรียบร้อยแล้ว! ข่าวขึ้นแสดงบนหน้าเว็บทันที'
-            : 'บันทึกข่าวเก็บไว้เรียบร้อยแล้ว (ยังไม่แสดงบนหน้าเว็บ)'
+          finalStatus === 'published'
+            ? 'สร้างและเผยแพร่เนื้อหาใหม่เรียบร้อยแล้ว'
+            : 'บันทึกเนื้อหาใหม่เป็นฉบับร่างเรียบร้อยแล้ว'
         );
       }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setEditorOpen(false);
+      await onRefresh();
     } catch (err) {
-      setErrorMsg((err as Error).message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง');
+      setErrorMsg((err as Error).message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     } finally {
       setSaving(false);
     }
@@ -321,8 +341,9 @@ export const PostCrudManager: React.FC<Props> = ({
     try {
       const url = await api.uploadImage(file);
       setForm((prev) => ({ ...prev, coverImage: url }));
+      showToast('อัปโหลดรูปภาพปกเรียบร้อยแล้ว');
     } catch (err) {
-      setErrorMsg((err as Error).message);
+      setErrorMsg((err as Error).message || 'อัปโหลดรูปภาพไม่สำเร็จ');
     } finally {
       setUploading(false);
     }
@@ -334,60 +355,90 @@ export const PostCrudManager: React.FC<Props> = ({
     setUploadingVideo(true);
     setErrorMsg(null);
     try {
-      const url = await api.uploadFile(file);
-      setForm((prev) => ({ ...prev, videoUrl: url, contentType: 'video' }));
+      const url = await api.uploadVideo(file);
+      setForm((prev) => ({
+        ...prev,
+        videoUrl: url,
+        contentType: 'video',
+      }));
+      showToast('อัปโหลดไฟล์วิดีโอเรียบร้อยแล้ว');
     } catch (err) {
-      setErrorMsg((err as Error).message);
+      setErrorMsg((err as Error).message || 'อัปโหลดวิดีโอไม่สำเร็จ');
     } finally {
       setUploadingVideo(false);
     }
   };
 
-  const handleAiGenerateFull = async () => {
-    if (!form.title.trim()) {
-      setErrorMsg('กรุณาพิมพ์หัวข้อข่าวด้านล่างก่อน แล้วค่อยกดปุ่มให้ AI ช่วยเขียนครับ');
+  const handleAiWriteArticle = async () => {
+    const topicToWrite = aiWritePrompt.trim() || form.title.trim();
+    if (!topicToWrite) {
+      setErrorMsg('กรุณาระบุหัวข้อหรือประเด็นที่ต้องการให้ AI ร่างเนื้อหา');
       return;
     }
-    setAiLoading(true);
+    setWritingWithAi(true);
     setErrorMsg(null);
     try {
-      const res = await api.aiAssistPost({
-        title: form.title,
-        category: form.category,
-        mode: 'generate_full',
+      const draft = await api.draftContentFromChat({
+        ideaText: topicToWrite,
+        contentFormat: form.contentType === 'news' ? 'news' : 'article',
       });
       setForm((prev) => ({
         ...prev,
-        subtitle: res.subtitle || prev.subtitle,
-        excerpt: res.excerpt || prev.excerpt,
-        content: res.content || prev.content,
-        tagsText: Array.isArray(res.tags) ? res.tags.join(', ') : prev.tagsText,
-        coverImage: res.coverImage || prev.coverImage,
+        title: draft.title || prev.title,
+        subtitle: draft.subtitle || prev.subtitle,
+        excerpt: draft.excerpt || prev.excerpt,
+        content: draft.content || prev.content,
+        category: draft.category || prev.category,
+        tagsInput: (draft.tags || []).join(', ') || prev.tagsInput,
       }));
+      setShowAiWriterBox(false);
+      showToast('ร่างเนื้อหาด้วย AI เรียบร้อยแล้ว สามารถตรวจสอบและแก้ไขได้ทันที');
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
-      setAiLoading(false);
+      setWritingWithAi(false);
     }
   };
 
-  const handleAiGenerateCover = async () => {
-    setAiLoading(true);
+  const handleGenerateAiCover = async () => {
+    const promptText =
+      aiImagePrompt.trim() ||
+      form.title.trim() ||
+      'Modern Thai classroom with AI technology and warm teacher guiding students';
+    setGeneratingAiImage(true);
     setErrorMsg(null);
     try {
-      const res = await api.aiAssistPost({
-        title: form.title || 'คมคิด by KOMKRIT การศึกษายุค AI',
-        category: form.category,
-        mode: 'generate_real_image',
+      const asset = await api.generateRealImage({
+        prompt: promptText,
+        provider: 'gemini',
+        aspectRatio: '16:9',
       });
-      if (res.coverImage) {
-        setForm((prev) => ({ ...prev, coverImage: res.coverImage }));
-      }
-      await loadSharedAiMedia();
+      setForm((prev) => ({ ...prev, coverImage: asset.fileUrl }));
+      await loadAiMediaLibrary();
+      showToast(`สร้างรูปภาพปกด้วย AI (${asset.engine}) สำเร็จ`);
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
-      setAiLoading(false);
+      setGeneratingAiImage(false);
+    }
+  };
+
+  const handleToggleStatus = async (post: Post) => {
+    setBusyId(post.id);
+    setErrorMsg(null);
+    try {
+      const next: PostStatus = post.status === 'published' ? 'draft' : 'published';
+      await api.updatePost(post.id, { status: next });
+      await onRefresh();
+      showToast(
+        next === 'published'
+          ? `เปลี่ยนสถานะ "${post.title}" เป็นเผยแพร่แล้ว`
+          : `เปลี่ยนสถานะ "${post.title}" เป็นฉบับร่างแล้ว`
+      );
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -399,8 +450,8 @@ export const PostCrudManager: React.FC<Props> = ({
       await onRefresh();
       showToast(
         !post.isFeatured
-          ? `ตั้ง "${post.title}" เป็นข่าวเด่นหน้าแรกแล้ว`
-          : 'ยกเลิกการตั้งเป็นข่าวเด่นหน้าแรกแล้ว'
+          ? `ปักหมุด "${post.title}" เป็นเนื้อหาแนะนำแล้ว`
+          : `ยกเลิกปักหมุด "${post.title}" แล้ว`
       );
     } catch (err) {
       setErrorMsg((err as Error).message);
@@ -409,35 +460,14 @@ export const PostCrudManager: React.FC<Props> = ({
     }
   };
 
-  const handleToggleStatus = async (post: Post) => {
+  const executeDelete = async (post: Post) => {
     setBusyId(post.id);
     setErrorMsg(null);
     try {
-      const nextStatus: PostStatus =
-        post.status === 'published' ? 'draft' : 'published';
-      await api.updatePost(post.id, { status: nextStatus });
+      await api.deletePost(post.id);
+      setConfirmDeleteId(null);
       await onRefresh();
-      showToast(
-        nextStatus === 'published'
-          ? `เปิดแสดงข่าว "${post.title}" บนหน้าเว็บแล้ว`
-          : `ซ่อนข่าว "${post.title}" ออกจากหน้าเว็บชั่วคราวแล้ว`
-      );
-    } catch (err) {
-      setErrorMsg((err as Error).message);
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleConfirmDelete = async (id: number) => {
-    setBusyId(id);
-    setErrorMsg(null);
-    try {
-      await api.deletePost(id);
-      setDeleteConfirmId(null);
-      setSelectedIds((prev) => prev.filter((x) => x !== id));
-      await onRefresh();
-      showToast('ลบข่าวออกจากเว็บไซต์เรียบร้อยแล้ว');
+      showToast(`ลบเนื้อหา "${post.title}" เรียบร้อยแล้ว`);
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -451,7 +481,7 @@ export const PostCrudManager: React.FC<Props> = ({
     try {
       const cloned = await api.duplicatePost(post.id);
       await onRefresh();
-      showToast(`คัดลอก "${cloned.title}" เป็นฉบับร่างเรียบร้อยแล้ว`);
+      showToast(`ทำสำเนา "${cloned.title}" เป็นฉบับร่างเรียบร้อยแล้ว`);
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -477,13 +507,13 @@ export const PostCrudManager: React.FC<Props> = ({
       await onRefresh();
       const actionLabel =
         action === 'publish'
-          ? 'เปิดแสดงบนเว็บ'
+          ? 'เผยแพร่เนื้อหา'
           : action === 'draft'
-          ? 'ซ่อนเป็นฉบับร่าง'
+          ? 'เปลี่ยนเป็นฉบับร่าง'
           : action === 'category'
           ? 'ย้ายหมวดหมู่'
-          : 'ลบถาวร';
-      showToast(`ดำเนินการ "${actionLabel}" สำเร็จจำนวน ${res.affected} เรื่อง!`);
+          : 'ลบข้อมูลถาวร';
+      showToast(`ดำเนินการ "${actionLabel}" สำเร็จ ${res.affected} รายการ`);
     } catch (err) {
       setErrorMsg((err as Error).message);
     } finally {
@@ -513,266 +543,576 @@ export const PostCrudManager: React.FC<Props> = ({
   const handleExportBackupJson = async () => {
     setErrorMsg(null);
     try {
-      const snap = await api.exportCmsBackup();
-      const blob = new Blob([JSON.stringify(snap, null, 2)], {
+      const backup = await api.exportDatabaseBackup();
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
         type: 'application/json;charset=utf-8;',
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `komkrit-cms-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `komkrit-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      showToast('ดาวน์โหลดไฟล์สำรองข้อมูล CMS (JSON Backup) เรียบร้อยแล้ว');
+      showToast('ส่งออกไฟล์สำรองฐานข้อมูล (.JSON) สำเร็จ');
     } catch (err) {
       setErrorMsg((err as Error).message);
     }
   };
 
-  const handleImportBackupJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportBackupJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImportingBackup(true);
     setErrorMsg(null);
     try {
-      const raw = await file.text();
-      const parsed = JSON.parse(raw);
-      const dataObj = parsed?.data || (Array.isArray(parsed) ? { posts: parsed } : parsed);
-      const res = await api.importCmsBackup({ data: dataObj, mode: 'merge' });
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const payload = parsed?.data ? parsed.data : parsed;
+      const res = await api.importDatabaseBackup({
+        mode: 'merge',
+        data: payload,
+      });
       await onRefresh();
-      showToast(
-        `นำเข้าข้อมูลสำเร็จ (เพิ่มข่าว/บทความ ${res.importedPosts} เรื่อง, คลังความรู้ ${res.importedKnowledge} รายการ)`
-      );
+      showToast(`นำเข้าข้อมูลสำเร็จ (เพิ่ม/อัปเดต ${res.restoredPosts} รายการ)`);
     } catch (err) {
-      setErrorMsg(`นำเข้าไฟล์ JSON ไม่สำเร็จ: ${(err as Error).message}`);
+      setErrorMsg((err as Error).message || 'ไฟล์สำรองข้อมูลไม่ถูกต้อง');
     } finally {
+      setImportingBackup(false);
       e.target.value = '';
     }
   };
 
   const filtered = posts
     .filter((p) => {
-      if (quickFilter === 'published' && p.status !== 'published') return false;
-      if (quickFilter === 'draft' && p.status !== 'draft') return false;
-      if (quickFilter === 'video' && p.contentType !== 'video' && !p.videoUrl) return false;
+      const matchSearch =
+        !search.trim() ||
+        p.title.toLowerCase().includes(search.toLowerCase()) ||
+        p.excerpt.toLowerCase().includes(search.toLowerCase()) ||
+        (p.tags || []).some((t) => t.toLowerCase().includes(search.toLowerCase()));
+      if (!matchSearch) return false;
+
       if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        return (
-          p.title.toLowerCase().includes(q) ||
-          p.excerpt.toLowerCase().includes(q) ||
-          p.content.toLowerCase().includes(q) ||
-          (p.tags || []).some((t) => t.toLowerCase().includes(q))
-        );
-      }
+
+      if (quickFilter === 'published') return p.status === 'published';
+      if (quickFilter === 'draft') return p.status === 'draft';
+      if (quickFilter === 'featured') return Boolean(p.isFeatured);
+      if (quickFilter === 'video')
+        return p.contentType === 'video' || Boolean(p.videoUrl);
       return true;
     })
     .sort((a, b) => {
-      if (sortBy === 'oldest') {
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      }
-      if (sortBy === 'views_desc') {
-        return (b.views || 0) - (a.views || 0);
-      }
-      if (sortBy === 'updated_desc') {
-        return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
-      }
-      if (sortBy === 'title_asc') {
-        return a.title.localeCompare(b.title, 'th');
-      }
-      if (a.isFeatured !== b.isFeatured) return a.isFeatured ? -1 : 1;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sortBy === 'oldest') return a.id - b.id;
+      if (sortBy === 'views_desc') return (b.views || 0) - (a.views || 0);
+      if (sortBy === 'title_asc') return a.title.localeCompare(b.title, 'th');
+      return b.id - a.id;
     });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedPosts = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const paginatedPosts = filtered.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize
+  );
 
-  const toggleSelectOne = (id: number) => {
+  const toggleSelectId = (id: number) => {
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
 
-  const allFilteredSelected =
-    filtered.length > 0 && filtered.every((p) => selectedIds.includes(p.id));
-
   const toggleSelectAllFiltered = () => {
-    if (allFilteredSelected) {
-      const filteredSet = new Set(filtered.map((p) => p.id));
-      setSelectedIds((prev) => prev.filter((id) => !filteredSet.has(id)));
+    const currentIds = paginatedPosts.map((p) => p.id);
+    const allSelected =
+      currentIds.length > 0 && currentIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !currentIds.includes(id)));
     } else {
-      const merged = new Set([...selectedIds, ...filtered.map((p) => p.id)]);
-      setSelectedIds(Array.from(merged));
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...currentIds])));
     }
   };
 
-  // ============================================================================
-  // VIEW 1: SIMPLE FULL-PAGE WRITE / EDIT SCREEN (ELDER-FRIENDLY, LARGE FONTS!)
-  // ============================================================================
+  const publishedCount = posts.filter((p) => p.status === 'published').length;
+  const draftCount = posts.filter((p) => p.status === 'draft').length;
+  const featuredCount = posts.filter((p) => p.isFeatured).length;
+
+  // =========================================================================
+  // FORMAL 2-COLUMN EDITORIAL FORM VIEW
+  // =========================================================================
   if (editorOpen) {
     return (
-      <div className="max-w-4xl mx-auto space-y-5">
-        {successMsg && (
-          <div className="rounded-2xl bg-emerald-600 text-white px-5 py-3.5 shadow-md flex items-center gap-3 text-sm sm:text-base font-extrabold">
-            <CheckCircle2 className="w-5 h-5 text-amber-300 shrink-0" />
-            <span>{successMsg}</span>
-          </div>
-        )}
-
-        {/* Back button + Clear Heading */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs">
-          <div>
+      <div className="space-y-5">
+        {/* Top Action Bar */}
+        <div className="rounded-lg bg-white border border-slate-200 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setEditorOpen(false)}
-              className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-[#0d2546] mb-1.5 cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
-              กลับไปหน้ารายการข่าวทั้งหมด
+              <ArrowLeft className="w-3.5 h-3.5" />
+              กลับสู่รายการเนื้อหา
             </button>
-            <h2 className="text-xl sm:text-2xl font-extrabold text-[#0d2546]">
-              {editingId ? '✏️ แก้ไขข่าว / บทความ' : '➕ ลงข่าว / เขียนบทความใหม่'}
-            </h2>
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900">
+                {editingPost
+                  ? `แก้ไขเนื้อหา #${editingPost.id}`
+                  : 'สร้างเนื้อหาใหม่'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                กำหนดรายละเอียดเนื้อหา สื่อประกอบ และสถานะการเผยแพร่
+              </p>
+            </div>
           </div>
 
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => savePostWithStatus('published')}
-            className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-6 py-3.5 text-base font-extrabold text-white hover:bg-emerald-700 shadow-sm transition cursor-pointer disabled:opacity-50"
-          >
-            <CheckCircle2 className="w-5 h-5" />
-            {saving
-              ? 'กำลังบันทึก...'
-              : editingId
-              ? 'บันทึกการแก้ไข'
-              : 'ลงข่าวขึ้นหน้าเว็บ'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleSave('draft')}
+              className="rounded-md border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+            >
+              บันทึกฉบับร่าง
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleSave('published')}
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+              {saving ? 'กำลังบันทึก...' : 'บันทึกและเผยแพร่'}
+            </button>
+          </div>
         </div>
 
+        {/* Error Alert */}
         {errorMsg && (
-          <div className="rounded-2xl bg-rose-50 border-2 border-rose-300 p-4 text-sm sm:text-base text-rose-900 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 font-bold">
-              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+          <div className="rounded-lg bg-rose-50 border border-rose-200 p-4 flex flex-wrap items-center justify-between gap-3 text-xs text-rose-800">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
               <span>{errorMsg}</span>
             </div>
-            {onOpenSettings && errorMsg.includes('API Key') && (
+            {errorMsg.includes('API Key') && onOpenSettings && (
               <button
                 type="button"
-                onClick={() => {
-                  setEditorOpen(false);
-                  onOpenSettings();
-                }}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-4 py-2 text-sm font-bold text-amber-300 hover:bg-[#193d6e] cursor-pointer"
+                onClick={onOpenSettings}
+                className="inline-flex items-center gap-1.5 rounded-md bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-800 cursor-pointer"
               >
-                <KeyRound className="w-4 h-4" /> ไปหน้าตั้งค่าคีย์ AI
+                <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Key
               </button>
             )}
           </div>
         )}
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 space-y-7 shadow-2xs">
-          {/* STEP 1: HEADLINE */}
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-base sm:text-lg font-extrabold text-[#0d2546]">
-                1. หัวข้อข่าว หรือ ชื่อบทความ <span className="text-rose-600">*</span>
-              </label>
-              <button
-                type="button"
-                disabled={aiLoading}
-                onClick={handleAiGenerateFull}
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-extrabold text-[#0b1f3a] hover:bg-amber-300 transition cursor-pointer disabled:opacity-50"
-              >
-                <Sparkles className="w-4 h-4" />
-                {aiLoading ? 'AI กำลังเขียนเนื้อหาให้...' : '✨ ให้ AI ช่วยเขียนเนื้อหาจากหัวข้อนี้'}
-              </button>
-            </div>
-            <input
-              type="text"
-              required
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="พิมพ์ชื่อหัวข้อข่าวที่นี่..."
-              className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3.5 text-base sm:text-lg font-bold text-[#0d2546] placeholder:font-normal placeholder:text-slate-400 focus:border-[#0d2546] focus:outline-none"
-            />
-          </div>
+        {/* 2-Column Editorial Workspace */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          {/* Left Column (8 Cols): Main Article Content */}
+          <div className="lg:col-span-8 space-y-5">
+            <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  หัวข้อเนื้อหา / ชื่อเรื่อง <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="ระบุหัวข้อข่าว บทความ หรือชื่อหลักสูตร"
+                  className="w-full rounded-md border border-slate-300 px-3.5 py-2.5 text-sm sm:text-base font-semibold text-slate-900 focus:border-slate-900 focus:outline-none"
+                />
+              </div>
 
-          {/* STEP 2: TYPE & CATEGORY (BIG EASY BUTTONS) */}
-          <div className="space-y-4">
-            <div>
-              <label className="block text-base sm:text-lg font-extrabold text-[#0d2546] mb-2.5">
-                2. ประเภทและหมวดหมู่ของข่าว
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {CONTENT_TYPES.map((ct) => {
-                  const selected = form.contentType === ct.id;
-                  return (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  บทคัดย่อ / คำโปรยสรุป (Excerpt)
+                </label>
+                <textarea
+                  rows={2}
+                  value={form.excerpt}
+                  onChange={(e) => setForm({ ...form, excerpt: e.target.value })}
+                  placeholder="สรุปใจความสำคัญ 1-2 ประโยคสำหรับแสดงในหน้ารวมบทความ (หากเว้นว่างระบบจะดึงจากเนื้อหาอัตโนมัติ)"
+                  className="w-full rounded-md border border-slate-300 px-3.5 py-2 text-xs sm:text-sm text-slate-800 focus:border-slate-900 focus:outline-none"
+                />
+              </div>
+
+              {/* Content Editor Header & AI Co-work Tools */}
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-slate-700">
+                    เนื้อหาหลัก (รองรับ Markdown, รูปภาพ และวิดีโอ)
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
-                      key={ct.id}
                       type="button"
-                      onClick={() => setForm({ ...form, contentType: ct.id })}
-                      className={`flex items-center justify-center gap-2 rounded-xl border-2 px-3 py-3 text-sm font-extrabold transition cursor-pointer ${
-                        selected
-                          ? 'border-[#0d2546] bg-[#0d2546] text-white shadow-xs'
-                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                      }`}
+                      onClick={() => setShowAiWriterBox((v) => !v)}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                     >
-                      {ct.icon}
-                      {ct.label}
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      ให้ AI ช่วยร่างเนื้อหา
                     </button>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => setShowAiGalleryPicker((v) => !v)}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
+                      คลังสื่อ AI ({aiMediaLibrary.length})
+                    </button>
+                    <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditorPreviewMode('write')}
+                        className={`rounded px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                          editorPreviewMode === 'write'
+                            ? 'bg-white text-slate-900 shadow-2xs'
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        แก้ไข
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditorPreviewMode('preview')}
+                        className={`rounded px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                          editorPreviewMode === 'preview'
+                            ? 'bg-white text-slate-900 shadow-2xs'
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        ดูตัวอย่าง
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Inline AI Content Generator */}
+                {showAiWriterBox && (
+                  <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-800">
+                        ระบุประเด็นที่ต้องการให้ AI ร่างบทความหรือข่าวประชาสัมพันธ์
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAiWriterBox(false)}
+                        className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={aiWritePrompt}
+                        onChange={(e) => setAiWritePrompt(e.target.value)}
+                        placeholder={
+                          form.title ||
+                          'เช่น แนวทางบูรณาการ AI ในสถานศึกษาเพื่อลดภาระงานเอกสารของครู'
+                        }
+                        className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        disabled={writingWithAi}
+                        onClick={handleAiWriteArticle}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        {writingWithAi ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            กำลังประมวลผล...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            สร้างร่างเนื้อหา
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline AI Media Picker Tray */}
+                {showAiGalleryPicker && (
+                  <div className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-800">
+                        เลือกสื่อจากคลัง AI เพื่อตั้งเป็นปกหรือแทรกในเนื้อหา
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAiGalleryPicker(false)}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
+                      >
+                        ปิดหน้าต่าง
+                      </button>
+                    </div>
+                    {aiMediaLibrary.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-2">
+                        ยังไม่มีสื่อในคลัง สามารถกดสร้างภาพปกด้วย AI ทางคอลัมน์ด้านขวาได้ทันที
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1">
+                        {aiMediaLibrary.slice(0, 12).map((asset) => (
+                          <div
+                            key={asset.id}
+                            className="rounded-md border border-slate-200 bg-white p-2 space-y-1.5"
+                          >
+                            <div className="relative aspect-video rounded bg-slate-900 overflow-hidden">
+                              {asset.mediaType === 'video' ? (
+                                <video
+                                  src={asset.fileUrl}
+                                  className="h-full w-full object-cover"
+                                  muted
+                                  playsInline
+                                />
+                              ) : (
+                                <img
+                                  src={asset.fileUrl}
+                                  alt={asset.thaiSummary || asset.prompt}
+                                  className="h-full w-full object-cover"
+                                />
+                              )}
+                              <span className="absolute top-1 left-1 rounded bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                {asset.mediaType === 'video' ? 'VIDEO' : 'IMAGE'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-medium text-slate-700 line-clamp-1">
+                              {asset.thaiSummary || asset.prompt}
+                            </div>
+                            <div className="flex gap-1">
+                              {asset.mediaType === 'image' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setForm((prev) => ({
+                                      ...prev,
+                                      coverImage: asset.fileUrl,
+                                    }));
+                                    showToast('ตั้งเป็นรูปภาพปกเรียบร้อยแล้ว');
+                                  }}
+                                  className="flex-1 rounded bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                                >
+                                  ตั้งเป็นปก
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setForm((prev) => ({
+                                      ...prev,
+                                      videoUrl: asset.fileUrl,
+                                      contentType: 'video',
+                                    }));
+                                    showToast('กำหนดเป็นวิดีโอหลักเรียบร้อยแล้ว');
+                                  }}
+                                  className="flex-1 rounded bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                                >
+                                  ตั้งเป็นวิดีโอหลัก
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => insertMediaIntoContent(asset)}
+                                className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                              >
+                                แทรกในเนื้อหา
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {editorPreviewMode === 'write' ? (
+                  <textarea
+                    rows={14}
+                    value={form.content}
+                    onChange={(e) => setForm({ ...form, content: e.target.value })}
+                    placeholder="พิมพ์เนื้อหาบทความที่นี่... (รองรับหัวข้อ ##, รายการ -, ตัวหนา **ข้อความ** และการแทรกสื่อ)"
+                    className="w-full rounded-md border border-slate-300 p-3.5 text-sm leading-relaxed text-slate-900 font-body focus:border-slate-900 focus:outline-none"
+                  />
+                ) : (
+                  <div className="rounded-md border border-slate-200 bg-slate-50/50 p-5 min-h-[320px] prose prose-slate max-w-none text-sm leading-relaxed">
+                    {form.content.trim() ? (
+                      renderRichMarkdown(form.content)
+                    ) : (
+                      <p className="text-slate-400">ยังไม่มีเนื้อหาสำหรับแสดงตัวอย่าง</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Advanced Metadata Toggle */}
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedFields((v) => !v)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+                >
+                  {showAdvancedFields ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                  ข้อมูลเพิ่มเติม (คำโปรยรอง, ผู้เขียน, ป้ายกำกับ Tags, ไฟล์เสียง)
+                </button>
+
+                {showAdvancedFields && (
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-3 border-t border-slate-100">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        คำโปรยรอง (Subtitle)
+                      </label>
+                      <input
+                        type="text"
+                        value={form.subtitle}
+                        onChange={(e) =>
+                          setForm({ ...form, subtitle: e.target.value })
+                        }
+                        className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        ชื่อผู้เขียน (Author)
+                      </label>
+                      <input
+                        type="text"
+                        value={form.author}
+                        onChange={(e) => setForm({ ...form, author: e.target.value })}
+                        className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        ป้ายกำกับ (Tags คั่นด้วยเครื่องหมายจุลภาค ,)
+                      </label>
+                      <input
+                        type="text"
+                        value={form.tagsInput}
+                        onChange={(e) =>
+                          setForm({ ...form, tagsInput: e.target.value })
+                        }
+                        className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        URL ไฟล์เสียงบรรยาย (Audio URL)
+                      </label>
+                      <input
+                        type="text"
+                        value={form.audioUrl}
+                        onChange={(e) =>
+                          setForm({ ...form, audioUrl: e.target.value })
+                        }
+                        placeholder="/uploads/ai-...wav"
+                        className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs sm:text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
+          </div>
 
-            <div>
-              <span className="block text-sm font-bold text-slate-600 mb-2">
-                เลือกหมวดหมู่ที่จะแสดงบนหน้าเว็บ:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((c) => {
-                  const selected = form.category === c.id;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setForm({ ...form, category: c.id })}
-                      className={`rounded-xl px-4 py-2.5 text-sm font-bold transition cursor-pointer border-2 ${
-                        selected
-                          ? 'text-white border-transparent shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                      style={selected ? { backgroundColor: c.color } : undefined}
-                    >
+          {/* Right Column (4 Cols): Publishing Settings & Media Attachments */}
+          <div className="lg:col-span-4 space-y-5">
+            {/* Classification & Status Box */}
+            <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
+                การจำแนกประเภทและสถานะ
+              </h3>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  ประเภทเนื้อหา
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {CONTENT_TYPES.map((ct) => {
+                    const active = form.contentType === ct.id;
+                    return (
+                      <button
+                        key={ct.id}
+                        type="button"
+                        onClick={() => setForm({ ...form, contentType: ct.id })}
+                        className={`flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold border transition cursor-pointer ${
+                          active
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {ct.icon}
+                        <span className="truncate">{ct.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  หมวดหมู่หลัก
+                </label>
+                <select
+                  value={form.category}
+                  onChange={(e) =>
+                    setForm({ ...form, category: e.target.value as CategoryId })
+                  }
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-800 focus:border-slate-900 focus:outline-none"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
                       {c.nameTh}
-                    </button>
-                  );
-                })}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isFeatured}
+                    onChange={(e) =>
+                      setForm({ ...form, isFeatured: e.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-slate-300 accent-slate-900"
+                  />
+                  <span className="text-xs font-semibold text-slate-800">
+                    ปักหมุดเป็นเนื้อหาเด่นหน้าแรก (Featured)
+                  </span>
+                </label>
               </div>
             </div>
 
-            <label className="inline-flex items-center gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm sm:text-base font-extrabold text-amber-950 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.isFeatured}
-                onChange={(e) => setForm({ ...form, isFeatured: e.target.checked })}
-                className="h-5 w-5 accent-[#0d2546]"
-              />
-              ⭐ ตั้งเป็น "ข่าวเด่นพิเศษ" แสดงกรอบใหญ่สุดบนหน้าแรก
-            </label>
-          </div>
+            {/* Cover Image Box */}
+            <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-3.5 shadow-2xs">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5 flex items-center justify-between">
+                <span>รูปภาพหน้าปก (Cover Image)</span>
+                <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
+              </h3>
 
-          {/* STEP 3: COVER PHOTO + SHARED AI AGENT MEDIA LIBRARY */}
-          <div className="space-y-4 rounded-2xl bg-slate-50 border border-slate-200 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="text-base sm:text-lg font-extrabold text-[#0d2546]">
-                3. รูปภาพหน้าปก & คลังรูป/วิดีโอจากทีม AI Agent
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <label className="inline-flex items-center gap-2 rounded-xl bg-[#0d2546] px-5 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-[#193d6e] cursor-pointer shadow-xs">
-                  <Upload className="w-5 h-5 text-amber-300" />
-                  {uploading ? 'กำลังอัปโหลดรูป...' : '📷 เลือกรูปจากเครื่อง / มือถือ'}
+              <div className="aspect-video w-full rounded-md overflow-hidden border border-slate-200 bg-slate-100">
+                <img
+                  src={form.coverImage}
+                  alt="Cover preview"
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/images/thumb-ai-edu.jpg';
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  {uploading ? 'กำลังอัปโหลด...' : 'อัปโหลดรูปภาพจากเครื่อง'}
                   <input
                     type="file"
                     accept="image/*"
@@ -781,306 +1121,93 @@ export const PostCrudManager: React.FC<Props> = ({
                   />
                 </label>
 
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setForm({ ...form, coverImage: e.target.value });
+                    }
+                  }}
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700"
+                >
+                  <option value="">-- หรือเลือกภาพมาตรฐานของระบบ --</option>
+                  {PRESET_IMAGES.map((img) => (
+                    <option key={img.url} value={img.url}>
+                      {img.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* AI Cover Generator */}
+              <div className="pt-3 border-t border-slate-100 space-y-2">
+                <label className="block text-[11px] font-semibold text-slate-600">
+                  สร้างภาพหน้าปกใหม่ด้วย AI
+                </label>
+                <input
+                  type="text"
+                  value={aiImagePrompt}
+                  onChange={(e) => setAiImagePrompt(e.target.value)}
+                  placeholder="ระบุคำอธิบายภาพ (หรือเว้นว่างเพื่ออ้างอิงตามหัวข้อ)"
+                  className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+                />
                 <button
                   type="button"
-                  disabled={aiLoading}
-                  onClick={handleAiGenerateCover}
-                  className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-sm font-bold text-[#0d2546] hover:bg-slate-100 cursor-pointer disabled:opacity-50"
+                  disabled={generatingAiImage}
+                  onClick={handleGenerateAiCover}
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                 >
-                  <ImageIcon className="w-4 h-4 text-amber-600" />
-                  ให้ AI วาดรูปปกให้
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  {generatingAiImage ? 'กำลังสร้างภาพปก...' : 'สั่ง AI วาดภาพหน้าปก'}
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center pt-1">
-              <div className="sm:col-span-5">
-                <img
-                  src={form.coverImage}
-                  alt="ตัวอย่างรูปหน้าปก"
-                  className="h-44 w-full rounded-2xl object-cover border-2 border-white shadow-sm bg-[#0d2546]"
-                />
-              </div>
-              <div className="sm:col-span-7 space-y-2.5">
-                <div className="text-sm font-bold text-slate-600">
-                  หรือกดเลือกจากรูปภาพมาตรฐานด้านล่างได้ทันที:
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {PRESET_IMAGES.map((img) => {
-                    const active = form.coverImage === img.url;
-                    return (
-                      <button
-                        key={img.url}
-                        type="button"
-                        onClick={() => setForm({ ...form, coverImage: img.url })}
-                        className={`rounded-xl border-2 px-3.5 py-2 text-sm font-bold transition cursor-pointer ${
-                          active
-                            ? 'border-[#0d2546] bg-[#0d2546] text-white'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-amber-400'
-                        }`}
-                      >
-                        {img.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+            {/* Video Attachment Box */}
+            <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-3 shadow-2xs">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5 flex items-center justify-between">
+                <span>สื่อวิดีโอประกอบ (ถ้ามี)</span>
+                <Film className="w-3.5 h-3.5 text-slate-400" />
+              </h3>
 
-            {/* SHARED AI MEDIA PICKER (Put AI-generated images & videos directly into Content!) */}
-            {aiMediaAssets.length > 0 && (
-              <div className="pt-3 border-t border-slate-200 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-extrabold text-[#0d2546] flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-500" />
-                    คลังรูปภาพ & วิดีโอที่ AI Agent สร้างไว้ ({aiMediaAssets.length} รายการ) — กดเลือกใส่ Content ได้ทันที:
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
-                  {aiMediaAssets.slice(0, 12).map((asset) => (
-                    <div
-                      key={asset.id}
-                      className="rounded-xl border border-slate-200 bg-white p-2.5 space-y-2 shadow-2xs"
-                    >
-                      <div className="relative aspect-video rounded-lg bg-slate-900 overflow-hidden">
-                        {asset.mediaType === 'video' ? (
-                          <video
-                            src={asset.fileUrl}
-                            className="h-full w-full object-cover"
-                            muted
-                            playsInline
-                          />
-                        ) : (
-                          <img
-                            src={asset.fileUrl}
-                            alt={asset.thaiSummary || 'AI Media'}
-                            className="h-full w-full object-cover"
-                          />
-                        )}
-                        <span
-                          className={`absolute top-1.5 left-1.5 rounded-md px-2 py-0.5 text-[10px] font-extrabold text-white ${
-                            asset.mediaType === 'video' ? 'bg-indigo-600' : 'bg-amber-600'
-                          }`}
-                        >
-                          {asset.mediaType === 'video' ? 'VDO' : 'รูป AI'}
-                        </span>
-                      </div>
-                      <div className="text-xs font-bold text-slate-700 line-clamp-1">
-                        {asset.thaiSummary || asset.prompt}
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {asset.mediaType === 'image' ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setForm((prev) => ({ ...prev, coverImage: asset.fileUrl }));
-                              showToast('ตั้งรูป AI นี้เป็นรูปหน้าปกข่าวแล้ว!');
-                            }}
-                            className="flex-1 rounded-lg bg-[#0d2546] px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-[#193d6e] cursor-pointer"
-                          >
-                            ตั้งเป็นรูปปก
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setForm((prev) => ({
-                                ...prev,
-                                videoUrl: asset.fileUrl,
-                                contentType: 'video',
-                              }));
-                              showToast('แนบวิดีโอ AI เป็นวิดีโอหลักของข่าวนี้แล้ว!');
-                            }}
-                            className="flex-1 rounded-lg bg-indigo-600 px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-indigo-700 cursor-pointer"
-                          >
-                            ใช้เป็นวิดีโอหลัก
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => insertMediaIntoContent(asset)}
-                          className="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-[11px] font-extrabold text-white hover:bg-emerald-700 cursor-pointer"
-                        >
-                          + แทรกในเนื้อหา
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* VIDEO LINK (Shown when contentType === 'video' OR when videoUrl is attached) */}
-          {(form.contentType === 'video' || Boolean(form.videoUrl)) && (
-            <div className="rounded-2xl bg-rose-50/70 border border-rose-200 p-5 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="text-base font-extrabold text-rose-950 flex items-center gap-1.5">
-                  <Film className="w-5 h-5 text-rose-600" />
-                  วิดีโอประกอบ Content นี้ (ลิงก์ YouTube / ไฟล์วิดีโอ AI)
-                </label>
-                <div className="flex items-center gap-2">
-                  <label className="inline-flex items-center gap-1.5 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800 cursor-pointer">
-                    <Upload className="w-4 h-4" />
-                    {uploadingVideo ? 'กำลังอัปโหลดวิดีโอ...' : 'เลือกไฟล์วิดีโอ (.MP4)'}
-                    <input
-                      type="file"
-                      accept="video/*"
-                      onChange={handleUploadVideoFile}
-                      className="hidden"
-                    />
-                  </label>
-                  {form.videoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setForm({ ...form, videoUrl: '' })}
-                      className="rounded-xl bg-white border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 cursor-pointer"
-                    >
-                      เอาวิดีโอออก
-                    </button>
-                  )}
-                </div>
-              </div>
               <input
                 type="text"
                 value={form.videoUrl}
                 onChange={(e) => setForm({ ...form, videoUrl: e.target.value })}
-                placeholder="วางลิงก์ YouTube หรือเลือกวิดีโอจากคลัง AI ด้านบน..."
-                className="w-full rounded-xl border-2 border-rose-200 bg-white px-4 py-3 text-base focus:border-rose-500 focus:outline-none"
+                placeholder="URL YouTube หรือไฟล์วิดีโอ (.mp4)"
+                className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
               />
-            </div>
-          )}
 
-          {/* STEP 4: MAIN CONTENT + RICH INLINE MEDIA PREVIEW */}
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-base sm:text-lg font-extrabold text-[#0d2546]">
-                4. เนื้อหาข่าว / รายละเอียดบทความ <span className="text-rose-600">*</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setPreviewContentRich((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#0d2546] bg-white px-3.5 py-1.5 text-xs sm:text-sm font-extrabold text-[#0d2546] hover:bg-slate-50 cursor-pointer"
-              >
-                <Eye className="w-4 h-4" />
-                {previewContentRich
-                  ? 'กลับไปแก้ไขข้อความ'
-                  : 'ดูตัวอย่างหน้าอ่านจริง (พร้อมรูป/วิดีโอที่แทรก)'}
-              </button>
-            </div>
-            <p className="text-sm text-slate-500">
-              พิมพ์ข้อความตามปกติ หรือกดปุ่ม <strong>“+ แทรกในเนื้อหา”</strong> จากคลังรูป/วิดีโอ AI ด้านบนเพื่อวางภาพและคลิปแทรกในบทความได้เลยครับ
-            </p>
-            {previewContentRich ? (
-              <div className="rounded-2xl border-2 border-[#0d2546]/20 bg-[#fcfdff] p-5 sm:p-6 space-y-3">
-                <div className="text-xs font-extrabold text-amber-700">
-                  👁️ ตัวอย่างการแสดงผลจริงบนหน้าเว็บ:
-                </div>
-                <div>{renderRichMarkdown(form.content || '*(ยังไม่มีเนื้อหา)*')}</div>
-              </div>
-            ) : (
-              <textarea
-                rows={12}
-                required
-                value={form.content}
-                onChange={(e) => setForm({ ...form, content: e.target.value })}
-                placeholder="พิมพ์เนื้อหาข่าวหรือบทความที่นี่..."
-                className="w-full rounded-2xl border-2 border-slate-200 px-4 py-4 text-base sm:text-lg font-body leading-relaxed text-slate-800 focus:border-[#0d2546] focus:outline-none"
-              />
-            )}
-          </div>
-
-          {/* OPTIONAL EXTRA FIELDS (Tucked neatly away!) */}
-          <div className="border-t border-slate-100 pt-4">
-            <button
-              type="button"
-              onClick={() => setShowExtraFields((v) => !v)}
-              className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-[#0d2546] cursor-pointer"
-            >
-              {showExtraFields ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-              ตัวเลือกเสริม (คำโปรยย่อ / ลิงก์วิดีโอเพิ่มเติม / ชื่อผู้เขียน) — ไม่กรอกก็ได้
-            </button>
-
-            {showExtraFields && (
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-2xl bg-slate-50 p-4 border border-slate-200">
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-1">
-                    คำโปรยสั้นๆ หน้าแรก (ถ้าเว้นว่าง ระบบดึงจากเนื้อหาข่าวให้อัตโนมัติ)
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={form.excerpt}
-                    onChange={(e) => setForm({ ...form, excerpt: e.target.value })}
-                    placeholder="สรุปสั้นๆ 1-2 บรรทัด..."
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
-                  />
-                </div>
-                {form.contentType !== 'video' && !form.videoUrl && (
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">
-                      แนบลิงก์วิดีโอ YouTube (ถ้ามี)
-                    </label>
-                    <input
-                      type="text"
-                      value={form.videoUrl}
-                      onChange={(e) => setForm({ ...form, videoUrl: e.target.value })}
-                      placeholder="https://www.youtube.com/watch?v=..."
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">
-                    ชื่อผู้เขียน
-                  </label>
+              <div className="flex items-center gap-2">
+                <label className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  {uploadingVideo ? 'กำลังอัปโหลด...' : 'อัปโหลดไฟล์ .MP4'}
                   <input
-                    type="text"
-                    value={form.author}
-                    onChange={(e) => setForm({ ...form, author: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-[#0d2546] focus:outline-none"
+                    type="file"
+                    accept="video/*"
+                    onChange={handleUploadVideoFile}
+                    className="hidden"
                   />
-                </div>
+                </label>
+                {form.videoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, videoUrl: '' })}
+                    className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 cursor-pointer"
+                  >
+                    ล้างค่า
+                  </button>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* HUGE CLEAR SAVE BUTTONS AT BOTTOM */}
-          <div className="pt-5 border-t-2 border-slate-100 flex flex-wrap items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setEditorOpen(false)}
-              className="rounded-2xl border-2 border-slate-200 px-6 py-3.5 text-base font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
-            >
-              ยกเลิก
-            </button>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => savePostWithStatus('draft')}
-                className="rounded-2xl border-2 border-slate-300 bg-white px-5 py-3.5 text-sm sm:text-base font-bold text-slate-700 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
-              >
-                บันทึกเก็บไว้ก่อน (ยังไม่แสดงหน้าเว็บ)
-              </button>
-
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => savePostWithStatus('published')}
-                className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-8 py-3.5 text-base sm:text-lg font-extrabold text-white hover:bg-emerald-700 shadow-md transition cursor-pointer disabled:opacity-50"
-              >
-                <CheckCircle2 className="w-5 h-5" />
-                {saving
-                  ? 'กำลังบันทึก...'
-                  : editingId
-                  ? 'บันทึกการแก้ไขและแสดงบนเว็บ'
-                  : 'บันทึกและลงหน้าเว็บทันที'}
-              </button>
+              {form.videoUrl && form.videoUrl.startsWith('/uploads/') && (
+                <video
+                  src={form.videoUrl}
+                  controls
+                  playsInline
+                  className="w-full rounded-md bg-black max-h-40"
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1088,74 +1215,98 @@ export const PostCrudManager: React.FC<Props> = ({
     );
   }
 
-  // ============================================================================
-  // VIEW 2: NEWS & ARTICLES LIST (LARGE BUTTONS, ZERO JARGON!)
-  // ============================================================================
+  // =========================================================================
+  // FORMAL CMS LIST & ENTERPRISE DATA TABLE VIEW
+  // =========================================================================
   return (
-    <div className="space-y-5">
-      {/* Big Success Notification */}
-      {successMsg && (
-        <div className="rounded-2xl bg-emerald-600 text-white px-5 py-4 shadow-md flex items-center gap-3 text-base font-extrabold">
-          <CheckCircle2 className="w-6 h-6 text-amber-300 shrink-0" />
-          <span>{successMsg}</span>
+    <div className="space-y-4">
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs sm:text-sm font-medium text-emerald-900 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{toastMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastMsg(null)}
+            className="text-emerald-700 hover:text-emerald-900 text-xs font-semibold cursor-pointer"
+          >
+            ปิด
+          </button>
         </div>
       )}
 
       {errorMsg && (
-        <div className="rounded-2xl bg-rose-50 border-2 border-rose-300 px-5 py-4 text-base font-bold text-rose-800 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
-          <span>{errorMsg}</span>
+        <div className="rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-xs sm:text-sm font-medium text-rose-900 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorMsg(null)}
+            className="text-rose-700 hover:text-rose-900 text-xs font-semibold cursor-pointer"
+          >
+            ปิด
+          </button>
         </div>
       )}
 
-      {/* Main Action Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-[#0d2546]">
-            📰 ข่าวสารและบทความบนเว็บไซต์ ({posts.length} เรื่อง)
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            ระบบจัดการเนื้อหาระดับ Production — รองรับค้นหา, กรองหมวดหมู่, คัดลอกข่าว, จัดการหลายรายการ (Bulk Actions) และสำรองข้อมูล JSON/CSV
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleExportPostsCsv}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
-          >
-            <Download className="w-4 h-4 text-[#0d2546]" /> ส่งออก CSV
-          </button>
-          <button
-            type="button"
-            onClick={handleExportBackupJson}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
-          >
-            <Download className="w-4 h-4 text-emerald-700" /> Backup JSON
-          </button>
-          <label className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer">
-            <Upload className="w-4 h-4 text-amber-600" /> นำเข้า JSON
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={handleImportBackupJson}
-              className="hidden"
-            />
-          </label>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 shadow-md transition cursor-pointer"
-          >
-            <Plus className="w-5 h-5" />
-            ลงข่าว / เขียนบทความใหม่
-          </button>
-        </div>
-      </div>
+      {/* Control & Filter Panel */}
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm sm:text-base font-bold text-slate-900">
+              ทะเบียนเนื้อหาและบทความเว็บไซต์
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              บริหารจัดการข่าวประชาสัมพันธ์ บทความวิชาการ สื่อวิดีโอ และหลักสูตรทั้งหมด
+            </p>
+          </div>
 
-      {/* Search, Category Filter, Sort & Quick Filter Tabs */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-          <div className="relative md:col-span-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportPostsCsv}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              ส่งออก CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleExportBackupJson}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              สำรองฐานข้อมูล
+            </button>
+            <label className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-slate-500" />
+              {importingBackup ? 'กำลังนำเข้า...' : 'นำเข้าข้อมูล'}
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={handleImportBackupJsonFile}
+                className="hidden"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-amber-400" />
+              สร้างเนื้อหาใหม่
+            </button>
+          </div>
+        </div>
+
+        {/* Filter & Search Bar */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+          <div className="md:col-span-5 relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={search}
@@ -1163,73 +1314,29 @@ export const PostCrudManager: React.FC<Props> = ({
                 setSearch(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="พิมพ์ค้นหาชื่อข่าว, เนื้อหา หรือแท็ก..."
-              className="w-full rounded-xl border-2 border-slate-200 pl-10 pr-4 py-2.5 text-sm sm:text-base focus:border-[#0d2546] focus:outline-none"
+              placeholder="ค้นหาตามชื่อเรื่อง คำสำคัญ หรือป้ายกำกับ..."
+              className="w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
             />
-            <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           </div>
 
-          <div className="md:col-span-4">
-            <select
-              value={categoryFilter}
-              onChange={(e) => {
-                setCategoryFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm font-bold text-[#0d2546] bg-white focus:border-[#0d2546] focus:outline-none"
-            >
-              <option value="all">ทุกหมวดหมู่ ({posts.length})</option>
-              {CATEGORIES.map((c) => (
-                <option key={c.id} value={c.id}>
-                  หมวด: {c.nameTh} ({posts.filter((p) => p.category === c.id).length})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="md:col-span-3 flex items-center gap-2">
-            <ArrowUpDown className="w-4 h-4 text-slate-400 shrink-0" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="w-full rounded-xl border-2 border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 bg-white focus:border-[#0d2546] focus:outline-none"
-            >
-              <option value="newest">เรียง: ใหม่ล่าสุด + ข่าวเด่น</option>
-              <option value="updated_desc">เรียง: แก้ไขล่าสุด</option>
-              <option value="views_desc">เรียง: ยอดอ่านสูงสุด</option>
-              <option value="oldest">เรียง: เก่าสุดก่อน</option>
-              <option value="title_asc">เรียง: ชื่อ ก-ฮ / A-Z</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-          <div className="flex flex-wrap gap-2">
+          <div className="md:col-span-4 flex items-center gap-1 overflow-x-auto no-scrollbar">
             {[
               { id: 'all', label: `ทั้งหมด (${posts.length})` },
-              {
-                id: 'published',
-                label: `แสดงบนเว็บ (${posts.filter((p) => p.status === 'published').length})`,
-              },
-              {
-                id: 'draft',
-                label: `ซ่อนไว้ (${posts.filter((p) => p.status === 'draft').length})`,
-              },
-              {
-                id: 'video',
-                label: `คลิปวิดีโอ (${posts.filter((p) => p.contentType === 'video' || Boolean(p.videoUrl)).length})`,
-              },
+              { id: 'published', label: `เผยแพร่ (${publishedCount})` },
+              { id: 'draft', label: `ฉบับร่าง (${draftCount})` },
+              { id: 'featured', label: `ปักหมุด (${featuredCount})` },
             ].map((tab) => (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => {
                   setQuickFilter(tab.id as any);
                   setCurrentPage(1);
                 }}
-                className={`rounded-xl px-4 py-2 text-xs sm:text-sm font-extrabold transition cursor-pointer ${
+                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold shrink-0 transition cursor-pointer ${
                   quickFilter === tab.id
-                    ? 'bg-[#0d2546] text-white'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
                 }`}
               >
                 {tab.label}
@@ -1237,313 +1344,480 @@ export const PostCrudManager: React.FC<Props> = ({
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleSelectAllFiltered}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-extrabold text-[#0d2546] hover:bg-slate-100 cursor-pointer"
+          <div className="md:col-span-3 grid grid-cols-2 gap-2">
+            <select
+              value={categoryFilter}
+              onChange={(e) => {
+                setCategoryFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700"
             >
-              {allFilteredSelected ? (
-                <CheckSquare className="w-4 h-4 text-emerald-600" />
-              ) : (
-                <Square className="w-4 h-4 text-slate-400" />
-              )}
-              {allFilteredSelected
-                ? `ยกเลิกเลือกทั้งหมด (${filtered.length})`
-                : `เลือกทั้งหมดในหน้านี้ (${filtered.length})`}
-            </button>
+              <option value="all">ทุกหมวดหมู่</option>
+              {CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nameTh}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700"
+            >
+              <option value="newest">ล่าสุดก่อน</option>
+              <option value="oldest">เก่าสุดก่อน</option>
+              <option value="views_desc">ยอดเข้าชมสูงสุด</option>
+              <option value="title_asc">เรียงตาม ก-ฮ</option>
+            </select>
           </div>
         </div>
-      </div>
 
-      {/* Production Bulk Actions Toolbar */}
-      {selectedIds.length > 0 && (
-        <div className="rounded-2xl bg-[#0d2546] text-white p-4 shadow-md flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm font-extrabold">
-            <CheckSquare className="w-5 h-5 text-amber-300" />
-            <span>เลือกไว้ {selectedIds.length} รายการ</span>
-            <button
-              type="button"
-              onClick={() => setSelectedIds([])}
-              className="ml-2 text-xs text-slate-300 underline hover:text-white cursor-pointer"
-            >
-              ล้างที่เลือก
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => handleBulkAction('publish')}
-              className="rounded-xl bg-emerald-500 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-emerald-600 cursor-pointer disabled:opacity-50"
-            >
-              🟢 เปิดแสดงบนเว็บทั้งหมด
-            </button>
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => handleBulkAction('draft')}
-              className="rounded-xl bg-slate-700 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-slate-600 cursor-pointer disabled:opacity-50"
-            >
-              ⚪ ซ่อนเป็นฉบับร่างทั้งหมด
-            </button>
-
-            <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
-              <select
-                value={bulkCategoryTarget}
-                onChange={(e) => setBulkCategoryTarget(e.target.value as CategoryId)}
-                className="rounded-lg bg-[#0a1930] text-white px-2.5 py-1.5 text-xs font-bold"
+        {/* Bulk Action Bar */}
+        {selectedIds.length > 0 && (
+          <div className="rounded-md bg-slate-900 text-white px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-semibold">
+              เลือกแล้ว {selectedIds.length} รายการ
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => handleBulkAction('publish')}
+                className="rounded bg-emerald-600 px-2.5 py-1 font-semibold hover:bg-emerald-700 cursor-pointer"
               >
+                เผยแพร่ที่เลือก
+              </button>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => handleBulkAction('draft')}
+                className="rounded bg-slate-700 px-2.5 py-1 font-semibold hover:bg-slate-600 cursor-pointer"
+              >
+                เปลี่ยนเป็นฉบับร่าง
+              </button>
+              <select
+                defaultValue=""
+                disabled={bulkBusy}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleBulkAction('category', e.target.value);
+                    e.target.value = '';
+                  }
+                }}
+                className="rounded bg-slate-800 border border-slate-700 px-2 py-1 text-white font-medium"
+              >
+                <option value="">ย้ายหมวดหมู่...</option>
                 {CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nameTh}
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                disabled={bulkBusy}
-                onClick={() => handleBulkAction('category', bulkCategoryTarget)}
-                className="rounded-lg bg-amber-400 px-2.5 py-1.5 text-xs font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer disabled:opacity-50"
-              >
-                ย้ายหมวด
-              </button>
-            </div>
-
-            {bulkDeleteConfirm ? (
-              <div className="flex items-center gap-1.5 bg-rose-900/80 border border-rose-400 rounded-xl p-1">
+              {bulkDeleteConfirm ? (
+                <div className="inline-flex items-center gap-1 bg-rose-950 border border-rose-700 rounded px-2 py-0.5">
+                  <button
+                    type="button"
+                    disabled={bulkBusy}
+                    onClick={() => handleBulkAction('delete')}
+                    className="font-bold text-rose-300 hover:text-white cursor-pointer"
+                  >
+                    ยืนยันลบ ({selectedIds.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkDeleteConfirm(false)}
+                    className="text-slate-300 ml-1 cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                </div>
+              ) : (
                 <button
                   type="button"
                   disabled={bulkBusy}
-                  onClick={() => handleBulkAction('delete')}
-                  className="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-extrabold text-white cursor-pointer"
+                  onClick={() => setBulkDeleteConfirm(true)}
+                  className="rounded bg-rose-600 px-2.5 py-1 font-semibold hover:bg-rose-700 cursor-pointer"
                 >
-                  ยืนยันลบ {selectedIds.length} เรื่อง
+                  ลบที่เลือก
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setBulkDeleteConfirm(false)}
-                  className="rounded-lg bg-white/15 px-2.5 py-1.5 text-xs font-bold text-white cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-              </div>
-            ) : (
+              )}
               <button
                 type="button"
-                disabled={bulkBusy}
-                onClick={() => setBulkDeleteConfirm(true)}
-                className="rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-rose-700 cursor-pointer disabled:opacity-50"
+                onClick={() => setSelectedIds([])}
+                className="text-slate-300 hover:text-white px-2 py-1 cursor-pointer"
               >
-                🗑️ ลบที่เลือก
+                ยกเลิกการเลือก
               </button>
-            )}
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Posts List with Large, Clear Thai Action Buttons */}
-      <div className="space-y-3.5">
-        {paginatedPosts.length === 0 ? (
-          <div className="rounded-2xl bg-white p-12 text-center border border-slate-200 space-y-3">
-            <p className="text-slate-600 text-base font-bold">ยังไม่มีข่าวในหมวดที่เลือก</p>
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-6 py-3 text-base font-extrabold text-white cursor-pointer"
-            >
-              <Plus className="w-5 h-5" /> ลงข่าวเรื่องแรกเลย
-            </button>
-          </div>
-        ) : (
-          paginatedPosts.map((post) => {
-            const cat =
-              CATEGORIES.find((c) => c.id === post.category) || CATEGORIES[0];
-            const isBusy = busyId === post.id;
-            const isSelected = selectedIds.includes(post.id);
-            return (
-              <div
-                key={post.id}
-                className={`rounded-2xl bg-white border-2 p-4 sm:p-5 shadow-2xs transition flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
-                  isSelected
-                    ? 'border-[#0d2546] bg-sky-50/20'
-                    : post.isFeatured
-                    ? 'border-amber-400'
-                    : 'border-slate-200/90'
-                } ${isBusy ? 'opacity-60 pointer-events-none' : ''}`}
-              >
-                <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleSelectOne(post.id)}
-                    className="mt-1 sm:mt-0 text-slate-400 hover:text-[#0d2546] cursor-pointer shrink-0"
-                    title="เลือกรายการนี้"
-                  >
-                    {isSelected ? (
-                      <CheckSquare className="w-5 h-5 text-[#0d2546]" />
-                    ) : (
-                      <Square className="w-5 h-5" />
-                    )}
-                  </button>
-                  <img
-                    src={post.coverImage}
-                    alt={post.title}
-                    className="h-24 w-32 sm:w-36 rounded-xl object-cover shrink-0 bg-[#0d2546]"
-                  />
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className="rounded-lg px-3 py-1 text-xs font-extrabold text-white"
-                        style={{ backgroundColor: cat.color }}
-                      >
-                        {cat.nameTh}
-                      </span>
-                      {post.isFeatured && (
-                        <span className="rounded-lg bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
-                          ⭐ ข่าวเด่นหน้าแรก
-                        </span>
-                      )}
-                      {post.status === 'draft' && (
-                        <span className="rounded-lg bg-slate-200 px-3 py-1 text-xs font-extrabold text-slate-700">
-                          ซ่อนไว้ (ยังไม่แสดงหน้าเว็บ)
-                        </span>
-                      )}
-                    </div>
-
-                    <h3 className="font-extrabold text-[#0d2546] text-base sm:text-lg line-clamp-1">
-                      {post.title}
-                    </h3>
-                    <p className="text-sm text-slate-500 line-clamp-1 font-body">
-                      {post.excerpt}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-slate-400 font-medium">
-                      <span>ลงเมื่อ: {formatThaiDate(post.createdAt)}</span>
-                      <span>• คนอ่าน {formatViews(post.views)} ครั้ง</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Big Labeled Thai Buttons */}
-                <div className="flex flex-wrap items-center gap-2 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
-                  <button
-                    onClick={() => openEdit(post)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-4 py-2.5 text-sm font-extrabold text-white hover:bg-[#193d6e] cursor-pointer shadow-2xs"
-                  >
-                    <Edit3 className="w-4 h-4 text-amber-300" /> แก้ไขข่าว
-                  </button>
-
-                  <button
-                    onClick={() => handleDuplicatePost(post)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3.5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-200 cursor-pointer"
-                    title="คัดลอกข่าวนี้เป็นฉบับร่าง"
-                  >
-                    <Copy className="w-4 h-4" /> คัดลอก
-                  </button>
-
-                  <button
-                    onClick={() => onPreviewPost(post.id)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3.5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-200 cursor-pointer"
-                  >
-                    <Eye className="w-4 h-4" /> เปิดอ่าน
-                  </button>
-
-                  <button
-                    onClick={() => handleToggleStatus(post)}
-                    className={`rounded-xl px-3.5 py-2.5 text-sm font-bold transition cursor-pointer ${
-                      post.status === 'published'
-                        ? 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'
-                        : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                    }`}
-                  >
-                    {post.status === 'published' ? '🟢 แสดงบนเว็บ' : '⚪ กดเพื่อแสดงบนเว็บ'}
-                  </button>
-
-                  <button
-                    onClick={() => handleToggleFeatured(post)}
-                    className={`inline-flex items-center gap-1 rounded-xl px-3 py-2.5 text-sm font-bold transition cursor-pointer ${
-                      post.isFeatured
-                        ? 'bg-amber-100 text-amber-900'
-                        : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-800'
-                    }`}
-                  >
-                    <Star
-                      className={`w-4 h-4 ${
-                        post.isFeatured ? 'fill-amber-500 text-amber-500' : ''
-                      }`}
-                    />
-                    {post.isFeatured ? 'ข่าวเด่น' : 'ตั้งเป็นเด่น'}
-                  </button>
-
-                  {deleteConfirmId === post.id ? (
-                    <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 rounded-xl p-1">
-                      <button
-                        onClick={() => handleConfirmDelete(post.id)}
-                        className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-extrabold text-white cursor-pointer"
-                      >
-                        ยืนยันลบข่าวนี้
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirmId(null)}
-                        className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-slate-700 cursor-pointer"
-                      >
-                        ไม่ลบ
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setDeleteConfirmId(post.id)}
-                      className="inline-flex items-center gap-1 rounded-xl bg-rose-50 px-3 py-2.5 text-sm font-bold text-rose-700 hover:bg-rose-600 hover:text-white transition cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" /> ลบ
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })
         )}
       </div>
 
+      {/* Empty State */}
+      {filtered.length === 0 ? (
+        <div className="rounded-lg bg-white border border-slate-200 p-10 text-center space-y-2">
+          <p className="text-sm font-semibold text-slate-700">
+            ไม่พบรายการเนื้อหาที่ตรงกับเงื่อนไขการค้นหา
+          </p>
+          <p className="text-xs text-slate-500">
+            ลองปรับตัวกรองหมวดหมู่ หรือคลิกปุ่มสร้างเนื้อหาใหม่ด้านบน
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* DESKTOP DATA TABLE (md and up) */}
+          <div className="hidden md:block rounded-lg bg-white border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <th className="py-3 pl-4 pr-2 w-9">
+                      <button
+                        type="button"
+                        onClick={toggleSelectAllFiltered}
+                        className="text-slate-400 hover:text-slate-700 cursor-pointer flex items-center"
+                      >
+                        {paginatedPosts.length > 0 &&
+                        paginatedPosts.every((p) => selectedIds.includes(p.id)) ? (
+                          <CheckSquare className="w-4 h-4 text-slate-900" />
+                        ) : (
+                          <Square className="w-4 h-4" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="py-3 px-3">เนื้อหา / หัวข้อ</th>
+                    <th className="py-3 px-3 w-36">หมวดหมู่</th>
+                    <th className="py-3 px-3 w-28">สถานะ</th>
+                    <th className="py-3 px-3 w-28">สถิติ / วันที่</th>
+                    <th className="py-3 pl-3 pr-4 text-right w-56">การจัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-xs">
+                  {paginatedPosts.map((p) => {
+                    const cat = CATEGORIES.find((c) => c.id === p.category);
+                    const isPublished = p.status === 'published';
+                    const isSelected = selectedIds.includes(p.id);
+                    const isConfirming = confirmDeleteId === p.id;
+
+                    return (
+                      <tr
+                        key={p.id}
+                        className={`hover:bg-slate-50/80 transition ${
+                          isSelected ? 'bg-slate-50' : ''
+                        }`}
+                      >
+                        <td className="py-3 pl-4 pr-2 align-middle">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectId(p.id)}
+                            className="h-4 w-4 rounded border-slate-300 accent-slate-900 cursor-pointer"
+                          />
+                        </td>
+                        <td className="py-3 px-3 align-middle">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={p.coverImage}
+                              alt={p.title}
+                              className="h-11 w-16 rounded object-cover border border-slate-200 bg-slate-100 shrink-0"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src =
+                                  '/images/thumb-ai-edu.jpg';
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                {p.isFeatured && (
+                                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 shrink-0">
+                                    <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                                    แนะนำ
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openEdit(p)}
+                                  className="font-semibold text-slate-900 hover:text-slate-700 text-left line-clamp-1 cursor-pointer"
+                                >
+                                  {p.title}
+                                </button>
+                              </div>
+                              <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                                {p.excerpt}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-middle">
+                          <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                            {cat?.nameTh || 'ทั่วไป'}
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {CONTENT_TYPES.find((c) => c.id === p.contentType)
+                              ?.label || p.contentType}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-middle">
+                          <button
+                            type="button"
+                            disabled={busyId === p.id}
+                            onClick={() => handleToggleStatus(p)}
+                            title="คลิกเพื่อสลับสถานะ"
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer ${
+                              isPublished
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                isPublished ? 'bg-emerald-600' : 'bg-slate-400'
+                              }`}
+                            />
+                            {isPublished ? 'เผยแพร่แล้ว' : 'ฉบับร่าง'}
+                          </button>
+                        </td>
+                        <td className="py-3 px-3 align-middle text-[11px] text-slate-600">
+                          <div className="font-medium text-slate-800">
+                            {formatViews(p.views)} ครั้ง
+                          </div>
+                          <div className="text-slate-400">
+                            {formatThaiDate(p.createdAt)}
+                          </div>
+                        </td>
+                        <td className="py-3 pl-3 pr-4 align-middle text-right">
+                          {isConfirming ? (
+                            <div className="inline-flex items-center gap-1.5 bg-rose-50 border border-rose-200 rounded-md px-2 py-1">
+                              <span className="text-[11px] font-semibold text-rose-800">
+                                ยืนยันลบ?
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => executeDelete(p)}
+                                className="rounded bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-rose-700 cursor-pointer"
+                              >
+                                ลบ
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="text-[11px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+                              >
+                                ยกเลิก
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openEdit(p)}
+                                className="rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                              >
+                                แก้ไข
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onPreviewPost(p.id)}
+                                title="ดูตัวอย่างหน้าเว็บ"
+                                className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleFeatured(p)}
+                                title={
+                                  p.isFeatured
+                                    ? 'ยกเลิกปักหมุด'
+                                    : 'ปักหมุดเป็นเนื้อหาแนะนำ'
+                                }
+                                className={`rounded border p-1.5 cursor-pointer ${
+                                  p.isFeatured
+                                    ? 'border-amber-300 bg-amber-50 text-amber-600'
+                                    : 'border-slate-200 bg-white text-slate-400 hover:text-slate-700'
+                                }`}
+                              >
+                                <Star className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicatePost(p)}
+                                title="ทำสำเนา"
+                                className="rounded border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(p.id)}
+                                title="ลบเนื้อหา"
+                                className="rounded border border-slate-200 bg-white p-1.5 text-rose-600 hover:bg-rose-50 hover:border-rose-200 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* MOBILE CARD LIST (< md) */}
+          <div className="md:hidden space-y-2.5">
+            {paginatedPosts.map((p) => {
+              const cat = CATEGORIES.find((c) => c.id === p.category);
+              const isPublished = p.status === 'published';
+              const isConfirming = confirmDeleteId === p.id;
+
+              return (
+                <div
+                  key={p.id}
+                  className="rounded-lg bg-white border border-slate-200 p-3.5 space-y-3 shadow-2xs"
+                >
+                  <div className="flex items-start gap-3">
+                    <img
+                      src={p.coverImage}
+                      alt={p.title}
+                      className="h-14 w-20 rounded object-cover border border-slate-200 shrink-0"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          '/images/thumb-ai-edu.jpg';
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            isPublished
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {isPublished ? 'เผยแพร่แล้ว' : 'ฉบับร่าง'}
+                        </span>
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                          {cat?.nameTh || 'ทั่วไป'}
+                        </span>
+                      </div>
+                      <h3 className="text-xs font-bold text-slate-900 line-clamp-2">
+                        {p.title}
+                      </h3>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        {formatThaiDate(p.createdAt)} • {formatViews(p.views)} ครั้ง
+                      </div>
+                    </div>
+                  </div>
+
+                  {isConfirming ? (
+                    <div className="flex items-center justify-between rounded bg-rose-50 border border-rose-200 px-3 py-2 text-xs">
+                      <span className="font-semibold text-rose-800">
+                        ยืนยันการลบรายการนี้?
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => executeDelete(p)}
+                          className="rounded bg-rose-600 px-2.5 py-1 font-semibold text-white"
+                        >
+                          ยืนยันลบ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="rounded border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700"
+                        >
+                          ยกเลิก
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(p)}
+                          className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800"
+                        >
+                          <Edit3 className="w-3 h-3" /> แก้ไข
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onPreviewPost(p.id)}
+                          className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600"
+                        >
+                          <Eye className="w-3 h-3" /> ดูหน้าเว็บ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStatus(p)}
+                          className="rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600"
+                        >
+                          {isPublished ? 'ซ่อน' : 'เผยแพร่'}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(p.id)}
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
       {/* Pagination Bar */}
       {filtered.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-2xl p-4 border border-slate-200 text-xs sm:text-sm">
-          <div className="text-slate-600 font-bold">
-            แสดง {(safePage - 1) * pageSize + 1}–
-            {Math.min(safePage * pageSize, filtered.length)} จากทั้งหมด {filtered.length} เรื่อง
+        <div className="rounded-lg bg-white border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+          <div>
+            แสดงรายการที่ {(safePage - 1) * pageSize + 1} ถึง{' '}
+            {Math.min(safePage * pageSize, filtered.length)} จากทั้งหมด{' '}
+            <strong className="text-slate-900">{filtered.length}</strong> รายการ
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+
+          <div className="flex items-center gap-2">
             <select
               value={pageSize}
               onChange={(e) => {
                 setPageSize(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700"
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium"
             >
-              <option value={10}>10 เรื่อง / หน้า</option>
-              <option value={20}>20 เรื่อง / หน้า</option>
-              <option value={50}>50 เรื่อง / หน้า</option>
-              <option value={200}>ทั้งหมด (200)</option>
+              <option value={8}>8 รายการ/หน้า</option>
+              <option value={12}>12 รายการ/หน้า</option>
+              <option value={24}>24 รายการ/หน้า</option>
+              <option value={100}>100 รายการ/หน้า</option>
             </select>
 
             <button
               type="button"
               disabled={safePage <= 1}
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              className="rounded-xl border border-slate-200 px-3 py-1.5 font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+              className="rounded border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
             >
-              ← ก่อนหน้า
+              ก่อนหน้า
             </button>
-            <span className="font-extrabold text-[#0d2546] px-2">
+            <span className="font-semibold text-slate-900 px-1.5">
               หน้า {safePage} / {totalPages}
             </span>
             <button
               type="button"
               disabled={safePage >= totalPages}
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              className="rounded-xl border border-slate-200 px-3 py-1.5 font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+              className="rounded border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
             >
-              ถัดไป →
+              ถัดไป
             </button>
           </div>
         </div>

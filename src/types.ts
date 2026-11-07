@@ -145,15 +145,35 @@ export interface KnowledgeItem {
   createdAt: string;
 }
 
+export interface DashboardStats {
+  postsTotal: number;
+  postsPublished: number;
+  totalViews: number;
+  totalComments: number;
+  totalWorkflows: number;
+  pendingApprovals: number;
+  totalSubscribers: number;
+  unreadContacts: number;
+  kbCount: number;
+  mediaAssetsCount?: number;
+}
+
 export interface BusinessPillarItem {
   id: number;
   pillarIndex: number;
+  pillarNumber?: number;
   pillarKey: string;
   title: string;
   subtitle: string;
+  nameTh?: string;
+  nameEn?: string;
   description: string;
   metricLabel: string;
   metricValue: string;
+  targetKpi?: string;
+  currentProgress?: number;
+  leadAgent?: string;
+  status?: 'active' | 'scaling' | 'pilot' | string;
   statusBadge?: string;
   actionUrl?: string;
 }
@@ -176,6 +196,7 @@ export interface ResearchOutput {
 
 export interface ScriptOutput {
   titleSuggestions: string[];
+  headlines?: string[];
   selectedTitle: string;
   subtitle: string;
   excerpt: string;
@@ -183,6 +204,7 @@ export interface ScriptOutput {
   fullArticleMarkdown: string;
   videoScript: string;
   socialHook: string;
+  hook?: string;
 }
 
 export interface DesignOutput {
@@ -199,6 +221,7 @@ export interface VisualOutput {
   infographicSubpoints: string[];
   generatedSvgDataUrl: string;
   generatedRealImageUrl?: string;
+  suggestedCoverImage?: string;
   recommendedTools: string[];
 }
 
@@ -298,6 +321,7 @@ export interface AiWorkflow {
   qaOutput: QaOutput;
   analyticsOutput: AnalyticsOutput;
   omnichannelOutput: OmnichannelOutput;
+  publishingOutput?: any;
   humanApproval: HumanApprovalState;
   createdAt: string;
   updatedAt: string;
@@ -308,6 +332,7 @@ export interface Subscriber {
   email: string;
   name: string;
   role: string;
+  interestTopic?: string;
   createdAt: string;
 }
 
@@ -315,6 +340,7 @@ export interface ContactMessage {
   id: number;
   name: string;
   email: string;
+  phone?: string;
   subject: string;
   message: string;
   status: 'unread' | 'read';
@@ -333,19 +359,22 @@ export type DiscoverableProvider =
 export interface LiveModelOption {
   id: string;
   label: string;
+  provider?: string;
+  capability?: string;
   createdAt?: string | number;
   supportedMethods?: string[];
 }
 
 export interface ProviderLiveCatalog {
-  provider: DiscoverableProvider;
-  connected: boolean;
-  fetchedAt: string;
+  provider?: DiscoverableProvider;
+  connected?: boolean;
+  ok?: boolean;
+  fetchedAt?: string;
   error?: string;
   textModels: LiveModelOption[];
-  imageModels: LiveModelOption[];
-  videoModels: LiveModelOption[];
-  ttsModels: LiveModelOption[];
+  imageModels?: LiveModelOption[];
+  videoModels?: LiveModelOption[];
+  ttsModels?: LiveModelOption[];
   voices?: LiveModelOption[];
 }
 
@@ -363,7 +392,9 @@ export interface AiEngineSettings {
   // Google Gemini + Media
   geminiModel: string;
   geminiImageModel: string;
+  imageModel?: string;
   geminiVideoModel: string;
+  veoModel?: string;
   geminiTtsModel?: string;
   hasGeminiKey: boolean;
   geminiKeyMasked: string;
@@ -412,6 +443,7 @@ export interface AiEvaluatedPrompt {
   target: 'image' | 'video';
   assessmentThai: string;
   visualSummaryThai: string;
+  thaiSummary?: string;
   fullPrompt: string;
   recommendedAspectRatio: '16:9' | '9:16' | '1:1';
   suggestedPostTitle: string;
@@ -447,6 +479,7 @@ export interface AiMediaAsset {
   mediaType: 'image' | 'video' | 'audio';
   provider: string;
   model: string;
+  engine?: string;
   prompt: string;
   fileUrl: string;
   mimeType: string;
@@ -522,11 +555,14 @@ export interface PublishLog {
   channelName: string;
   title: string;
   contentPreview: string;
+  contentSnippet?: string;
   mode: 'live_api' | 'webhook' | 'internal_live' | 'unconfigured';
   status: 'published' | 'scheduled' | 'failed';
   scheduledAt?: string | null;
   externalUrl?: string;
+  publishedUrl?: string;
   responseNote: string;
+  errorDetail?: string;
   createdAt: string;
 }
 

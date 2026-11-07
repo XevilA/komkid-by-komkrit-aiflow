@@ -17,6 +17,7 @@ import {
   Upload,
   Wand2,
   BrainCircuit,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   AiChatMessage,
@@ -39,28 +40,11 @@ interface Props {
 const CHAT_PROVIDERS: {
   id: Exclude<LlmProviderId, 'auto'>;
   name: string;
-  badgeColor: string;
 }[] = [
-  {
-    id: 'gemini',
-    name: 'Google Gemini',
-    badgeColor: 'bg-sky-600',
-  },
-  {
-    id: 'claude',
-    name: 'Anthropic Claude',
-    badgeColor: 'bg-amber-700',
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    badgeColor: 'bg-indigo-600',
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI ChatGPT',
-    badgeColor: 'bg-emerald-600',
-  },
+  { id: 'gemini', name: 'Google Gemini' },
+  { id: 'claude', name: 'Anthropic Claude' },
+  { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'openai', name: 'OpenAI ChatGPT' },
 ];
 
 export const FlowAndChatStudio: React.FC<Props> = ({
@@ -70,11 +54,12 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 }) => {
   const [subTab, setSubTab] = useState<'flow' | 'direct_media' | 'chat'>('flow');
   const [settings, setSettings] = useState<AiEngineSettings | null>(null);
-  const [liveModels, setLiveModels] = useState<UnifiedLiveModelsResponse | null>(null);
+  const [liveModels, setLiveModels] = useState<UnifiedLiveModelsResponse | null>(
+    null
+  );
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
-  // ---------------- MULTI-LLM CHAT STATE ----------------
   const [chatProvider, setChatProvider] =
     useState<Exclude<LlmProviderId, 'auto'>>('gemini');
   const [chatModel, setChatModel] = useState('');
@@ -84,10 +69,15 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   const [chatSending, setChatSending] = useState(false);
   const [arenaRunning, setArenaRunning] = useState(false);
   const [arenaResults, setArenaResults] = useState<
-    { provider: string; engineLabel: string; reply: string; latencyMs?: number; error?: string }[]
+    {
+      provider: string;
+      engineLabel: string;
+      reply: string;
+      latencyMs?: number;
+      error?: string;
+    }[]
   >([]);
 
-  // ---------------- GOOGLE FLOW STUDIO STATE ----------------
   const [flowProjects, setFlowProjects] = useState<FlowProject[]>([]);
   const [selectedFlowId, setSelectedFlowId] = useState<number | null>(null);
   const [flowTitle, setFlowTitle] = useState('');
@@ -101,21 +91,26 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   const [assemblingFlow, setAssemblingFlow] = useState(false);
   const [generatingFlowVo, setGeneratingFlowVo] = useState(false);
 
-  // ---------------- DIRECT VEO / IMAGE / TTS MEDIA LAB STATE ----------------
   const [mediaAssets, setMediaAssets] = useState<AiMediaAsset[]>([]);
   const [directVidPrompt, setDirectVidPrompt] = useState('');
   const [directVidEngine, setDirectVidEngine] = useState<string>('');
   const [directVidAspect, setDirectVidAspect] = useState<'16:9' | '9:16'>('16:9');
   const [directVidDuration, setDirectVidDuration] = useState(6);
-  const [directVidRes, setDirectVidRes] = useState<'720p' | '1080p' | '4k'>('720p');
+  const [directVidRes, setDirectVidRes] = useState<'720p' | '1080p' | '4k'>(
+    '720p'
+  );
   const [directFirstFrame, setDirectFirstFrame] = useState('');
   const [directLastFrame, setDirectLastFrame] = useState('');
   const [directVidLoading, setDirectVidLoading] = useState(false);
 
   const [directImgPrompt, setDirectImgPrompt] = useState('');
-  const [directImgProvider, setDirectImgProvider] = useState<'gemini' | 'openai'>('gemini');
+  const [directImgProvider, setDirectImgProvider] = useState<'gemini' | 'openai'>(
+    'gemini'
+  );
   const [directImgModel, setDirectImgModel] = useState('');
-  const [directImgAspect, setDirectImgAspect] = useState<'16:9' | '9:16' | '1:1'>('16:9');
+  const [directImgAspect, setDirectImgAspect] = useState<'16:9' | '9:16' | '1:1'>(
+    '16:9'
+  );
   const [directImgLoading, setDirectImgLoading] = useState(false);
 
   const [directTtsText, setDirectTtsText] = useState('');
@@ -173,7 +168,6 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   const activeFlow =
     flowProjects.find((p) => p.id === selectedFlowId) || flowProjects[0] || null;
 
-  // ---------------- HANDLERS: MULTI-LLM CHAT ----------------
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
@@ -199,7 +193,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
   const handleRun4ModelArena = async () => {
     if (!chatInput.trim()) {
-      setErrorBanner('กรุณาพิมพ์คำถามในช่องแชทก่อนกดเปรียบเทียบ 4 โมเดลพร้อมกัน');
+      setErrorBanner('กรุณาระบุคำถามในช่องสนทนาก่อนดำเนินการเปรียบเทียบ');
       return;
     }
     setErrorBanner(null);
@@ -239,28 +233,30 @@ export const FlowAndChatStudio: React.FC<Props> = ({
     setArenaRunning(false);
   };
 
-  const handlePublishTextToCrud = async (contentMarkdown: string, sourceLabel: string) => {
+  const handlePublishTextToCrud = async (
+    contentMarkdown: string,
+    sourceLabel: string
+  ) => {
     const firstLine =
       contentMarkdown
         .split('\n')
         .map((l) => l.replace(/^#+\s*/, '').trim())
-        .find((l) => l.length > 5) || 'บทความจาก AI Chat Studio';
+        .find((l) => l.length > 5) || 'บทความจากระบบผู้ช่วย AI';
     const created = await api.createPost({
       title: firstLine.slice(0, 110),
-      subtitle: `สังเคราะห์ร่วมกับ ${sourceLabel}`,
+      subtitle: `เรียบเรียงร่วมกับ ${sourceLabel}`,
       excerpt: contentMarkdown.replace(/[#>*_`]/g, '').slice(0, 180),
       content: contentMarkdown,
       category: 'ai-tech',
       contentType: 'article',
       status: 'published',
-      tags: ['AI Chat Studio', sourceLabel, 'คมคิด by KOMKRIT'],
+      tags: ['AI Studio', sourceLabel, 'คมคิด by KOMKRIT'],
     });
     await onRefreshAll();
-    setSuccessBanner(`สร้างโพสต์ใหม่ขึ้นหน้าเว็บไซต์สำเร็จ! (Post #${created.id})`);
+    setSuccessBanner(`สร้างและเผยแพร่เนื้อหาสำเร็จ (รหัสเนื้อหา #${created.id})`);
     onOpenPost(created.id);
   };
 
-  // ---------------- HANDLERS: GOOGLE FLOW FILMMAKING ----------------
   const handleCreateFlowProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!flowTitle.trim() || !flowConcept.trim()) return;
@@ -281,7 +277,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       setFlowTitle('');
       setFlowConcept('');
       setSuccessBanner(
-        `AI Director ออกแบบ Storyboard ${created.scenes.length} ฉากสำเร็จ! พร้อมสร้างภาพ Keyframe และเรนเดอร์วิดีโอ Veo / Omni จริง`
+        `สร้างโครงร่างสตอรีบอร์ดจำนวน ${created.scenes.length} ฉากเรียบร้อยแล้ว`
       );
     } catch (err) {
       setErrorBanner((err as Error).message);
@@ -331,7 +327,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         prev.map((p) => (p.id === updated.id ? updated : p))
       );
       await loadStudioData();
-      setSuccessBanner(`เรนเดอร์คลิปวิดีโอ .mp4 ฉากที่ ${sceneIdx + 1} สำเร็จ!`);
+      setSuccessBanner(`เรนเดอร์คลิปวิดีโอฉากที่ ${sceneIdx + 1} สำเร็จ`);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -351,7 +347,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         prev.map((p) => (p.id === updated.id ? updated : p))
       );
       await loadStudioData();
-      setSuccessBanner('สร้างเสียงพากย์ภาษาไทยรวมทุกฉากด้วย Gemini 3.8 Flash TTS สำเร็จ!');
+      setSuccessBanner('สังเคราะห์เสียงบรรยายภาษาไทยรวมทุกฉากสำเร็จ');
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -368,9 +364,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         prev.map((p) => (p.id === updated.id ? updated : p))
       );
       await loadStudioData();
-      setSuccessBanner(
-        'ตัดต่อรวมภาพยนตร์ Master .MP4 ด้วย FFmpeg พร้อมผสมเสียงพากย์สำเร็จ!'
-      );
+      setSuccessBanner('ตัดต่อรวมทุกฉากและผสมเสียงบรรยายเป็นไฟล์ .MP4 สำเร็จ');
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -384,7 +378,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       proj.scenes.find((s) => s.videoClipUrl)?.videoClipUrl ||
       '';
     if (!videoUrl) {
-      setErrorBanner('กรุณาเรนเดอร์คลิปวิดีโออย่างน้อย 1 ฉากก่อนเผยแพร่ขึ้นหน้าเว็บ');
+      setErrorBanner('กรุณาเรนเดอร์คลิปวิดีโออย่างน้อย 1 ฉากก่อนเผยแพร่');
       return;
     }
     const cover =
@@ -396,7 +390,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
     const created = await api.createPost({
       title: proj.title,
-      subtitle: `ผลิตด้วย Google Flow & ${proj.videoEngine}`,
+      subtitle: `ผลิตด้วยระบบ Multi-Scene Video (${proj.videoEngine})`,
       excerpt: proj.concept.slice(0, 180),
       content: `## ${proj.title}\n\n${proj.concept}\n\n${fullNarration}`,
       category: 'ai-tech',
@@ -405,13 +399,12 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       videoUrl,
       audioUrl: proj.voiceoverAudioUrl || '',
       status: 'published',
-      tags: ['Google Flow', 'Google Veo', 'คมคิด by KOMKRIT'],
+      tags: ['AI Video Production', 'คมคิด by KOMKRIT'],
     });
     await onRefreshAll();
     onOpenPost(created.id);
   };
 
-  // ---------------- HANDLERS: DIRECT VEO / IMAGE / TTS ----------------
   const handleDirectVideoGen = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!directVidPrompt.trim()) return;
@@ -429,7 +422,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
           directFirstFrame && directLastFrame ? directLastFrame : undefined,
       });
       await loadStudioData();
-      setSuccessBanner(`สร้างไฟล์วิดีโอจริง ${asset.fileUrl} สำเร็จ!`);
+      setSuccessBanner(`สร้างไฟล์วิดีโอ ${asset.fileUrl} สำเร็จ`);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -450,7 +443,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         aspectRatio: directImgAspect,
       });
       await loadStudioData();
-      setSuccessBanner(`สร้างรูปภาพ AI จริง ${asset.fileUrl} สำเร็จ!`);
+      setSuccessBanner(`สร้างไฟล์รูปภาพ ${asset.fileUrl} สำเร็จ`);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -470,7 +463,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         voice: directTtsVoice,
       });
       await loadStudioData();
-      setSuccessBanner(`สร้างไฟล์เสียงพากย์จริง ${asset.fileUrl} สำเร็จ!`);
+      setSuccessBanner(`สังเคราะห์ไฟล์เสียงบรรยาย ${asset.fileUrl} สำเร็จ`);
     } catch (err) {
       setErrorBanner((err as Error).message);
     } finally {
@@ -487,86 +480,86 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
   return (
     <div className="space-y-5">
-      {/* STUDIO HEADER */}
-      <div className="rounded-2xl bg-gradient-to-r from-[#091a32] via-[#13325c] to-[#0d2546] p-5 sm:p-6 text-white shadow-md border border-[#244e86]">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      {/* Sub-Navigation Header */}
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-400 px-3 py-0.5 text-[11px] font-extrabold text-[#081b33]">
-              100% REAL LIVE API • ZERO MOCKUP • GOOGLE FLOW & VEO + 4 CHAT LLMs
-            </div>
-            <h2 className="mt-2 text-xl sm:text-2xl font-extrabold">
-              Google Flow & Veo Filmmaking Studio + Multi-LLM Chat Hub
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
-              เชื่อมต่อ API จริงโดยตรง: <strong>Google Veo 3.1 / Gemini Omni 1.1 Flash Video</strong>,{' '}
-              <strong>Google Flow Multi-Scene + FFmpeg</strong>, <strong>Claude</strong>,{' '}
-              <strong>DeepSeek (V3/R1)</strong>, <strong>ChatGPT</strong> และ <strong>Gemini</strong>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900">
+              สตูดิโอตัดต่อวิดีโอหลายฉาก (Multi-Scene Flow) & ห้องปฏิบัติการสื่อ
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              วางโครงเรื่องรายฉาก สร้างภาพต้นฉาก-ท้ายฉาก เรนเดอร์วิดีโอ และรวมเสียงบรรยายด้วย FFmpeg
             </p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={onOpenSettings}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[#f59e0b] px-4 py-2.5 text-xs font-extrabold text-[#0b1e38] hover:brightness-105 transition cursor-pointer"
-            >
-              <KeyRound className="w-4 h-4" />
-              ตั้งค่า API Keys ({activeKeyCount}/4 Chat Providers พร้อมใช้)
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer shrink-0"
+          >
+            <KeyRound className="w-3.5 h-3.5 text-slate-500" />
+            ตั้งค่า API ({activeKeyCount}/4 ค่าย)
+          </button>
         </div>
 
-        {/* SUB-NAVIGATION TABS */}
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
+            type="button"
             onClick={() => setSubTab('flow')}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold transition cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold border transition cursor-pointer ${
               subTab === 'flow'
-                ? 'bg-white text-[#0d2546] shadow-sm'
-                : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Clapperboard className="w-4 h-4 text-amber-500" />
-            1. Google Flow Filmmaking Studio (Multi-Scene + Veo)
+            <Clapperboard className="w-3.5 h-3.5 text-amber-400" />
+            1. สตอรีบอร์ดและตัดต่อหลายฉาก
           </button>
           <button
+            type="button"
             onClick={() => setSubTab('direct_media')}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold transition cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold border transition cursor-pointer ${
               subTab === 'direct_media'
-                ? 'bg-white text-[#0d2546] shadow-sm'
-                : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Film className="w-4 h-4 text-rose-500" />
-            2. Google Veo Video • Nano Banana Image • TTS Audio Lab
+            <Film className="w-3.5 h-3.5 text-amber-400" />
+            2. สร้างวิดีโอ ภาพ และเสียงบรรยายโดยตรง
           </button>
           <button
+            type="button"
             onClick={() => setSubTab('chat')}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-extrabold transition cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold border transition cursor-pointer ${
               subTab === 'chat'
-                ? 'bg-white text-[#0d2546] shadow-sm'
-                : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Bot className="w-4 h-4 text-emerald-500" />
-            3. Real Multi-LLM Chat (Claude • DeepSeek • ChatGPT • Gemini)
+            <Bot className="w-3.5 h-3.5 text-amber-400" />
+            3. เปรียบเทียบผลลัพธ์ 4 โมเดล (Multi-LLM Arena)
           </button>
         </div>
       </div>
 
-      {/* BANNERS */}
+      {/* Notifications */}
       {errorBanner && (
-        <div className="rounded-2xl bg-rose-50 border-2 border-rose-300 p-4 text-xs font-bold text-rose-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>⚠️ ข้อผิดพลาดจาก API จริง: {errorBanner}</div>
-          <div className="flex items-center gap-2 shrink-0">
+        <div className="rounded-lg bg-rose-50 border border-rose-200 p-3.5 text-xs font-medium text-rose-900 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorBanner}</span>
+          </div>
+          <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={onOpenSettings}
-              className="rounded-lg bg-rose-700 px-3 py-1.5 text-white hover:bg-rose-800 cursor-pointer"
+              className="rounded bg-rose-700 px-2.5 py-1 text-white font-semibold hover:bg-rose-800 cursor-pointer"
             >
-              ไปหน้าตั้งค่า API Keys
+              ตั้งค่า API Keys
             </button>
             <button
+              type="button"
               onClick={() => setErrorBanner(null)}
-              className="rounded-lg border border-rose-300 px-2.5 py-1.5 text-rose-700 cursor-pointer"
+              className="text-rose-700 font-semibold cursor-pointer"
             >
               ปิด
             </button>
@@ -575,79 +568,72 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       )}
 
       {successBanner && (
-        <div className="rounded-2xl bg-emerald-50 border border-emerald-300 p-3.5 text-xs font-bold text-emerald-900 flex items-center justify-between">
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3.5 text-xs font-medium text-emerald-900 flex items-center justify-between">
           <span className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             {successBanner}
           </span>
           <button
+            type="button"
             onClick={() => setSuccessBanner(null)}
-            className="text-emerald-700 hover:underline cursor-pointer"
+            className="text-emerald-700 font-semibold cursor-pointer"
           >
             ปิด
           </button>
         </div>
       )}
 
-      {/* ==================================================================== */}
-      {/* TAB 1: GOOGLE FLOW MULTI-SCENE FILMMAKING STUDIO                     */}
-      {/* ==================================================================== */}
+      {/* TAB 1: MULTI-SCENE FILMMAKING */}
       {subTab === 'flow' && (
         <div className="space-y-5">
-          {/* Create New Google Flow Project Form */}
           <form
             onSubmit={handleCreateFlowProject}
-            className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-4"
+            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-base font-extrabold text-[#0d2546] flex items-center gap-2">
-                <Clapperboard className="w-5 h-5 text-[#e88d14]" />
-                สร้างโปรเจกต์ภาพยนตร์ใหม่ด้วย Google Flow Workflow (AI Storyboard → Keyframe Ingredients → Veo/Omni Video → FFmpeg Master)
-              </h3>
-            </div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
+              สร้างโปรเจกต์สตอรีบอร์ดวิดีโอใหม่
+            </h4>
 
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5">
               <div className="md:col-span-5">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  ชื่อโปรเจกต์วิดีโอ *
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  ชื่อโปรเจกต์วิดีโอ <span className="text-rose-600">*</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={flowTitle}
                   onChange={(e) => setFlowTitle(e.target.value)}
-                  placeholder="เช่น ห้องเรียนไทยยุค AI: เมื่อครูมีเวลาดูแลหัวใจเด็กมากขึ้น"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold focus:border-[#f59e0b] focus:outline-none"
+                  placeholder="เช่น การประยุกต์ใช้ AI ในห้องเรียนยุคใหม่"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
                 />
               </div>
               <div className="md:col-span-7">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  แนวคิดเรื่องราว / บทสรุปที่ต้องการสื่อสาร *
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  แนวคิดเรื่องราว / ประเด็นหลัก <span className="text-rose-600">*</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={flowConcept}
                   onChange={(e) => setFlowConcept(e.target.value)}
-                  placeholder="เช่น เปรียบเทียบห้องเรียนแบบเดิมกับห้องเรียน Active Learning ที่มี AI ช่วยครูออกแบบสื่อ..."
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm focus:border-[#f59e0b] focus:outline-none"
+                  placeholder="ระบุโครงเรื่องเพื่อให้ AI แบ่งฉากและเขียนบทบรรยาย"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Video Generation Engine (ดึงจาก API จริง)
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  โมเดลวิดีโอ
                 </label>
                 <select
                   value={flowEngine}
                   onChange={(e) => setFlowEngine(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
                 >
-                  <option value="">
-                    ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API)
-                  </option>
+                  <option value="">อัตโนมัติ (รุ่นล่าสุดจาก API)</option>
                   {combinedLiveVideoModels.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.label}
@@ -657,13 +643,13 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  จำนวนฉาก (Scenes)
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  จำนวนฉาก
                 </label>
                 <select
                   value={flowScenesCount}
                   onChange={(e) => setFlowScenesCount(Number(e.target.value))}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
                 >
                   <option value={2}>2 ฉาก (~12 วินาที)</option>
                   <option value={3}>3 ฉาก (~18 วินาที)</option>
@@ -672,29 +658,29 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  สัดส่วนวิดีโอ (Aspect Ratio)
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  สัดส่วนวิดีโอ
                 </label>
                 <select
                   value={flowAspect}
                   onChange={(e) => setFlowAspect(e.target.value as any)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
                 >
-                  <option value="16:9">16:9 แนวนอน (YouTube / Web)</option>
-                  <option value="9:16">9:16 แนวตั้ง (TikTok / Reels / Shorts)</option>
+                  <option value="16:9">16:9 แนวนอน</option>
+                  <option value="9:16">9:16 แนวตั้ง</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  ความละเอียด (Resolution)
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  ความละเอียด
                 </label>
                 <select
                   value={flowRes}
                   onChange={(e) => setFlowRes(e.target.value as any)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
                 >
-                  <option value="720p">720p HD (รวดเร็ว)</option>
+                  <option value="720p">720p HD</option>
                   <option value="1080p">1080p Full HD</option>
                   <option value="4k">4K Ultra HD</option>
                 </select>
@@ -703,46 +689,45 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               <button
                 type="submit"
                 disabled={creatingFlow}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0d2546] py-2.5 px-4 text-xs font-extrabold text-amber-300 hover:bg-[#163b6d] transition cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 py-2 px-4 text-xs font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-60"
               >
                 {creatingFlow ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    AI กำลังวางฉาก...
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    กำลังสร้างฉาก...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4" />
-                    สร้าง Storyboard จริง
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    สร้างสตอรีบอร์ด
                   </>
                 )}
               </button>
             </div>
           </form>
 
-          {/* Active Flow Project Timeline Canvas */}
           {flowProjects.length > 0 && (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-              {/* Left Project List */}
-              <div className="xl:col-span-3 rounded-2xl bg-white border border-slate-200 p-4 space-y-2.5">
-                <h4 className="text-xs font-extrabold text-[#0d2546]">
-                  โปรเจกต์ Google Flow ({flowProjects.length})
+              <div className="xl:col-span-3 rounded-lg bg-white border border-slate-200 p-4 space-y-2.5 shadow-2xs">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 pb-1 border-b border-slate-100">
+                  รายการโปรเจกต์ ({flowProjects.length})
                 </h4>
                 {flowProjects.map((fp) => (
                   <div
                     key={fp.id}
                     onClick={() => setSelectedFlowId(fp.id)}
-                    className={`rounded-xl border p-3 cursor-pointer transition ${
+                    className={`rounded-md border p-3 cursor-pointer transition ${
                       activeFlow?.id === fp.id
-                        ? 'border-[#f59e0b] bg-amber-50/60'
-                        : 'border-slate-200 hover:bg-slate-50'
+                        ? 'border-slate-900 bg-slate-50'
+                        : 'border-slate-200 hover:bg-slate-50/60'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-extrabold text-sky-800 bg-sky-100 rounded-full px-2 py-0.5">
+                      <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">
                         {fp.aspectRatio} • {fp.resolution}
                       </span>
                       <button
+                        type="button"
                         onClick={async (e) => {
                           e.stopPropagation();
                           await api.deleteFlowProject(fp.id);
@@ -753,27 +738,25 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="mt-1 text-xs font-bold text-[#0d2546] line-clamp-2">
+                    <div className="mt-1.5 text-xs font-semibold text-slate-900 line-clamp-2">
                       {fp.title}
                     </div>
-                    <div className="mt-1 text-[10.5px] text-slate-500">
-                      Engine: {fp.videoEngine}
+                    <div className="mt-0.5 text-[11px] text-slate-500 truncate">
+                      {fp.videoEngine}
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* Right Scene-by-Scene Canvas & Master Film Output */}
               {activeFlow && (
                 <div className="xl:col-span-9 space-y-4">
-                  {/* Master Film Control Bar */}
-                  <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                       <div>
-                        <span className="text-[11px] font-extrabold text-amber-700">
-                          GOOGLE FLOW PROJECT #{activeFlow.id} • ENGINE: {activeFlow.videoEngine}
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                          PROJECT #{activeFlow.id} • {activeFlow.videoEngine}
                         </span>
-                        <h3 className="text-lg font-extrabold text-[#0d2546]">
+                        <h3 className="text-base font-bold text-slate-900 mt-0.5">
                           {activeFlow.title}
                         </h3>
                         <p className="text-xs text-slate-600">{activeFlow.concept}</p>
@@ -781,42 +764,44 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
                       <div className="flex flex-wrap gap-2">
                         <button
+                          type="button"
                           onClick={() => handleGenerateFlowVoiceover(activeFlow.id)}
                           disabled={generatingFlowVo}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-amber-100 px-3.5 py-2 text-xs font-extrabold text-amber-950 hover:bg-amber-200 cursor-pointer disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                         >
-                          <Mic className="w-3.5 h-3.5" />
+                          <Mic className="w-3.5 h-3.5 text-amber-600" />
                           {generatingFlowVo
-                            ? 'กำลังพากย์เสียง TTS...'
-                            : '1. สร้างเสียงพากย์ไทยรวม (Gemini 3.8 TTS)'}
+                            ? 'กำลังสังเคราะห์เสียง...'
+                            : '1. สร้างเสียงบรรยายรวม'}
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleAssembleMasterFilm(activeFlow.id)}
                           disabled={assemblingFlow}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 cursor-pointer disabled:opacity-50"
                         >
                           <Layers className="w-3.5 h-3.5" />
                           {assemblingFlow
                             ? 'กำลังตัดต่อด้วย FFmpeg...'
-                            : '2. ตัดต่อรวมทุกฉากเป็น Master .MP4 (FFmpeg)'}
+                            : '2. รวมทุกฉากเป็น Master .MP4'}
                         </button>
                         <button
+                          type="button"
                           onClick={() => handlePublishFlowVideoToWebsite(activeFlow)}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-3.5 py-2 text-xs font-extrabold text-amber-300 hover:bg-[#173c6e] cursor-pointer"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
                         >
-                          <FilePlus2 className="w-3.5 h-3.5" />
-                          เผยแพร่ขึ้นหน้าเว็บหลัก
+                          <FilePlus2 className="w-3.5 h-3.5 text-amber-400" />
+                          เผยแพร่ขึ้นหน้าเว็บ
                         </button>
                       </div>
                     </div>
 
-                    {/* Master Voiceover & Master Stitched MP4 Preview */}
                     {(activeFlow.voiceoverAudioUrl || activeFlow.masterVideoUrl) && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {activeFlow.voiceoverAudioUrl && (
-                          <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-3">
-                            <div className="text-xs font-extrabold text-amber-950 mb-1.5">
-                              🎙️ เสียงพากย์หลักรวมทุกฉาก (Real TTS Audio)
+                          <div className="rounded-md bg-slate-50 border border-slate-200 p-3">
+                            <div className="text-xs font-semibold text-slate-800 mb-1.5">
+                              ไฟล์เสียงบรรยายรวมทุกฉาก
                             </div>
                             <audio
                               controls
@@ -826,23 +811,23 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                           </div>
                         )}
                         {activeFlow.masterVideoUrl && (
-                          <div className="rounded-xl bg-emerald-50/70 border border-emerald-300 p-3">
+                          <div className="rounded-md bg-slate-50 border border-slate-200 p-3">
                             <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-xs font-extrabold text-emerald-950">
-                                🎬 ภาพยนตร์ Master Film (.MP4 Stitched)
+                              <span className="text-xs font-semibold text-slate-800">
+                                วิดีโอฉบับสมบูรณ์ (Master .MP4)
                               </span>
                               <a
                                 href={activeFlow.masterVideoUrl}
                                 download
-                                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 hover:underline"
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 hover:underline"
                               >
-                                <Download className="w-3.5 h-3.5" /> ดาวน์โหลด .MP4
+                                <Download className="w-3.5 h-3.5" /> ดาวน์โหลด
                               </a>
                             </div>
                             <video
                               controls
                               src={activeFlow.masterVideoUrl}
-                              className="w-full rounded-lg bg-black max-h-60"
+                              className="w-full rounded bg-black max-h-56"
                             />
                           </div>
                         )}
@@ -850,39 +835,37 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     )}
                   </div>
 
-                  {/* Scene Cards */}
-                  <div className="space-y-4">
+                  {/* Scene Breakdown */}
+                  <div className="space-y-3.5">
                     {activeFlow.scenes.map((sc, idx) => (
                       <div
                         key={sc.id || idx}
-                        className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+                        className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-2xs space-y-3.5"
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-full bg-[#0d2546] px-3 py-0.5 text-xs font-extrabold text-amber-300">
-                              SCENE {sc.sceneNumber} ({sc.durationSec}s)
-                            </span>
-                            <h4 className="font-extrabold text-sm text-[#0d2546]">
-                              {sc.title}
-                            </h4>
-                          </div>
+                        <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
+                          <span className="rounded bg-slate-900 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+                            ฉากที่ {sc.sceneNumber} ({sc.durationSec} วินาที)
+                          </span>
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-900">
+                            {sc.title}
+                          </h4>
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                          {/* Start Frame Ingredient */}
-                          <div className="rounded-xl border border-slate-200 p-3 space-y-2 bg-slate-50/60">
-                            <div className="text-xs font-extrabold text-[#0d2546]">
-                              1. First Frame Ingredient (&lt;FIRST_FRAME&gt;)
+                          {/* First Frame */}
+                          <div className="rounded-md border border-slate-200 p-3 space-y-2 bg-slate-50/50">
+                            <div className="text-xs font-semibold text-slate-800">
+                              1. ภาพต้นฉาก (First Frame)
                             </div>
                             {sc.firstFrameUrl ? (
                               <img
                                 src={sc.firstFrameUrl}
                                 alt="First frame"
-                                className="w-full h-36 object-cover rounded-lg border border-slate-200 bg-slate-900"
+                                className="w-full h-36 object-cover rounded border border-slate-200 bg-slate-900"
                               />
                             ) : (
-                              <div className="h-36 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-[11px] text-slate-400">
-                                ยังไม่ได้สร้างภาพต้นฉาก
+                              <div className="h-36 rounded border border-dashed border-slate-300 flex items-center justify-center text-xs text-slate-400">
+                                ยังไม่มีภาพต้นฉาก
                               </div>
                             )}
                             <textarea
@@ -890,14 +873,19 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                               value={sc.firstFramePrompt}
                               onChange={(e) => {
                                 const next = [...activeFlow.scenes];
-                                next[idx] = { ...sc, firstFramePrompt: e.target.value };
+                                next[idx] = {
+                                  ...sc,
+                                  firstFramePrompt: e.target.value,
+                                };
                                 setFlowProjects((prev) =>
                                   prev.map((p) =>
-                                    p.id === activeFlow.id ? { ...p, scenes: next } : p
+                                    p.id === activeFlow.id
+                                      ? { ...p, scenes: next }
+                                      : p
                                   )
                                 );
                               }}
-                              className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[11px]"
+                              className="w-full rounded border border-slate-300 bg-white p-2 text-xs"
                             />
                             <div className="flex gap-1.5">
                               <button
@@ -911,13 +899,13 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                                     sc.firstFramePrompt
                                   )
                                 }
-                                className="flex-1 rounded-lg bg-sky-700 py-1.5 text-[11px] font-extrabold text-white hover:bg-sky-800 cursor-pointer disabled:opacity-50"
+                                className="flex-1 rounded bg-slate-900 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                               >
                                 {busySceneKey === `frame-${idx}-first`
-                                  ? 'กำลังวาดภาพจริง...'
-                                  : 'สร้างด้วย Nano Banana 2.1'}
+                                  ? 'กำลังสร้างภาพ...'
+                                  : 'สร้างภาพต้นฉาก'}
                               </button>
-                              <label className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 cursor-pointer hover:bg-slate-100">
+                              <label className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-50">
                                 <Upload className="w-3.5 h-3.5 inline" />
                                 <input
                                   type="file"
@@ -929,9 +917,10 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                                     const url = await api.uploadFile(f);
                                     const next = [...activeFlow.scenes];
                                     next[idx] = { ...sc, firstFrameUrl: url };
-                                    const up = await api.updateFlowProject(activeFlow.id, {
-                                      scenes: next,
-                                    });
+                                    const up = await api.updateFlowProject(
+                                      activeFlow.id,
+                                      { scenes: next }
+                                    );
                                     setFlowProjects((prev) =>
                                       prev.map((p) => (p.id === up.id ? up : p))
                                     );
@@ -941,20 +930,20 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                             </div>
                           </div>
 
-                          {/* End Frame Transition Ingredient */}
-                          <div className="rounded-xl border border-slate-200 p-3 space-y-2 bg-slate-50/60">
-                            <div className="text-xs font-extrabold text-[#0d2546]">
-                              2. Last Frame Transition (&lt;LAST_FRAME&gt; Optional)
+                          {/* Last Frame */}
+                          <div className="rounded-md border border-slate-200 p-3 space-y-2 bg-slate-50/50">
+                            <div className="text-xs font-semibold text-slate-800">
+                              2. ภาพท้ายฉาก (Last Frame • ไม่บังคับ)
                             </div>
                             {sc.lastFrameUrl ? (
                               <img
                                 src={sc.lastFrameUrl}
                                 alt="Last frame"
-                                className="w-full h-36 object-cover rounded-lg border border-slate-200 bg-slate-900"
+                                className="w-full h-36 object-cover rounded border border-slate-200 bg-slate-900"
                               />
                             ) : (
-                              <div className="h-36 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-[11px] text-slate-400 text-center px-2">
-                                (ทางเลือก) สร้างภาพท้ายฉากเพื่อบังคับ Flow Frame-to-Frame Transition
+                              <div className="h-36 rounded border border-dashed border-slate-300 flex items-center justify-center text-xs text-slate-400 text-center px-2">
+                                กำหนดภาพท้ายฉากสำหรับการเปลี่ยนฉากแบบต่อเนื่อง
                               </div>
                             )}
                             <textarea
@@ -962,14 +951,19 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                               value={sc.lastFramePrompt}
                               onChange={(e) => {
                                 const next = [...activeFlow.scenes];
-                                next[idx] = { ...sc, lastFramePrompt: e.target.value };
+                                next[idx] = {
+                                  ...sc,
+                                  lastFramePrompt: e.target.value,
+                                };
                                 setFlowProjects((prev) =>
                                   prev.map((p) =>
-                                    p.id === activeFlow.id ? { ...p, scenes: next } : p
+                                    p.id === activeFlow.id
+                                      ? { ...p, scenes: next }
+                                      : p
                                   )
                                 );
                               }}
-                              className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[11px]"
+                              className="w-full rounded border border-slate-300 bg-white p-2 text-xs"
                             />
                             <button
                               type="button"
@@ -982,25 +976,25 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                                   sc.lastFramePrompt
                                 )
                               }
-                              className="w-full rounded-lg bg-indigo-700 py-1.5 text-[11px] font-extrabold text-white hover:bg-indigo-800 cursor-pointer disabled:opacity-50"
+                              className="w-full rounded border border-slate-300 bg-white py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                             >
                               {busySceneKey === `frame-${idx}-last`
-                                ? 'กำลังวาดภาพท้ายฉาก...'
-                                : 'สร้าง Last Frame (Nano Banana 2.1)'}
+                                ? 'กำลังสร้างภาพ...'
+                                : 'สร้างภาพท้ายฉาก'}
                             </button>
                           </div>
 
-                          {/* Veo / Omni Video Clip Output */}
-                          <div className="rounded-xl border-2 border-[#0d2546]/20 p-3 space-y-2 bg-amber-50/30">
+                          {/* Scene Video Clip */}
+                          <div className="rounded-md border border-slate-200 p-3 space-y-2 bg-slate-50/50">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-extrabold text-[#0d2546]">
-                                3. Veo / Omni Scene Video (.MP4)
+                              <span className="text-xs font-semibold text-slate-800">
+                                3. วิดีโอประจำฉาก (.MP4)
                               </span>
                               {sc.videoClipUrl && (
                                 <a
                                   href={sc.videoClipUrl}
                                   download
-                                  className="text-[11px] font-bold text-emerald-700 hover:underline"
+                                  className="text-xs font-semibold text-slate-700 hover:underline"
                                 >
                                   ดาวน์โหลด
                                 </a>
@@ -1011,12 +1005,11 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                               <video
                                 controls
                                 src={sc.videoClipUrl}
-                                className="w-full h-36 rounded-lg bg-black object-contain"
+                                className="w-full h-36 rounded bg-black object-contain"
                               />
                             ) : (
-                              <div className="h-36 rounded-lg border border-dashed border-amber-400/70 bg-white flex items-center justify-center text-[11px] text-slate-500 text-center px-3">
-                                กดปุ่มด้านล่างเพื่อเรนเดอร์วิดีโอ .mp4 จริงจาก{' '}
-                                {activeFlow.videoEngine}
+                              <div className="h-36 rounded border border-dashed border-slate-300 bg-white flex items-center justify-center text-xs text-slate-400 text-center px-3">
+                                พร้อมเรนเดอร์คลิปวิดีโอสำหรับฉากนี้
                               </div>
                             )}
 
@@ -1025,20 +1018,27 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                               value={sc.videoMotionPrompt}
                               onChange={(e) => {
                                 const next = [...activeFlow.scenes];
-                                next[idx] = { ...sc, videoMotionPrompt: e.target.value };
+                                next[idx] = {
+                                  ...sc,
+                                  videoMotionPrompt: e.target.value,
+                                };
                                 setFlowProjects((prev) =>
                                   prev.map((p) =>
-                                    p.id === activeFlow.id ? { ...p, scenes: next } : p
+                                    p.id === activeFlow.id
+                                      ? { ...p, scenes: next }
+                                      : p
                                   )
                                 );
                               }}
-                              className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[11px]"
+                              className="w-full rounded border border-slate-300 bg-white p-2 text-xs"
                             />
 
                             <div className="flex flex-wrap gap-1.5">
                               <button
                                 type="button"
-                                disabled={Boolean(busySceneKey?.startsWith(`video-${idx}`))}
+                                disabled={Boolean(
+                                  busySceneKey?.startsWith(`video-${idx}`)
+                                )}
                                 onClick={() =>
                                   handleRenderSceneVideo(
                                     activeFlow.id,
@@ -1047,40 +1047,43 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                                     sc.videoMotionPrompt
                                   )
                                 }
-                                className="flex-1 rounded-lg bg-gradient-to-r from-[#f59e0b] to-[#ea8810] py-1.5 px-2 text-[11px] font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer disabled:opacity-50"
+                                className="flex-1 rounded bg-slate-900 py-1.5 px-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                               >
                                 {busySceneKey === `video-${idx}-keyframes` ||
                                 busySceneKey === `video-${idx}-text_only`
-                                  ? 'กำลังเรนเดอร์ .MP4 จริง...'
+                                  ? 'กำลังเรนเดอร์...'
                                   : sc.firstFrameUrl
-                                  ? '🎬 เรนเดอร์จาก Keyframe'
-                                  : '🎬 เรนเดอร์ Text-to-Video'}
+                                  ? 'เรนเดอร์จากภาพต้นฉาก'
+                                  : 'เรนเดอร์จากข้อความ'}
                               </button>
 
-                              {idx > 0 && activeFlow.scenes[idx - 1]?.videoClipUrl && (
-                                <button
-                                  type="button"
-                                  disabled={Boolean(busySceneKey?.startsWith(`video-${idx}`))}
-                                  onClick={() =>
-                                    handleRenderSceneVideo(
-                                      activeFlow.id,
-                                      idx,
-                                      'extend_prev',
-                                      sc.videoMotionPrompt
-                                    )
-                                  }
-                                  className="rounded-lg bg-[#0d2546] py-1.5 px-2.5 text-[11px] font-extrabold text-amber-300 cursor-pointer disabled:opacity-50"
-                                  title="Google Flow Scene Extension: ขยายวิดีโอต่อเนื่องจากฉากก่อนหน้า"
-                                >
-                                  Extend ฉากก่อน
-                                </button>
-                              )}
+                              {idx > 0 &&
+                                activeFlow.scenes[idx - 1]?.videoClipUrl && (
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(
+                                      busySceneKey?.startsWith(`video-${idx}`)
+                                    )}
+                                    onClick={() =>
+                                      handleRenderSceneVideo(
+                                        activeFlow.id,
+                                        idx,
+                                        'extend_prev',
+                                        sc.videoMotionPrompt
+                                      )
+                                    }
+                                    className="rounded border border-slate-300 bg-white py-1.5 px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                                  >
+                                    ต่อเนื่องฉากก่อน
+                                  </button>
+                                )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="text-xs text-slate-600 bg-slate-50 rounded-xl px-3 py-2 border border-slate-200/70">
-                          <strong>บทพากย์ฉากนี้:</strong> {sc.narrationThai}
+                        <div className="text-xs text-slate-600 bg-slate-50 rounded-md px-3 py-2 border border-slate-200">
+                          <strong className="text-slate-800">บทบรรยายประจำฉาก:</strong>{' '}
+                          {sc.narrationThai}
                         </div>
                       </div>
                     ))}
@@ -1092,310 +1095,215 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ==================================================================== */}
-      {/* TAB 2: DIRECT GOOGLE VEO VIDEO / NANO BANANA IMAGE / TTS AUDIO LAB   */}
-      {/* ==================================================================== */}
+      {/* TAB 2: DIRECT MEDIA GENERATION */}
       {subTab === 'direct_media' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* 1. Direct Google Veo / Gemini Omni Video Card */}
-            <form
-              onSubmit={handleDirectVideoGen}
-              className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {/* Video Generator */}
+          <form
+            onSubmit={handleDirectVideoGen}
+            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
+              <Film className="w-4 h-4 text-slate-700" />
+              สร้างไฟล์วิดีโอ (.MP4)
+            </div>
+            <select
+              value={directVidEngine}
+              onChange={(e) => setDirectVidEngine(e.target.value)}
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium"
             >
-              <div className="flex items-center gap-2 text-sm font-extrabold text-[#0d2546]">
-                <Film className="w-4 h-4 text-rose-600" />
-                สร้างวิดีโอ .MP4 จริง (Google Veo / Omni Video)
-              </div>
-              <select
-                value={directVidEngine}
-                onChange={(e) => setDirectVidEngine(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold"
-              >
-                <option value="">
-                  ✨ อัตโนมัติ (ใช้โมเดลวิดีโอใหม่ล่าสุดจาก API)
+              <option value="">อัตโนมัติ (รุ่นล่าสุดจาก API)</option>
+              {combinedLiveVideoModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
                 </option>
-                {combinedLiveVideoModels.map((m) => (
+              ))}
+            </select>
+            <textarea
+              rows={3}
+              required
+              value={directVidPrompt}
+              onChange={(e) => setDirectVidPrompt(e.target.value)}
+              placeholder="ระบุคำอธิบายฉากวิดีโอ..."
+              className="w-full rounded-md border border-slate-300 p-2.5 text-xs"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={directVidAspect}
+                onChange={(e) => setDirectVidAspect(e.target.value as any)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value="16:9">16:9</option>
+                <option value="9:16">9:16</option>
+              </select>
+              <select
+                value={directVidRes}
+                onChange={(e) => setDirectVidRes(e.target.value as any)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value="720p">720p</option>
+                <option value="1080p">1080p</option>
+                <option value="4k">4K</option>
+              </select>
+              <select
+                value={directVidDuration}
+                onChange={(e) => setDirectVidDuration(Number(e.target.value))}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value={5}>5 วินาที</option>
+                <option value={6}>6 วินาที</option>
+                <option value={8}>8 วินาที</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <input
+                type="text"
+                value={directFirstFrame}
+                onChange={(e) => setDirectFirstFrame(e.target.value)}
+                placeholder="URL ภาพต้นฉาก (ถ้ามี)"
+                className="rounded-md border border-slate-300 px-2.5 py-1.5"
+              />
+              <input
+                type="text"
+                value={directLastFrame}
+                onChange={(e) => setDirectLastFrame(e.target.value)}
+                placeholder="URL ภาพท้ายฉาก (ถ้ามี)"
+                className="rounded-md border border-slate-300 px-2.5 py-1.5"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={directVidLoading}
+              className="w-full rounded-md bg-slate-900 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+            >
+              {directVidLoading ? 'กำลังเรนเดอร์วิดีโอ...' : 'ดำเนินการสร้างวิดีโอ'}
+            </button>
+          </form>
+
+          {/* Image Generator */}
+          <form
+            onSubmit={handleDirectImageGen}
+            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
+              <ImageIcon className="w-4 h-4 text-slate-700" />
+              สร้างไฟล์ภาพนิ่ง (.PNG)
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={directImgProvider}
+                onChange={(e) => {
+                  const p = e.target.value as 'gemini' | 'openai';
+                  setDirectImgProvider(p);
+                  setDirectImgModel('');
+                }}
+                className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
+              >
+                <option value="gemini">Google Gemini Image</option>
+                <option value="openai">OpenAI Images</option>
+              </select>
+              <select
+                value={directImgModel}
+                onChange={(e) => setDirectImgModel(e.target.value)}
+                className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
+              >
+                <option value="">อัตโนมัติ (รุ่นล่าสุด)</option>
+                {(
+                  liveModels?.providers?.[directImgProvider]?.imageModels || []
+                ).map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
                   </option>
                 ))}
               </select>
-              <textarea
-                rows={3}
-                required
-                value={directVidPrompt}
-                onChange={(e) => setDirectVidPrompt(e.target.value)}
-                placeholder="บรรยายฉากวิดีโอ เช่น Cinematic wide shot of an inspiring Thai educator teaching students with holographic AI mind maps, warm golden sunlight..."
-                className="w-full rounded-xl border border-slate-200 p-3 text-xs"
-              />
-              <div className="grid grid-cols-3 gap-2">
-                <select
-                  value={directVidAspect}
-                  onChange={(e) => setDirectVidAspect(e.target.value as any)}
-                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                </select>
-                <select
-                  value={directVidRes}
-                  onChange={(e) => setDirectVidRes(e.target.value as any)}
-                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
-                >
-                  <option value="720p">720p</option>
-                  <option value="1080p">1080p</option>
-                  <option value="4k">4K</option>
-                </select>
-                <select
-                  value={directVidDuration}
-                  onChange={(e) => setDirectVidDuration(Number(e.target.value))}
-                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
-                >
-                  <option value={5}>5 วินาที</option>
-                  <option value={6}>6 วินาที</option>
-                  <option value={8}>8 วินาที</option>
-                  <option value={10}>10 วินาที</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <input
-                  type="text"
-                  value={directFirstFrame}
-                  onChange={(e) => setDirectFirstFrame(e.target.value)}
-                  placeholder="First Frame URL (ไม่บังคับ)"
-                  className="rounded-lg border border-slate-200 px-2.5 py-1.5"
-                />
-                <input
-                  type="text"
-                  value={directLastFrame}
-                  onChange={(e) => setDirectLastFrame(e.target.value)}
-                  placeholder="Last Frame URL (ไม่บังคับ)"
-                  className="rounded-lg border border-slate-200 px-2.5 py-1.5"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={directVidLoading}
-                className="w-full rounded-xl bg-rose-600 py-2.5 text-xs font-extrabold text-white hover:bg-rose-700 cursor-pointer disabled:opacity-50"
-              >
-                {directVidLoading
-                  ? 'กำลังสร้างวิดีโอ .MP4 จริง (ใช้เวลา ~30-90 วินาที)...'
-                  : 'สร้างวิดีโอ .MP4 จริงทันที'}
-              </button>
-            </form>
-
-            {/* 2. Direct Real Image Generator Card */}
-            <form
-              onSubmit={handleDirectImageGen}
-              className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+            </div>
+            <textarea
+              rows={4}
+              required
+              value={directImgPrompt}
+              onChange={(e) => setDirectImgPrompt(e.target.value)}
+              placeholder="ระบุคำอธิบายภาพ..."
+              className="w-full rounded-md border border-slate-300 p-2.5 text-xs"
+            />
+            <select
+              value={directImgAspect}
+              onChange={(e) => setDirectImgAspect(e.target.value as any)}
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs"
             >
-              <div className="flex items-center gap-2 text-sm font-extrabold text-[#0d2546]">
-                <ImageIcon className="w-4 h-4 text-sky-600" />
-                สร้างรูปภาพ .PNG จริง (ดึงโมเดลสดจาก API)
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={directImgProvider}
-                  onChange={(e) => {
-                    const p = e.target.value as 'gemini' | 'openai';
-                    setDirectImgProvider(p);
-                    setDirectImgModel('');
-                  }}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold"
-                >
-                  <option value="gemini">Google Gemini Image</option>
-                  <option value="openai">OpenAI Images</option>
-                </select>
-                <select
-                  value={directImgModel}
-                  onChange={(e) => setDirectImgModel(e.target.value)}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold"
-                >
-                  <option value="">✨ อัตโนมัติ (รุ่นใหม่ล่าสุดจาก API)</option>
-                  {(liveModels?.providers?.[directImgProvider]?.imageModels || []).map(
-                    (m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    )
-                  )}
-                </select>
-              </div>
-              <textarea
-                rows={4}
-                required
-                value={directImgPrompt}
-                onChange={(e) => setDirectImgPrompt(e.target.value)}
-                placeholder="Prompt ภาษาอังกฤษหรือไทย เช่น Modern Thai lifelong learning center in Phuket, deep navy and warm gold architectural accents, photorealistic..."
-                className="w-full rounded-xl border border-slate-200 p-3 text-xs"
-              />
+              <option value="16:9">16:9 แนวนอน</option>
+              <option value="1:1">1:1 จัตุรัส</option>
+              <option value="9:16">9:16 แนวตั้ง</option>
+            </select>
+            <button
+              type="submit"
+              disabled={directImgLoading}
+              className="w-full rounded-md bg-slate-900 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+            >
+              {directImgLoading ? 'กำลังสร้างไฟล์ภาพ...' : 'ดำเนินการสร้างรูปภาพ'}
+            </button>
+          </form>
+
+          {/* Audio TTS Generator */}
+          <form
+            onSubmit={handleDirectTtsGen}
+            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
+              <Mic className="w-4 h-4 text-slate-700" />
+              สังเคราะห์เสียงบรรยาย (TTS)
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               <select
-                value={directImgAspect}
-                onChange={(e) => setDirectImgAspect(e.target.value as any)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold"
+                value={directTtsProvider}
+                onChange={(e) => {
+                  const p = e.target.value as any;
+                  setDirectTtsProvider(p);
+                  setDirectTtsVoice(
+                    p === 'gemini'
+                      ? 'Kore'
+                      : p === 'openai'
+                      ? 'alloy'
+                      : 'JBFqnCBsd6RMkjVDRZzb'
+                  );
+                }}
+                className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium"
               >
-                <option value="16:9">16:9 (ภาพปกบทความ / YouTube)</option>
-                <option value="1:1">1:1 (Instagram / Facebook Square)</option>
-                <option value="9:16">9:16 (Stories / Reels / TikTok)</option>
+                <option value="gemini">Google Gemini TTS</option>
+                <option value="elevenlabs">ElevenLabs TTS</option>
+                <option value="openai">OpenAI TTS</option>
               </select>
-              <button
-                type="submit"
-                disabled={directImgLoading}
-                className="w-full rounded-xl bg-sky-700 py-2.5 text-xs font-extrabold text-white hover:bg-sky-800 cursor-pointer disabled:opacity-50"
-              >
-                {directImgLoading ? 'กำลังสร้างไฟล์ภาพจริง...' : 'สร้างรูปภาพ AI จริงทันที'}
-              </button>
-            </form>
-
-            {/* 3. Direct Real Audio TTS Card */}
-            <form
-              onSubmit={handleDirectTtsGen}
-              className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
-            >
-              <div className="flex items-center gap-2 text-sm font-extrabold text-[#0d2546]">
-                <Mic className="w-4 h-4 text-amber-600" />
-                สร้างเสียงพากย์จริง (Gemini 3.8 TTS / ElevenLabs / OpenAI)
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={directTtsProvider}
-                  onChange={(e) => {
-                    const p = e.target.value as any;
-                    setDirectTtsProvider(p);
-                    setDirectTtsVoice(
-                      p === 'gemini'
-                        ? 'Kore'
-                        : p === 'openai'
-                        ? 'alloy'
-                        : 'JBFqnCBsd6RMkjVDRZzb'
-                    );
-                  }}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-bold"
-                >
-                  <option value="gemini">Google Gemini TTS (รองรับไทย)</option>
-                  <option value="elevenlabs">ElevenLabs Multilingual TTS</option>
-                  <option value="openai">OpenAI TTS (ดึงโมเดลเสียงจาก API)</option>
-                </select>
-                <input
-                  type="text"
-                  value={directTtsVoice}
-                  onChange={(e) => setDirectTtsVoice(e.target.value)}
-                  placeholder="Voice (เช่น Kore, Orus, Puck)"
-                  className="rounded-xl border border-slate-200 px-2.5 py-2 text-xs font-bold"
-                />
-              </div>
-              <textarea
-                rows={5}
-                required
-                value={directTtsText}
-                onChange={(e) => setDirectTtsText(e.target.value)}
-                placeholder="พิมพ์บทพากย์ภาษาไทยหรืออังกฤษ เช่น สวัสดีครับชาวคมคิด วันนี้เราจะมาสำรวจแนวทางการใช้ AI ยกระดับห้องเรียนไทย..."
-                className="w-full rounded-xl border border-slate-200 p-3 text-xs"
+              <input
+                type="text"
+                value={directTtsVoice}
+                onChange={(e) => setDirectTtsVoice(e.target.value)}
+                placeholder="ชื่อเสียง (เช่น Kore)"
+                className="rounded-md border border-slate-300 px-2.5 py-2 text-xs"
               />
-              <button
-                type="submit"
-                disabled={directTtsLoading}
-                className="w-full rounded-xl bg-amber-500 py-2.5 text-xs font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer disabled:opacity-50"
-              >
-                {directTtsLoading ? 'กำลังสังเคราะห์ไฟล์เสียงจริง...' : 'สร้างไฟล์เสียง .WAV/.MP3 จริง'}
-              </button>
-            </form>
-          </div>
-
-          {/* Generated Real Media Assets Gallery */}
-          <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
-            <h3 className="text-base font-extrabold text-[#0d2546]">
-              คลังไฟล์สื่อ AI ที่สร้างจริงในระบบ ({mediaAssets.length} ไฟล์ใน /uploads/)
-            </h3>
-            {mediaAssets.length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">
-                ยังไม่มีไฟล์สื่อที่สร้าง กดสั่งสร้างวิดีโอ รูปภาพ หรือเสียงด้านบนได้เลยครับ
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {mediaAssets.map((a) => (
-                  <div
-                    key={a.id}
-                    className="rounded-xl border border-slate-200 p-3 space-y-2 flex flex-col justify-between"
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-[10.5px]">
-                        <span className="rounded-full bg-[#0d2546] text-amber-300 px-2.5 py-0.5 font-extrabold uppercase">
-                          {a.mediaType} • {a.model}
-                        </span>
-                        <button
-                          onClick={async () => {
-                            await api.deleteMediaAsset(a.id);
-                            await loadStudioData();
-                          }}
-                          className="text-slate-400 hover:text-rose-600 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      {a.mediaType === 'video' && (
-                        <video
-                          controls
-                          src={a.fileUrl}
-                          className="w-full h-40 rounded-lg bg-black object-contain"
-                        />
-                      )}
-                      {a.mediaType === 'image' && (
-                        <img
-                          src={a.fileUrl}
-                          alt={a.prompt}
-                          className="w-full h-40 rounded-lg object-cover bg-slate-100"
-                        />
-                      )}
-                      {a.mediaType === 'audio' && (
-                        <div className="py-4">
-                          <audio controls src={a.fileUrl} className="w-full" />
-                        </div>
-                      )}
-
-                      <p className="text-[11px] text-slate-600 line-clamp-2">{a.prompt}</p>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <a
-                        href={a.fileUrl}
-                        download
-                        className="font-bold text-sky-700 hover:underline inline-flex items-center gap-1"
-                      >
-                        <Download className="w-3 h-3" /> ดาวน์โหลดไฟล์จริง
-                      </a>
-                      <button
-                        onClick={() => {
-                          if (a.mediaType === 'image') {
-                            setDirectFirstFrame(a.fileUrl);
-                            setSuccessBanner('นำ URL รูปภาพไปใส่เป็น First Frame สำหรับสร้างวิดีโอแล้ว!');
-                          }
-                        }}
-                        className={`font-bold text-amber-700 hover:underline cursor-pointer ${
-                          a.mediaType !== 'image' ? 'hidden' : ''
-                        }`}
-                      >
-                        ใช้เป็น First Frame →
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+            </div>
+            <textarea
+              rows={5}
+              required
+              value={directTtsText}
+              onChange={(e) => setDirectTtsText(e.target.value)}
+              placeholder="พิมพ์บทบรรยายภาษาไทยหรือภาษาอังกฤษ..."
+              className="w-full rounded-md border border-slate-300 p-2.5 text-xs"
+            />
+            <button
+              type="submit"
+              disabled={directTtsLoading}
+              className="w-full rounded-md bg-slate-900 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+            >
+              {directTtsLoading ? 'กำลังสังเคราะห์เสียง...' : 'สร้างไฟล์เสียงบรรยาย'}
+            </button>
+          </form>
         </div>
       )}
 
-      {/* ==================================================================== */}
-      {/* TAB 3: REAL MULTI-LLM INTERACTIVE CHAT (CLAUDE, DEEPSEEK, GPT, GEMINI) */}
-      {/* ==================================================================== */}
+      {/* TAB 3: MULTI-LLM ARENA */}
       {subTab === 'chat' && (
         <div className="space-y-4">
-          {/* Provider Switcher Bar */}
-          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-2xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="rounded-lg bg-white border border-slate-200 p-4 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
               {CHAT_PROVIDERS.map((p) => {
                 const active = chatProvider === p.id;
                 const hasKey =
@@ -1406,16 +1314,17 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 return (
                   <button
                     key={p.id}
+                    type="button"
                     onClick={() => setChatProvider(p.id)}
-                    className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-extrabold transition cursor-pointer ${
+                    className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold border transition cursor-pointer ${
                       active
-                        ? 'bg-[#0d2546] text-amber-300 shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     <span
-                      className={`h-2 w-2 rounded-full ${
-                        hasKey ? 'bg-emerald-400' : 'bg-rose-400'
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        hasKey ? 'bg-emerald-500' : 'bg-slate-300'
                       }`}
                     />
                     {p.name}
@@ -1428,50 +1337,53 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               <select
                 value={chatModel}
                 onChange={(e) => setChatModel(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-[#0d2546]"
+                className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800"
               >
-                <option value="">✨ อัตโนมัติ (ใช้รุ่นใหม่ล่าสุดจาก API)</option>
-                {(liveModels?.providers?.[chatProvider]?.textModels || []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
+                <option value="">อัตโนมัติ (รุ่นล่าสุดจาก API)</option>
+                {(liveModels?.providers?.[chatProvider]?.textModels || []).map(
+                  (m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  )
+                )}
               </select>
 
-              <label className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0d2546] cursor-pointer">
+              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={useKb}
                   onChange={(e) => setUseKb(e.target.checked)}
-                  className="accent-emerald-600"
+                  className="accent-slate-900"
                 />
-                เชื่อมฐานความรู้ คมคิด (RAG)
+                อ้างอิงคลังความรู้ (RAG)
               </label>
 
               <button
+                type="button"
                 onClick={async () => {
                   await api.clearChatHistory(sessionId);
                   setChatMessages([]);
                   setArenaResults([]);
                 }}
-                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-500 hover:text-rose-600 cursor-pointer"
+                className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-rose-600 cursor-pointer"
               >
-                ล้างประวัติแชท
+                ล้างประวัติ
               </button>
             </div>
           </div>
 
-          {/* 4-Model Side-by-Side Arena Output (if triggered) */}
           {arenaResults.length > 0 && (
-            <div className="rounded-2xl bg-slate-900 p-4 text-white space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold text-amber-300 flex items-center gap-1.5">
-                  <BrainCircuit className="w-4 h-4" />
-                  ผลลัพธ์การประชัน 4 โมเดลจริงพร้อมกัน (Gemini • Claude • DeepSeek • ChatGPT)
+            <div className="rounded-lg bg-white border border-slate-200 p-4 space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <BrainCircuit className="w-4 h-4 text-amber-600" />
+                  ผลการเปรียบเทียบคำตอบจาก 4 ผู้ให้บริการ
                 </span>
                 <button
+                  type="button"
                   onClick={() => setArenaResults([])}
-                  className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                  className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
                 >
                   ซ่อนตารางเปรียบเทียบ
                 </button>
@@ -1480,30 +1392,31 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 {arenaResults.map((ar, i) => (
                   <div
                     key={i}
-                    className="rounded-xl bg-white/10 border border-white/15 p-3.5 space-y-2"
+                    className="rounded-md bg-slate-50 border border-slate-200 p-3.5 space-y-2"
                   >
-                    <div className="flex items-center justify-between text-xs font-extrabold text-amber-300">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span>{ar.engineLabel}</span>
                       {ar.latencyMs && (
-                        <span className="text-[10.5px] text-emerald-300">
+                        <span className="text-[11px] text-slate-500">
                           {ar.latencyMs} ms
                         </span>
                       )}
                     </div>
                     {ar.error ? (
-                      <div className="text-xs text-rose-300">{ar.error}</div>
+                      <div className="text-xs text-rose-600">{ar.error}</div>
                     ) : (
                       <>
-                        <div className="text-xs text-slate-100 whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                        <div className="text-xs text-slate-700 whitespace-pre-wrap max-h-56 overflow-y-auto leading-relaxed">
                           {ar.reply}
                         </div>
                         <button
+                          type="button"
                           onClick={() =>
                             handlePublishTextToCrud(ar.reply, ar.engineLabel)
                           }
-                          className="rounded-lg bg-amber-400 px-2.5 py-1 text-[11px] font-extrabold text-[#0b1e38] cursor-pointer"
+                          className="rounded bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer"
                         >
-                          นำคำตอบนี้ไปสร้างโพสต์หน้าเว็บ →
+                          นำไปสร้างเนื้อหาบนเว็บไซต์
                         </button>
                       </>
                     )}
@@ -1513,17 +1426,17 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Chat Conversation Box */}
-          <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden flex flex-col h-[540px]">
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          <div className="rounded-lg bg-white border border-slate-200 shadow-2xs overflow-hidden flex flex-col h-[500px]">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
               {chatMessages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-2">
-                  <Bot className="w-10 h-10 text-[#0d2546]/30" />
-                  <div className="text-sm font-bold text-[#0d2546]">
-                    สนทนาสดกับ {CHAT_PROVIDERS.find((p) => p.id === chatProvider)?.name} ({chatModel})
+                <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-1.5">
+                  <Bot className="w-8 h-8 text-slate-300" />
+                  <div className="text-xs font-semibold text-slate-700">
+                    พร้อมทดสอบคำสั่งกับ{' '}
+                    {CHAT_PROVIDERS.find((p) => p.id === chatProvider)?.name}
                   </div>
-                  <p className="text-xs max-w-md">
-                    ทุกข้อความส่งตรงถึง API จริง 100% (ไม่มีข้อความจำลอง) สามารถสั่งวิเคราะห์นโยบาย ร่างบทความ สคริปต์วิดีโอ หรือกดปุ่มประชัน 4 โมเดลพร้อมกันได้ทันที
+                  <p className="text-xs text-slate-500 max-w-md">
+                    พิมพ์คำสั่งด้านล่างเพื่อสนทนากับโมเดลที่เลือก หรือกดปุ่มเปรียบเทียบ 4 โมเดลพร้อมกัน
                   </p>
                 </div>
               ) : (
@@ -1535,55 +1448,24 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     }`}
                   >
                     <div
-                      className={`max-w-3xl rounded-2xl px-4 py-3 text-sm ${
+                      className={`max-w-3xl rounded-lg px-4 py-3 text-xs sm:text-sm ${
                         m.role === 'user'
-                          ? 'bg-[#0d2546] text-white'
+                          ? 'bg-slate-900 text-white'
                           : 'bg-slate-50 border border-slate-200 text-slate-800'
                       }`}
                     >
                       {m.role === 'assistant' && (
-                        <div className="flex items-center justify-between gap-4 mb-1.5 text-[11px] font-extrabold text-amber-700">
+                        <div className="flex items-center justify-between gap-4 mb-1.5 text-[11px] font-semibold text-slate-500">
                           <span>
-                            🤖 {m.provider.toUpperCase()} ({m.model})
+                            {m.provider.toUpperCase()} ({m.model})
                           </span>
                           {m.latencyMs ? <span>{m.latencyMs} ms</span> : null}
                         </div>
                       )}
-
-                      {m.reasoning && (
-                        <details className="mb-2 rounded-xl bg-indigo-50 border border-indigo-200 p-2.5 text-xs text-indigo-950">
-                          <summary className="font-extrabold cursor-pointer">
-                            🧠 ดูการคิดวิเคราะห์เชิงลึก (Reasoning Chain-of-Thought)
-                          </summary>
-                          <div className="mt-1.5 whitespace-pre-wrap text-[11.5px] text-slate-700">
-                            {m.reasoning}
-                          </div>
-                        </details>
-                      )}
-
                       {m.role === 'assistant' ? (
-                        <div className="text-xs sm:text-sm">
-                          {renderRichMarkdown(m.content)}
-                        </div>
+                        <div>{renderRichMarkdown(m.content)}</div>
                       ) : (
                         <div className="whitespace-pre-wrap">{m.content}</div>
-                      )}
-
-                      {m.role === 'assistant' && (
-                        <div className="mt-2.5 pt-2 border-t border-slate-200/80 flex justify-end">
-                          <button
-                            onClick={() =>
-                              handlePublishTextToCrud(
-                                m.content,
-                                `${m.provider} (${m.model})`
-                              )
-                            }
-                            className="inline-flex items-center gap-1 rounded-lg bg-[#0d2546]/10 px-2.5 py-1 text-[11px] font-extrabold text-[#0d2546] hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
-                          >
-                            <FilePlus2 className="w-3.5 h-3.5" />
-                            สร้างเป็นโพสต์ CRUD บนเว็บไซต์
-                          </button>
-                        </div>
                       )}
                     </div>
                   </div>
@@ -1591,7 +1473,6 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               )}
             </div>
 
-            {/* Chat Input Footer */}
             <form
               onSubmit={handleSendChat}
               className="border-t border-slate-200 bg-slate-50 p-3 flex flex-col sm:flex-row gap-2"
@@ -1600,27 +1481,26 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder={`พิมพ์ข้อความถึง ${chatProvider.toUpperCase()} (${chatModel})...`}
-                className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                placeholder="พิมพ์คำถามหรือหัวข้อที่ต้องการวิเคราะห์..."
+                className="flex-1 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
               />
               <div className="flex gap-2">
                 <button
                   type="button"
                   disabled={arenaRunning || chatSending}
                   onClick={handleRun4ModelArena}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-700 px-3.5 py-2.5 text-xs font-extrabold text-white hover:bg-indigo-800 cursor-pointer disabled:opacity-50"
-                  title="ยิงคำถามนี้ไปยัง Gemini, Claude, DeepSeek และ ChatGPT พร้อมกันเพื่อเทียบคำตอบจริง"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                 >
-                  <Wand2 className="w-3.5 h-3.5" />
-                  {arenaRunning ? 'กำลังเทียบ 4 API...' : 'เทียบ 4 โมเดลพร้อมกัน'}
+                  <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                  {arenaRunning ? 'กำลังเปรียบเทียบ...' : 'เปรียบเทียบ 4 โมเดล'}
                 </button>
                 <button
                   type="submit"
                   disabled={chatSending || arenaRunning}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#0d2546] px-5 py-2.5 text-xs font-extrabold text-amber-300 hover:bg-[#173d70] cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  {chatSending ? 'กำลังเรียก API...' : 'ส่งข้อความ'}
+                  {chatSending ? 'กำลังส่ง...' : 'ส่งคำสั่ง'}
                 </button>
               </div>
             </form>

@@ -12,8 +12,11 @@ function getAuthSecret(): string {
 }
 
 export function getAdminCredentials(): { username: string; password: string } {
-  const username = getSettingValue('admin_username', 'ADMIN_USERNAME') || 'admin';
-  const password = getSettingValue('admin_password', 'ADMIN_PASSWORD') || 'komkrit2026';
+  const rawUser = getSettingValue('admin_username', 'ADMIN_USERNAME');
+  const rawPass = getSettingValue('admin_password', 'ADMIN_PASSWORD');
+  const username = rawUser && rawUser !== 'change-me-admin' ? rawUser : 'admin';
+  const password =
+    rawPass && rawPass !== 'change-me-strong-password' ? rawPass : 'komkrit2026';
   return { username, password };
 }
 

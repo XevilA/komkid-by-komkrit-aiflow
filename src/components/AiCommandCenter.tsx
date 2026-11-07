@@ -120,37 +120,37 @@ const ALL_CHANNELS = [
 const AI_TOOLS_ECOSYSTEM = [
   {
     group: '01 RESEARCH',
-    accent: 'border-sky-200 bg-sky-50/50 text-sky-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['ChatGPT', 'Perplexity', 'Google Scholar', 'Elicit', 'Consensus', 'Notion AI'],
   },
   {
     group: '02 SCRIPT & IDEA',
-    accent: 'border-emerald-200 bg-emerald-50/50 text-emerald-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['ChatGPT', 'Claude', 'Gemini', 'Notion AI', 'MindMeister'],
   },
   {
     group: '03 DESIGN',
-    accent: 'border-lime-200 bg-lime-50/50 text-lime-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['Canva AI', 'Beautiful.ai', 'Gamma', 'Lucidchart'],
   },
   {
     group: '04 VISUAL',
-    accent: 'border-blue-200 bg-blue-50/50 text-blue-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['Gemini Image', 'OpenAI Image', 'Midjourney', 'Leonardo AI', 'Canva AI'],
   },
   {
     group: '05 VIDEO',
-    accent: 'border-purple-200 bg-purple-50/50 text-purple-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['Google Veo', 'Pictory AI', 'HeyGen (AI Avatar)', 'Runway', 'CapCut AI'],
   },
   {
     group: '06 AUDIO',
-    accent: 'border-amber-200 bg-amber-50/50 text-amber-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['ElevenLabs', 'Gemini TTS', 'Play.ht', 'Adobe Podcast', 'Soundraw'],
   },
   {
     group: '08 ANALYTICS',
-    accent: 'border-teal-200 bg-teal-50/50 text-teal-900',
+    accent: 'border-slate-200 bg-slate-50 text-slate-800',
     tools: ['YouTube Analytics', 'Facebook Insights', 'Google Analytics', 'Sheets AI'],
   },
 ];
