@@ -147,8 +147,8 @@ export interface KnowledgeItem {
 
 export interface BusinessPillarItem {
   id: number;
-  pillarIndex: 1 | 2 | 3 | 4 | 5;
-  pillarKey: 'views' | 'products' | 'sponsors' | 'business' | 'community';
+  pillarIndex: number;
+  pillarKey: string;
   title: string;
   subtitle: string;
   description: string;

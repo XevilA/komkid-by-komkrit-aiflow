@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Upload,
   Film,
+  Edit3,
 } from 'lucide-react';
 import {
   ChannelConfig,
@@ -119,8 +120,9 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
   const [editingChannel, setEditingChannel] = useState<ChannelConfig | null>(null);
   const [tokenInput, setTokenInput] = useState('');
 
-  // Survey Add Modal
+  // Survey Add / Edit Modal
   const [surveyModalOpen, setSurveyModalOpen] = useState(false);
+  const [editingSurveyId, setEditingSurveyId] = useState<number | null>(null);
   const [surveyForm, setSurveyForm] = useState({
     respondentName: '',
     respondentRole: 'ครู / บุคลากรทางการศึกษา',
@@ -286,10 +288,29 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
     await loadHub();
   };
 
+  const openEditSurvey = (sv: AudienceSurvey) => {
+    setEditingSurveyId(sv.id);
+    setSurveyForm({
+      respondentName: sv.respondentName,
+      respondentRole: sv.respondentRole,
+      schoolOrOrg: sv.schoolOrOrg || '',
+      preferredChannel: sv.preferredChannel || 'LINE OA',
+      requestedTopic: sv.requestedTopic,
+      satisfactionScore: sv.satisfactionScore || 5,
+      feedbackDetail: sv.feedbackDetail || '',
+    });
+    setSurveyModalOpen(true);
+  };
+
   const handleCreateSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.submitSurvey(surveyForm);
+    if (editingSurveyId) {
+      await api.updateSurvey(editingSurveyId, surveyForm);
+    } else {
+      await api.submitSurvey(surveyForm);
+    }
     setSurveyModalOpen(false);
+    setEditingSurveyId(null);
     setSurveyForm({
       respondentName: '',
       respondentRole: 'ครู / บุคลากรทางการศึกษา',
@@ -823,15 +844,26 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                     ? 'กำลังสั่งงานทีม AI...'
                     : 'ส่งโจทย์ให้ CEO Agent สร้างคอนเทนต์ทันที'}
                 </button>
-                <button
-                  onClick={async () => {
-                    await api.deleteSurvey(sv.id);
-                    await loadHub();
-                  }}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openEditSurvey(sv)}
+                    className="p-1.5 text-slate-500 hover:text-[#0d2546] cursor-pointer"
+                    title="แก้ไขแบบสำรวจนี้"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await api.deleteSurvey(sv.id);
+                      await loadHub();
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"
+                    title="ลบแบบสำรวจนี้"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -980,10 +1012,15 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
           >
             <div className="flex items-center justify-between">
               <h3 className="font-extrabold text-lg text-[#0d2546]">
-                แบบสำรวจความต้องการผู้เรียน / ครู / โรงเรียน
+                {editingSurveyId
+                  ? 'แก้ไขข้อมูลแบบสำรวจผู้เรียน / ครู / โรงเรียน'
+                  : 'แบบสำรวจความต้องการผู้เรียน / ครู / โรงเรียน'}
               </h3>
               <button
-                onClick={() => setSurveyModalOpen(false)}
+                onClick={() => {
+                  setSurveyModalOpen(false);
+                  setEditingSurveyId(null);
+                }}
                 className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
               >
                 <X className="w-5 h-5" />

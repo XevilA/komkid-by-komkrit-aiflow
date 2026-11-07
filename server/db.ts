@@ -258,6 +258,13 @@ export function initDatabase() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, is_featured DESC, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category, content_type);
+    CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_base(category, is_active);
+    CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_publish_logs_status ON publish_logs(status, scheduled_at);
   `);
 
   // Safe schema migration: add audio_url to posts if missing

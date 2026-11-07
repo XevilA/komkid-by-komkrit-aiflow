@@ -19,6 +19,8 @@ import {
   ExternalLink,
   Download,
   MailCheck,
+  Search,
+  Copy,
 } from 'lucide-react';
 import {
   KnowledgeItem,
@@ -49,6 +51,9 @@ export const KnowledgeBaseManager: React.FC<{
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [kbSearch, setKbSearch] = useState('');
+  const [kbCategoryFilter, setKbCategoryFilter] = useState<string>('all');
+  const [confirmDeleteKbId, setConfirmDeleteKbId] = useState<number | null>(null);
   const [form, setForm] = useState({
     title: '',
     category: 'research' as KnowledgeItem['category'],
@@ -56,6 +61,37 @@ export const KnowledgeBaseManager: React.FC<{
     content: '',
     sourceRef: '',
     isActive: true,
+  });
+
+  const handleDuplicateKb = async (k: KnowledgeItem) => {
+    setErrorMsg(null);
+    try {
+      await api.createKnowledge({
+        title: `${k.title} (สำเนา)`,
+        category: k.category,
+        summary: k.summary,
+        content: k.content,
+        sourceRef: k.sourceRef,
+        isActive: k.isActive,
+      });
+      await onRefresh();
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    }
+  };
+
+  const filteredKb = items.filter((k) => {
+    if (kbCategoryFilter !== 'all' && k.category !== kbCategoryFilter) return false;
+    if (kbSearch.trim()) {
+      const q = kbSearch.toLowerCase();
+      return (
+        k.title.toLowerCase().includes(q) ||
+        k.summary.toLowerCase().includes(q) ||
+        k.content.toLowerCase().includes(q) ||
+        (k.sourceRef || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
   });
 
   const openCreate = () => {
@@ -152,8 +188,33 @@ export const KnowledgeBaseManager: React.FC<{
         </div>
       )}
 
+      <div className="flex flex-col sm:flex-row gap-3 bg-white rounded-2xl p-4 border border-slate-200">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={kbSearch}
+            onChange={(e) => setKbSearch(e.target.value)}
+            placeholder="ค้นหาหัวข้อ, สรุป หรือแหล่งอ้างอิงในคลังความรู้..."
+            className="w-full rounded-xl border border-slate-200 pl-9 pr-3.5 py-2 text-xs sm:text-sm"
+          />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+        </div>
+        <select
+          value={kbCategoryFilter}
+          onChange={(e) => setKbCategoryFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 px-3.5 py-2 text-xs sm:text-sm font-bold text-[#0d2546]"
+        >
+          <option value="all">ทุกหมวดข้อมูล ({items.length})</option>
+          {KB_CATEGORIES.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label} ({items.filter((i) => i.category === c.id).length})
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {items.map((k) => {
+        {filteredKb.map((k) => {
           const catLabel =
             KB_CATEGORIES.find((c) => c.id === k.category)?.label || k.category;
           return (
@@ -190,7 +251,7 @@ export const KnowledgeBaseManager: React.FC<{
                 </p>
               </div>
               <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                <span>แหล่งอ้างอิง: {k.sourceRef || '-'}</span>
+                <span className="truncate max-w-[180px]">แหล่งอ้างอิง: {k.sourceRef || '-'}</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => openEdit(k)}
@@ -199,12 +260,39 @@ export const KnowledgeBaseManager: React.FC<{
                     <Edit3 className="w-3.5 h-3.5 inline mr-0.5" /> แก้ไข
                   </button>
                   <button
-                    onClick={() => handleDelete(k.id)}
-                    className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-600 hover:text-white cursor-pointer"
-                    title="ลบรายการนี้"
+                    onClick={() => handleDuplicateKb(k)}
+                    className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                    title="คัดลอกรายการนี้"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Copy className="w-3.5 h-3.5 inline" />
                   </button>
+                  {confirmDeleteKbId === k.id ? (
+                    <div className="flex items-center gap-1 bg-rose-50 border border-rose-200 rounded-lg px-1.5 py-0.5">
+                      <button
+                        onClick={async () => {
+                          await handleDelete(k.id);
+                          setConfirmDeleteKbId(null);
+                        }}
+                        className="text-[11px] font-extrabold text-rose-700 cursor-pointer"
+                      >
+                        ยืนยันลบ
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteKbId(null)}
+                        className="text-[11px] font-bold text-slate-500 cursor-pointer ml-1"
+                      >
+                        ยกเลิก
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteKbId(k.id)}
+                      className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-600 hover:text-white cursor-pointer"
+                      title="ลบรายการนี้"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -319,8 +407,26 @@ export const FivePillarManager: React.FC<{
   onRefresh: () => Promise<void>;
 }> = ({ pillars, onRefresh }) => {
   const [editing, setEditing] = useState<BusinessPillarItem | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [errText, setErrText] = useState<string | null>(null);
+
+  const openCreatePillar = () => {
+    setCreating(true);
+    setEditing({
+      id: 0,
+      pillarIndex: pillars.length + 1,
+      pillarKey: `pillar_${pillars.length + 1}`,
+      title: '',
+      subtitle: '',
+      description: '',
+      metricLabel: 'เป้าหมายหลัก (KPI)',
+      metricValue: '100%',
+      statusBadge: 'กำลังดำเนินการ',
+      actionUrl: '',
+    });
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -328,8 +434,13 @@ export const FivePillarManager: React.FC<{
     setSaving(true);
     setErrText(null);
     try {
-      await api.updatePillar(editing.id, editing);
+      if (creating || !editing.id) {
+        await api.createPillar(editing);
+      } else {
+        await api.updatePillar(editing.id, editing);
+      }
       setEditing(null);
+      setCreating(false);
       await onRefresh();
     } catch (err) {
       setErrText((err as Error).message);
@@ -338,18 +449,38 @@ export const FivePillarManager: React.FC<{
     }
   };
 
+  const handleDeletePillar = async (id: number) => {
+    setErrText(null);
+    try {
+      await api.deletePillar(id);
+      setConfirmDeleteId(null);
+      await onRefresh();
+    } catch (err) {
+      setErrText((err as Error).message);
+    }
+  };
+
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl bg-gradient-to-r from-[#0d2546] to-[#1a4378] p-6 text-white">
-        <span className="rounded-full bg-[#f59e0b] px-3 py-0.5 text-xs font-extrabold text-[#0b1e38]">
-          KOMKID 5-PILLAR BUSINESS MODEL
-        </span>
-        <h2 className="mt-2 text-xl sm:text-2xl font-extrabold">
-          CONTENT &nbsp;→&nbsp; AUDIENCE &nbsp;→&nbsp; TRUST
-        </h2>
-        <p className="text-xs sm:text-sm text-slate-200 mt-1">
-          จัดการเป้าหมายและตัวชี้วัดทั้ง 5 ด้านที่แสดงบนหน้าเว็บไซต์หลัก (กดปุ่มดินสอเพื่อแก้ไขได้ทันที)
-        </p>
+      <div className="rounded-2xl bg-gradient-to-r from-[#0d2546] to-[#1a4378] p-6 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span className="rounded-full bg-[#f59e0b] px-3 py-0.5 text-xs font-extrabold text-[#0b1e38]">
+            KOMKID 5-PILLAR BUSINESS MODEL
+          </span>
+          <h2 className="mt-2 text-xl sm:text-2xl font-extrabold">
+            CONTENT &nbsp;→&nbsp; AUDIENCE &nbsp;→&nbsp; TRUST
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-200 mt-1">
+            จัดการเสาหลักธุรกิจ ตัวชี้วัด KPI และลิงก์ปลายทางที่แสดงบนหน้าเว็บไซต์หลัก (เพิ่ม/แก้ไข/ลบ ได้ครบวงจร)
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={openCreatePillar}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2.5 text-xs sm:text-sm font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer shrink-0"
+        >
+          <Plus className="w-4 h-4" /> เพิ่มเสาหลักธุรกิจใหม่
+        </button>
       </div>
 
       {errText && (
@@ -388,15 +519,36 @@ export const FivePillarManager: React.FC<{
 
             <div className="mt-4 pt-3 border-t border-slate-100">
               <div className="text-[10.5px] text-slate-400">{p.metricLabel}</div>
-              <div className="text-base font-extrabold text-[#0d2546] flex items-center justify-between">
-                <span>{p.metricValue}</span>
-                <button
-                  onClick={() => setEditing({ ...p })}
-                  className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
-                  title="แก้ไขเสาหลักนี้"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
+              <div className="text-base font-extrabold text-[#0d2546] flex items-center justify-between gap-1">
+                <span className="truncate">{p.metricValue}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => {
+                      setCreating(false);
+                      setEditing({ ...p });
+                    }}
+                    className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
+                    title="แก้ไขเสาหลักนี้"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  {confirmDeleteId === p.id ? (
+                    <button
+                      onClick={() => handleDeletePillar(p.id)}
+                      className="rounded-lg bg-rose-600 px-2 py-1 text-[10px] font-extrabold text-white cursor-pointer"
+                    >
+                      ยืนยันลบ
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(p.id)}
+                      className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-600 hover:text-white transition cursor-pointer"
+                      title="ลบเสาหลักนี้"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -406,26 +558,47 @@ export const FivePillarManager: React.FC<{
       {editing && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
-          onClick={() => setEditing(null)}
+          onClick={() => {
+            setEditing(null);
+            setCreating(false);
+          }}
         >
           <div
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-extrabold text-lg text-[#0d2546] mb-3">
-              แก้ไข {editing.title}
+              {creating ? 'เพิ่มเสาหลักธุรกิจใหม่' : `แก้ไข ${editing.title}`}
             </h3>
             <form onSubmit={handleSave} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold mb-1">หัวข้อหลัก</label>
-                <input
-                  type="text"
-                  value={editing.title}
-                  onChange={(e) =>
-                    setEditing({ ...editing, title: e.target.value })
-                  }
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold"
-                />
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold mb-1">ลำดับที่</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editing.pillarIndex}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        pillarIndex: Number(e.target.value) || 1,
+                      })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold mb-1">หัวข้อหลัก *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editing.title}
+                    onChange={(e) =>
+                      setEditing({ ...editing, title: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-bold mb-1">คำอธิบายย่อย</label>
@@ -473,22 +646,39 @@ export const FivePillarManager: React.FC<{
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold mb-1">ป้ายสถานะ (Badge)</label>
-                <input
-                  type="text"
-                  value={editing.statusBadge || ''}
-                  onChange={(e) =>
-                    setEditing({ ...editing, statusBadge: e.target.value })
-                  }
-                  placeholder="เช่น กำลังดำเนินการ / เป้าหมายปี 2569"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold mb-1">ป้ายสถานะ (Badge)</label>
+                  <input
+                    type="text"
+                    value={editing.statusBadge || ''}
+                    onChange={(e) =>
+                      setEditing({ ...editing, statusBadge: e.target.value })
+                    }
+                    placeholder="เช่น กำลังดำเนินการ"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1">ลิงก์ปลายทาง (URL)</label>
+                  <input
+                    type="text"
+                    value={editing.actionUrl || ''}
+                    onChange={(e) =>
+                      setEditing({ ...editing, actionUrl: e.target.value })
+                    }
+                    placeholder="https://..."
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
               <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setEditing(null)}
+                  onClick={() => {
+                    setEditing(null);
+                    setCreating(false);
+                  }}
                   className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold cursor-pointer"
                 >
                   ยกเลิก
@@ -498,7 +688,7 @@ export const FivePillarManager: React.FC<{
                   disabled={saving}
                   className="rounded-xl bg-[#0d2546] px-5 py-2 text-xs font-extrabold text-white cursor-pointer disabled:opacity-50"
                 >
-                  {saving ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
+                  {saving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
                 </button>
               </div>
             </form>
@@ -538,10 +728,13 @@ export const AudienceAndSettingsHub: React.FC<{
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [fetchingSingle, setFetchingSingle] = useState<string | null>(null);
 
-  // Quick Add Subscriber state in Inbox mode
+  // Quick Add Subscriber & Full Edit states in Inbox mode
   const [newSubEmail, setNewSubEmail] = useState('');
   const [newSubName, setNewSubName] = useState('');
   const [addingSub, setAddingSub] = useState(false);
+  const [editingComment, setEditingComment] = useState<PostComment | null>(null);
+  const [editingSubscriber, setEditingSubscriber] = useState<Subscriber | null>(null);
+  const [editingContact, setEditingContact] = useState<ContactMessage | null>(null);
 
   const loadData = async (forceModelRefresh = false) => {
     try {
@@ -1910,20 +2103,29 @@ export const AudienceAndSettingsHub: React.FC<{
                         {c.authorRole}
                       </span>
                     </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await api.deleteComment(c.id);
-                          await loadData();
-                          await onRefreshStats();
-                        } catch (err) {
-                          setActionError((err as Error).message);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1 rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-600 hover:text-white cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" /> ลบ
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditingComment({ ...c })}
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-200/80 px-2 py-1 text-[11px] font-bold text-[#0d2546] hover:bg-slate-300 cursor-pointer"
+                      >
+                        <Edit3 className="w-3 h-3" /> แก้ไข
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.deleteComment(c.id);
+                            await loadData();
+                            await onRefreshStats();
+                          } catch (err) {
+                            setActionError((err as Error).message);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-600 hover:text-white cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" /> ลบ
+                      </button>
+                    </div>
                   </div>
                   <p className="mt-1.5 text-sm text-slate-700 font-body">
                     {c.message}
@@ -1999,6 +2201,13 @@ export const AudienceAndSettingsHub: React.FC<{
                               <MailCheck className="w-3.5 h-3.5" /> อ่านแล้ว
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => setEditingContact({ ...m })}
+                            className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-[#0d2546] hover:bg-slate-200 cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" /> แก้ไข
+                          </button>
                           <a
                             href={`mailto:${m.email}?subject=${encodeURIComponent(
                               `ตอบกลับจาก คมคิด by KOMKRIT: ${m.subject}`
@@ -2099,28 +2308,339 @@ export const AudienceAndSettingsHub: React.FC<{
                       {s.role}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await api.deleteSubscriber(s.id);
-                        await loadData();
-                        await onRefreshStats();
-                      } catch (err) {
-                        setActionError((err as Error).message);
-                      }
-                    }}
-                    className="text-slate-400 hover:text-rose-600 cursor-pointer p-1"
-                    title="ลบสมาชิกนี้"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditingSubscriber({ ...s })}
+                      className="text-slate-400 hover:text-[#0d2546] cursor-pointer p-1"
+                      title="แก้ไขสมาชิกนี้"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await api.deleteSubscriber(s.id);
+                          await loadData();
+                          await onRefreshStats();
+                        } catch (err) {
+                          setActionError((err as Error).message);
+                        }
+                      }}
+                      className="text-slate-400 hover:text-rose-600 cursor-pointer p-1"
+                      title="ลบสมาชิกนี้"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Edit Comment Modal */}
+      {editingComment && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
+          onClick={() => setEditingComment(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-extrabold text-base text-[#0d2546]">
+              แก้ไขความคิดเห็นจากผู้อ่าน
+            </h3>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await api.updateComment(editingComment.id, {
+                    authorName: editingComment.authorName,
+                    authorRole: editingComment.authorRole,
+                    message: editingComment.message,
+                    rating: editingComment.rating,
+                  });
+                  setEditingComment(null);
+                  await loadData();
+                } catch (err) {
+                  setActionError((err as Error).message);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold mb-1">ชื่อผู้แสดงความเห็น</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingComment.authorName}
+                    onChange={(e) =>
+                      setEditingComment({ ...editingComment, authorName: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1">บทบาท</label>
+                  <input
+                    type="text"
+                    value={editingComment.authorRole}
+                    onChange={(e) =>
+                      setEditingComment({ ...editingComment, authorRole: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1">คะแนนความพึงพอใจ (1–5)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={editingComment.rating}
+                  onChange={(e) =>
+                    setEditingComment({
+                      ...editingComment,
+                      rating: Number(e.target.value) || 5,
+                    })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1">ข้อความ</label>
+                <textarea
+                  rows={3}
+                  required
+                  value={editingComment.message}
+                  onChange={(e) =>
+                    setEditingComment({ ...editingComment, message: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingComment(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-[#0d2546] px-5 py-2 text-xs font-extrabold text-white cursor-pointer"
+                >
+                  บันทึกการแก้ไข
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Contact Modal */}
+      {editingContact && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
+          onClick={() => setEditingContact(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-extrabold text-base text-[#0d2546]">
+              แก้ไขข้อมูลผู้ติดต่อ / สถานะ
+            </h3>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await api.updateContact(editingContact.id, editingContact);
+                  setEditingContact(null);
+                  await loadData();
+                  await onRefreshStats();
+                } catch (err) {
+                  setActionError((err as Error).message);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold mb-1">ชื่อผู้ติดต่อ</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingContact.name}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, name: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1">อีเมล</label>
+                  <input
+                    type="email"
+                    required
+                    value={editingContact.email}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, email: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold mb-1">หัวข้อ</label>
+                  <input
+                    type="text"
+                    value={editingContact.subject}
+                    onChange={(e) =>
+                      setEditingContact({ ...editingContact, subject: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1">สถานะ</label>
+                  <select
+                    value={editingContact.status}
+                    onChange={(e) =>
+                      setEditingContact({
+                        ...editingContact,
+                        status: e.target.value as any,
+                      })
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold"
+                  >
+                    <option value="unread">ยังไม่อ่าน (unread)</option>
+                    <option value="read">อ่านแล้ว (read)</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1">ข้อความ</label>
+                <textarea
+                  rows={3}
+                  value={editingContact.message}
+                  onChange={(e) =>
+                    setEditingContact({ ...editingContact, message: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingContact(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-[#0d2546] px-5 py-2 text-xs font-extrabold text-white cursor-pointer"
+                >
+                  บันทึกการแก้ไข
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Subscriber Modal */}
+      {editingSubscriber && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
+          onClick={() => setEditingSubscriber(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-extrabold text-base text-[#0d2546]">
+              แก้ไขข้อมูลสมาชิกรับข่าวสาร
+            </h3>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  await api.updateSubscriber(editingSubscriber.id, {
+                    email: editingSubscriber.email,
+                    name: editingSubscriber.name,
+                    role: editingSubscriber.role,
+                  });
+                  setEditingSubscriber(null);
+                  await loadData();
+                } catch (err) {
+                  setActionError((err as Error).message);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-bold mb-1">อีเมล *</label>
+                <input
+                  type="email"
+                  required
+                  value={editingSubscriber.email}
+                  onChange={(e) =>
+                    setEditingSubscriber({ ...editingSubscriber, email: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1">ชื่อ-นามสกุล</label>
+                <input
+                  type="text"
+                  value={editingSubscriber.name}
+                  onChange={(e) =>
+                    setEditingSubscriber({ ...editingSubscriber, name: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1">กลุ่มผู้ติดตาม / บทบาท</label>
+                <input
+                  type="text"
+                  value={editingSubscriber.role}
+                  onChange={(e) =>
+                    setEditingSubscriber({ ...editingSubscriber, role: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingSubscriber(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-[#0d2546] px-5 py-2 text-xs font-extrabold text-white cursor-pointer"
+                >
+                  บันทึกการแก้ไข
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

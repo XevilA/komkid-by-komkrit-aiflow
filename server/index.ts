@@ -642,10 +642,15 @@ app.put('/api/posts/:id', (req, res) => {
     author = existing.author,
     status = existing.status,
     isFeatured,
+    views,
   } = req.body;
 
   const nextFeatured =
     typeof isFeatured === 'boolean' ? (isFeatured ? 1 : 0) : existing.is_featured;
+  const nextViews =
+    typeof views === 'number' && Number.isFinite(views) && views >= 0
+      ? Math.floor(views)
+      : Number(existing.views || 0);
 
   if (nextFeatured === 1 && existing.is_featured === 0) {
     db.prepare('UPDATE posts SET is_featured = 0').run();
@@ -658,7 +663,7 @@ app.put('/api/posts/:id', (req, res) => {
     `UPDATE posts SET
       title = ?, subtitle = ?, excerpt = ?, content = ?, category = ?,
       content_type = ?, cover_image = ?, video_url = ?, audio_url = ?, tags_json = ?,
-      author = ?, status = ?, is_featured = ?, updated_at = ?
+      author = ?, status = ?, is_featured = ?, views = ?, updated_at = ?
      WHERE id = ?`
   ).run(
     String(title).trim(),
@@ -674,6 +679,7 @@ app.put('/api/posts/:id', (req, res) => {
     String(author),
     String(status),
     nextFeatured,
+    nextViews,
     now,
     id
   );
@@ -685,6 +691,95 @@ app.put('/api/posts/:id', (req, res) => {
     )
     .get(id);
   res.json(mapPostRow(updated));
+});
+
+app.post('/api/posts/:id/duplicate', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM posts WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบบทความที่ต้องการคัดลอก' });
+    return;
+  }
+  const now = new Date().toISOString();
+  const copyTitle = `${String(existing.title).trim()} (สำเนา)`;
+  const r = db
+    .prepare(
+      `INSERT INTO posts (
+        title, subtitle, excerpt, content, category, content_type, cover_image,
+        video_url, audio_url, tags_json, author, status, is_featured, views, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 0, 0, ?, ?)`
+    )
+    .run(
+      copyTitle,
+      String(existing.subtitle || ''),
+      String(existing.excerpt || ''),
+      String(existing.content || ''),
+      String(existing.category || 'education'),
+      String(existing.content_type || 'article'),
+      String(existing.cover_image || '/images/thumb-ai-edu.jpg'),
+      String(existing.video_url || ''),
+      String(existing.audio_url || ''),
+      String(existing.tags_json || '[]'),
+      String(existing.author || 'คมกฤช (Komkrit)'),
+      now,
+      now
+    );
+  const created = db
+    .prepare(`SELECT p.*, 0 AS comments_count FROM posts p WHERE p.id = ?`)
+    .get(Number(r.lastInsertRowid));
+  res.status(201).json(mapPostRow(created));
+});
+
+app.post('/api/posts/bulk', (req, res) => {
+  const { ids, action, category } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: 'กรุณาเลือกรายการข่าวอย่างน้อย 1 รายการ' });
+    return;
+  }
+  const cleanIds = ids
+    .map((x: unknown) => Number(x))
+    .filter((n: number) => Number.isInteger(n) && n > 0);
+  if (cleanIds.length === 0) {
+    res.status(400).json({ error: 'รหัสรายการไม่ถูกต้อง' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (action === 'publish' || action === 'draft') {
+      const targetStatus = action === 'publish' ? 'published' : 'draft';
+      const stmt = db.prepare('UPDATE posts SET status = ?, updated_at = ? WHERE id = ?');
+      for (const pid of cleanIds) {
+        stmt.run(targetStatus, now, pid);
+      }
+    } else if (action === 'category' && category) {
+      const stmt = db.prepare('UPDATE posts SET category = ?, updated_at = ? WHERE id = ?');
+      for (const pid of cleanIds) {
+        stmt.run(String(category), now, pid);
+      }
+    } else if (action === 'delete') {
+      const delComments = db.prepare('DELETE FROM comments WHERE post_id = ?');
+      const delPost = db.prepare('DELETE FROM posts WHERE id = ?');
+      for (const pid of cleanIds) {
+        delComments.run(pid);
+        delPost.run(pid);
+      }
+    } else {
+      db.exec('ROLLBACK');
+      res.status(400).json({ error: 'คำสั่งจัดการหลายรายการ (bulk action) ไม่ถูกต้อง' });
+      return;
+    }
+    db.exec('COMMIT');
+    res.json({ ok: true, affected: cleanIds.length, action });
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 app.delete('/api/posts/:id', (req, res) => {
@@ -752,6 +847,47 @@ app.post('/api/posts/:id/comments', (req, res) => {
     message: String(message).trim(),
     rating: Number(rating) || 5,
     createdAt: now,
+  });
+});
+
+app.put('/api/comments/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM comments WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบความคิดเห็นที่ต้องการแก้ไข' });
+    return;
+  }
+  const {
+    authorName = existing.author_name,
+    authorRole = existing.author_role,
+    message = existing.message,
+    rating = existing.rating,
+  } = req.body || {};
+
+  if (!String(message).trim()) {
+    res.status(400).json({ error: 'กรุณาระบุข้อความความคิดเห็น' });
+    return;
+  }
+
+  const cleanRating = Math.min(5, Math.max(1, Number(rating) || existing.rating || 5));
+  db.prepare(
+    `UPDATE comments SET author_name = ?, author_role = ?, message = ?, rating = ? WHERE id = ?`
+  ).run(
+    String(authorName).trim() || 'ผู้ติดตามคมคิด',
+    String(authorRole).trim() || 'ผู้สนใจทั่วไป',
+    String(message).trim(),
+    cleanRating,
+    id
+  );
+
+  res.json({
+    id,
+    postId: existing.post_id,
+    authorName: String(authorName).trim() || 'ผู้ติดตามคมคิด',
+    authorRole: String(authorRole).trim() || 'ผู้สนใจทั่วไป',
+    message: String(message).trim(),
+    rating: cleanRating,
+    createdAt: existing.created_at,
   });
 });
 
@@ -884,6 +1020,65 @@ app.get('/api/pillars', (_req, res) => {
   res.json(rows);
 });
 
+app.post('/api/pillars', (req, res) => {
+  const {
+    pillarIndex,
+    pillarKey = `pillar_${Date.now()}`,
+    title,
+    subtitle = '',
+    description = '',
+    metricLabel = 'ตัวชี้วัดหลัก (KPI)',
+    metricValue = '100%',
+    statusBadge = 'กำลังดำเนินการ',
+    actionUrl = '',
+  } = req.body || {};
+
+  if (!title || !String(title).trim()) {
+    res.status(400).json({ error: 'กรุณาระบุชื่อเสาหลักธุรกิจ' });
+    return;
+  }
+
+  const maxIdxRow = db
+    .prepare('SELECT COALESCE(MAX(pillar_index), 0) AS max_idx FROM business_pillars')
+    .get() as any;
+  const nextIndex =
+    typeof pillarIndex === 'number' && Number.isFinite(pillarIndex)
+      ? Math.floor(pillarIndex)
+      : Number(maxIdxRow?.max_idx || 0) + 1;
+
+  const r = db
+    .prepare(
+      `INSERT INTO business_pillars (
+        pillar_index, pillar_key, title, subtitle, description,
+        metric_label, metric_value, status_badge, action_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      nextIndex,
+      String(pillarKey).trim() || `pillar_${nextIndex}`,
+      String(title).trim(),
+      String(subtitle).trim(),
+      String(description).trim(),
+      String(metricLabel).trim(),
+      String(metricValue).trim(),
+      String(statusBadge).trim(),
+      String(actionUrl).trim()
+    );
+
+  res.status(201).json({
+    id: Number(r.lastInsertRowid),
+    pillarIndex: nextIndex,
+    pillarKey: String(pillarKey).trim() || `pillar_${nextIndex}`,
+    title: String(title).trim(),
+    subtitle: String(subtitle).trim(),
+    description: String(description).trim(),
+    metricLabel: String(metricLabel).trim(),
+    metricValue: String(metricValue).trim(),
+    statusBadge: String(statusBadge).trim(),
+    actionUrl: String(actionUrl).trim(),
+  });
+});
+
 app.put('/api/pillars/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM business_pillars WHERE id = ?').get(id) as any;
@@ -892,16 +1087,51 @@ app.put('/api/pillars/:id', (req, res) => {
     return;
   }
   const {
+    pillarIndex = existing.pillar_index,
+    pillarKey = existing.pillar_key,
     title = existing.title,
     subtitle = existing.subtitle,
     description = existing.description,
     metricLabel = existing.metric_label,
     metricValue = existing.metric_value,
     statusBadge = existing.status_badge,
+    actionUrl = existing.action_url || '',
   } = req.body;
   db.prepare(
-    `UPDATE business_pillars SET title = ?, subtitle = ?, description = ?, metric_label = ?, metric_value = ?, status_badge = ? WHERE id = ?`
-  ).run(title, subtitle, description, metricLabel, metricValue, statusBadge, id);
+    `UPDATE business_pillars SET
+      pillar_index = ?, pillar_key = ?, title = ?, subtitle = ?, description = ?,
+      metric_label = ?, metric_value = ?, status_badge = ?, action_url = ?
+     WHERE id = ?`
+  ).run(
+    Number(pillarIndex) || existing.pillar_index,
+    String(pillarKey || existing.pillar_key),
+    String(title).trim(),
+    String(subtitle),
+    String(description),
+    String(metricLabel),
+    String(metricValue),
+    String(statusBadge || ''),
+    String(actionUrl || ''),
+    id
+  );
+  res.json({
+    ok: true,
+    id,
+    pillarIndex: Number(pillarIndex) || existing.pillar_index,
+    pillarKey: String(pillarKey || existing.pillar_key),
+    title: String(title).trim(),
+    subtitle: String(subtitle),
+    description: String(description),
+    metricLabel: String(metricLabel),
+    metricValue: String(metricValue),
+    statusBadge: String(statusBadge || ''),
+    actionUrl: String(actionUrl || ''),
+  });
+});
+
+app.delete('/api/pillars/:id', (req, res) => {
+  const id = Number(req.params.id);
+  db.prepare('DELETE FROM business_pillars WHERE id = ?').run(id);
   res.json({ ok: true });
 });
 
@@ -1924,6 +2154,39 @@ app.post('/api/subscribers', (req, res) => {
   res.status(201).json({ ok: true });
 });
 
+app.put('/api/subscribers/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM subscribers WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบรายชื่อสมาชิกที่ต้องการแก้ไข' });
+    return;
+  }
+  const {
+    email = existing.email,
+    name = existing.name,
+    role = existing.role,
+  } = req.body || {};
+
+  const cleanEmail = String(email).trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    res.status(400).json({ error: 'กรุณากรอกอีเมลให้ถูกต้อง' });
+    return;
+  }
+
+  db.prepare(
+    `UPDATE subscribers SET email = ?, name = ?, role = ? WHERE id = ?`
+  ).run(cleanEmail, String(name).trim(), String(role).trim() || 'ผู้สนใจทั่วไป', id);
+
+  res.json({
+    ok: true,
+    id,
+    email: cleanEmail,
+    name: String(name).trim(),
+    role: String(role).trim() || 'ผู้สนใจทั่วไป',
+    createdAt: existing.created_at,
+  });
+});
+
 app.delete('/api/subscribers/:id', (req, res) => {
   db.prepare('DELETE FROM subscribers WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
@@ -1962,6 +2225,44 @@ app.post('/api/contacts', (req, res) => {
     now
   );
   res.status(201).json({ ok: true });
+});
+
+app.put('/api/contacts/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM contacts WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบข้อความติดต่อที่ต้องการแก้ไข' });
+    return;
+  }
+  const {
+    name = existing.name,
+    email = existing.email,
+    subject = existing.subject,
+    message = existing.message,
+    status = existing.status,
+  } = req.body || {};
+
+  db.prepare(
+    `UPDATE contacts SET name = ?, email = ?, subject = ?, message = ?, status = ? WHERE id = ?`
+  ).run(
+    String(name).trim(),
+    String(email).trim(),
+    String(subject).trim(),
+    String(message).trim(),
+    String(status).trim() || 'read',
+    id
+  );
+
+  res.json({
+    ok: true,
+    id,
+    name: String(name).trim(),
+    email: String(email).trim(),
+    subject: String(subject).trim(),
+    message: String(message).trim(),
+    status: String(status).trim() || 'read',
+    createdAt: existing.created_at,
+  });
 });
 
 app.put('/api/contacts/:id/read', (req, res) => {
@@ -2477,6 +2778,34 @@ app.post('/api/publish/dispatch', async (req, res) => {
   }
 });
 
+app.put('/api/publish/logs/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM publish_logs WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบประวัติการเผยแพร่ที่ต้องการแก้ไข' });
+    return;
+  }
+  const {
+    title = existing.title,
+    contentPreview = existing.content_preview,
+    status = existing.status,
+    scheduledAt = existing.scheduled_at,
+    responseNote = existing.response_note,
+  } = req.body || {};
+
+  db.prepare(
+    `UPDATE publish_logs SET title = ?, content_preview = ?, status = ?, scheduled_at = ?, response_note = ? WHERE id = ?`
+  ).run(
+    String(title).trim(),
+    String(contentPreview || ''),
+    String(status || existing.status),
+    scheduledAt ? String(scheduledAt) : null,
+    String(responseNote || existing.response_note || ''),
+    id
+  );
+  res.json({ ok: true, id });
+});
+
 app.delete('/api/publish/logs/:id', (req, res) => {
   db.prepare('DELETE FROM publish_logs WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
@@ -2553,9 +2882,185 @@ app.post('/api/surveys', (req, res) => {
   res.status(201).json({ id: Number(r.lastInsertRowid), ok: true });
 });
 
+app.put('/api/surveys/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM audience_surveys WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบข้อมูลแบบสำรวจที่ต้องการแก้ไข' });
+    return;
+  }
+  const {
+    respondentName = existing.respondent_name,
+    respondentRole = existing.respondent_role,
+    schoolOrOrg = existing.school_or_org,
+    preferredChannel = existing.preferred_channel,
+    requestedTopic = existing.requested_topic,
+    satisfactionScore = existing.satisfaction_score,
+    feedbackDetail = existing.feedback_detail,
+  } = req.body || {};
+
+  if (!String(requestedTopic).trim()) {
+    res.status(400).json({ error: 'กรุณาระบุหัวข้อที่ต้องการนำเสนอ' });
+    return;
+  }
+
+  const cleanScore = Math.min(5, Math.max(1, Number(satisfactionScore) || existing.satisfaction_score || 5));
+  db.prepare(
+    `UPDATE audience_surveys SET
+      respondent_name = ?, respondent_role = ?, school_or_org = ?,
+      preferred_channel = ?, requested_topic = ?, satisfaction_score = ?, feedback_detail = ?
+     WHERE id = ?`
+  ).run(
+    String(respondentName).trim() || 'ผู้ร่วมตอบแบบสำรวจ',
+    String(respondentRole).trim(),
+    String(schoolOrOrg || '').trim(),
+    String(preferredChannel || 'LINE OA').trim(),
+    String(requestedTopic).trim(),
+    cleanScore,
+    String(feedbackDetail || '').trim(),
+    id
+  );
+
+  res.json({
+    ok: true,
+    id,
+    respondentName: String(respondentName).trim() || 'ผู้ร่วมตอบแบบสำรวจ',
+    respondentRole: String(respondentRole).trim(),
+    schoolOrOrg: String(schoolOrOrg || '').trim(),
+    preferredChannel: String(preferredChannel || 'LINE OA').trim(),
+    requestedTopic: String(requestedTopic).trim(),
+    satisfactionScore: cleanScore,
+    feedbackDetail: String(feedbackDetail || '').trim(),
+    createdAt: existing.created_at,
+  });
+});
+
 app.delete('/api/surveys/:id', (req, res) => {
   db.prepare('DELETE FROM audience_surveys WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
+});
+
+// --- PRODUCTION CMS BACKUP & RESTORE (JSON SNAPSHOT EXPORT / IMPORT) ---
+app.get('/api/admin/export-json', (_req, res) => {
+  const posts = db.prepare('SELECT * FROM posts ORDER BY id ASC').all().map(mapPostRow);
+  const comments = db.prepare('SELECT * FROM comments ORDER BY id ASC').all();
+  const knowledge = db.prepare('SELECT * FROM knowledge_base ORDER BY id ASC').all();
+  const pillars = db.prepare('SELECT * FROM business_pillars ORDER BY pillar_index ASC').all();
+  const subscribers = db.prepare('SELECT * FROM subscribers ORDER BY id ASC').all();
+  const contacts = db.prepare('SELECT * FROM contacts ORDER BY id ASC').all();
+  const surveys = db.prepare('SELECT * FROM audience_surveys ORDER BY id ASC').all();
+
+  res.json({
+    version: 'komkid-prod-cms-v1',
+    exportedAt: new Date().toISOString(),
+    counts: {
+      posts: posts.length,
+      comments: comments.length,
+      knowledge: knowledge.length,
+      pillars: pillars.length,
+      subscribers: subscribers.length,
+      contacts: contacts.length,
+      surveys: surveys.length,
+    },
+    data: {
+      posts,
+      comments,
+      knowledge,
+      pillars,
+      subscribers,
+      contacts,
+      surveys,
+    },
+  });
+});
+
+app.post('/api/admin/import-json', (req, res) => {
+  const { data, mode = 'merge' } = req.body || {};
+  if (!data || typeof data !== 'object') {
+    res.status(400).json({ error: 'รูปแบบไฟล์สำรองข้อมูล (JSON Backup) ไม่ถูกต้อง' });
+    return;
+  }
+
+  let importedPosts = 0;
+  let importedKnowledge = 0;
+  const now = new Date().toISOString();
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (mode === 'replace') {
+      if (Array.isArray(data.posts)) {
+        db.exec('DELETE FROM comments; DELETE FROM posts;');
+      }
+      if (Array.isArray(data.knowledge)) {
+        db.exec('DELETE FROM knowledge_base;');
+      }
+    }
+
+    if (Array.isArray(data.posts)) {
+      const insPost = db.prepare(
+        `INSERT INTO posts (
+          title, subtitle, excerpt, content, category, content_type, cover_image,
+          video_url, audio_url, tags_json, author, status, is_featured, views, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const p of data.posts) {
+        if (!p || !p.title) continue;
+        insPost.run(
+          String(p.title).trim(),
+          String(p.subtitle || ''),
+          String(p.excerpt || p.title),
+          String(p.content || ''),
+          String(p.category || 'education'),
+          String(p.contentType || p.content_type || 'article'),
+          String(p.coverImage || p.cover_image || '/images/thumb-ai-edu.jpg'),
+          String(p.videoUrl || p.video_url || ''),
+          String(p.audioUrl || p.audio_url || ''),
+          Array.isArray(p.tags) ? JSON.stringify(p.tags) : String(p.tags_json || '[]'),
+          String(p.author || 'คมกฤช (Komkrit)'),
+          String(p.status || 'published'),
+          p.isFeatured || p.is_featured ? 1 : 0,
+          Number(p.views || 1),
+          String(p.createdAt || p.created_at || now),
+          now
+        );
+        importedPosts++;
+      }
+    }
+
+    if (Array.isArray(data.knowledge)) {
+      const insKb = db.prepare(
+        `INSERT INTO knowledge_base (title, category, summary, content, source_ref, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const k of data.knowledge) {
+        if (!k || !k.title) continue;
+        insKb.run(
+          String(k.title).trim(),
+          String(k.category || 'research'),
+          String(k.summary || ''),
+          String(k.content || ''),
+          String(k.sourceRef || k.source_ref || ''),
+          k.isActive === false || k.is_active === 0 ? 0 : 1,
+          String(k.createdAt || k.created_at || now)
+        );
+        importedKnowledge++;
+      }
+    }
+
+    db.exec('COMMIT');
+    res.json({
+      ok: true,
+      importedPosts,
+      importedKnowledge,
+    });
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 // --- Serve Frontend via Vite (Dev) or Static Dist (Prod) ---

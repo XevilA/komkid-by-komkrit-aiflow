@@ -20,6 +20,11 @@ import {
   Newspaper,
   ChevronDown,
   ChevronUp,
+  Copy,
+  Download,
+  CheckSquare,
+  Square,
+  ArrowUpDown,
 } from 'lucide-react';
 import {
   AiMediaAsset,
@@ -70,6 +75,14 @@ export const PostCrudManager: React.FC<Props> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [quickFilter, setQuickFilter] = useState<'all' | 'published' | 'draft' | 'video'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'views_desc' | 'updated_desc' | 'title_asc'>('newest');
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkCategoryTarget, setBulkCategoryTarget] = useState<CategoryId>('education');
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Full-page clean editor mode (no accidental close on outside click!)
   const [editorOpen, setEditorOpen] = useState(false);
@@ -422,6 +435,7 @@ export const PostCrudManager: React.FC<Props> = ({
     try {
       await api.deletePost(id);
       setDeleteConfirmId(null);
+      setSelectedIds((prev) => prev.filter((x) => x !== id));
       await onRefresh();
       showToast('ลบข่าวออกจากเว็บไซต์เรียบร้อยแล้ว');
     } catch (err) {
@@ -431,20 +445,166 @@ export const PostCrudManager: React.FC<Props> = ({
     }
   };
 
-  const filtered = posts.filter((p) => {
-    if (quickFilter === 'published' && p.status !== 'published') return false;
-    if (quickFilter === 'draft' && p.status !== 'draft') return false;
-    if (quickFilter === 'video' && p.contentType !== 'video' && !p.videoUrl) return false;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      return (
-        p.title.toLowerCase().includes(q) ||
-        p.excerpt.toLowerCase().includes(q) ||
-        p.content.toLowerCase().includes(q)
-      );
+  const handleDuplicatePost = async (post: Post) => {
+    setBusyId(post.id);
+    setErrorMsg(null);
+    try {
+      const cloned = await api.duplicatePost(post.id);
+      await onRefresh();
+      showToast(`คัดลอก "${cloned.title}" เป็นฉบับร่างเรียบร้อยแล้ว`);
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setBusyId(null);
     }
-    return true;
-  });
+  };
+
+  const handleBulkAction = async (
+    action: 'publish' | 'draft' | 'delete' | 'category',
+    category?: string
+  ) => {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    setErrorMsg(null);
+    try {
+      const res = await api.bulkPostsAction({
+        ids: selectedIds,
+        action,
+        category,
+      });
+      setBulkDeleteConfirm(false);
+      setSelectedIds([]);
+      await onRefresh();
+      const actionLabel =
+        action === 'publish'
+          ? 'เปิดแสดงบนเว็บ'
+          : action === 'draft'
+          ? 'ซ่อนเป็นฉบับร่าง'
+          : action === 'category'
+          ? 'ย้ายหมวดหมู่'
+          : 'ลบถาวร';
+      showToast(`ดำเนินการ "${actionLabel}" สำเร็จจำนวน ${res.affected} เรื่อง!`);
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleExportPostsCsv = () => {
+    const header = 'id,title,category,contentType,status,isFeatured,views,author,createdAt\n';
+    const rows = posts
+      .map(
+        (p) =>
+          `${p.id},"${(p.title || '').replace(/"/g, '""')}","${p.category}","${p.contentType}","${p.status}",${p.isFeatured ? 1 : 0},${p.views},"${(p.author || '').replace(/"/g, '""')}","${p.createdAt}"`
+      )
+      .join('\n');
+    const blob = new Blob(['\uFEFF' + header + rows], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `komkrit-posts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportBackupJson = async () => {
+    setErrorMsg(null);
+    try {
+      const snap = await api.exportCmsBackup();
+      const blob = new Blob([JSON.stringify(snap, null, 2)], {
+        type: 'application/json;charset=utf-8;',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `komkrit-cms-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('ดาวน์โหลดไฟล์สำรองข้อมูล CMS (JSON Backup) เรียบร้อยแล้ว');
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    }
+  };
+
+  const handleImportBackupJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErrorMsg(null);
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      const dataObj = parsed?.data || (Array.isArray(parsed) ? { posts: parsed } : parsed);
+      const res = await api.importCmsBackup({ data: dataObj, mode: 'merge' });
+      await onRefresh();
+      showToast(
+        `นำเข้าข้อมูลสำเร็จ (เพิ่มข่าว/บทความ ${res.importedPosts} เรื่อง, คลังความรู้ ${res.importedKnowledge} รายการ)`
+      );
+    } catch (err) {
+      setErrorMsg(`นำเข้าไฟล์ JSON ไม่สำเร็จ: ${(err as Error).message}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const filtered = posts
+    .filter((p) => {
+      if (quickFilter === 'published' && p.status !== 'published') return false;
+      if (quickFilter === 'draft' && p.status !== 'draft') return false;
+      if (quickFilter === 'video' && p.contentType !== 'video' && !p.videoUrl) return false;
+      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return (
+          p.title.toLowerCase().includes(q) ||
+          p.excerpt.toLowerCase().includes(q) ||
+          p.content.toLowerCase().includes(q) ||
+          (p.tags || []).some((t) => t.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'oldest') {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      if (sortBy === 'views_desc') {
+        return (b.views || 0) - (a.views || 0);
+      }
+      if (sortBy === 'updated_desc') {
+        return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+      }
+      if (sortBy === 'title_asc') {
+        return a.title.localeCompare(b.title, 'th');
+      }
+      if (a.isFeatured !== b.isFeatured) return a.isFeatured ? -1 : 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedPosts = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const toggleSelectOne = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((p) => selectedIds.includes(p.id));
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      const filteredSet = new Set(filtered.map((p) => p.id));
+      setSelectedIds((prev) => prev.filter((id) => !filteredSet.has(id)));
+    } else {
+      const merged = new Set([...selectedIds, ...filtered.map((p) => p.id)]);
+      setSelectedIds(Array.from(merged));
+    }
+  };
 
   // ============================================================================
   // VIEW 1: SIMPLE FULL-PAGE WRITE / EDIT SCREEN (ELDER-FRIENDLY, LARGE FONTS!)
@@ -949,71 +1109,243 @@ export const PostCrudManager: React.FC<Props> = ({
       )}
 
       {/* Main Action Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-2xs">
         <div>
           <h2 className="text-xl sm:text-2xl font-extrabold text-[#0d2546]">
             📰 ข่าวสารและบทความบนเว็บไซต์ ({posts.length} เรื่อง)
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            กดปุ่มสีเขียวด้านขวาเพื่อลงข่าวใหม่ หรือกดปุ่ม "แก้ไขข่าว" ในรายการที่ต้องการแก้ได้เลยครับ
+            ระบบจัดการเนื้อหาระดับ Production — รองรับค้นหา, กรองหมวดหมู่, คัดลอกข่าว, จัดการหลายรายการ (Bulk Actions) และสำรองข้อมูล JSON/CSV
           </p>
         </div>
-        <button
-          onClick={openCreate}
-          className="inline-flex items-center justify-center gap-2.5 rounded-2xl bg-emerald-600 px-6 py-4 text-base sm:text-lg font-extrabold text-white hover:bg-emerald-700 shadow-md transition cursor-pointer shrink-0"
-        >
-          <Plus className="w-6 h-6" />
-          ลงข่าว / เขียนบทความใหม่
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleExportPostsCsv}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+          >
+            <Download className="w-4 h-4 text-[#0d2546]" /> ส่งออก CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleExportBackupJson}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+          >
+            <Download className="w-4 h-4 text-emerald-700" /> Backup JSON
+          </button>
+          <label className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-100 cursor-pointer">
+            <Upload className="w-4 h-4 text-amber-600" /> นำเข้า JSON
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={handleImportBackupJson}
+              className="hidden"
+            />
+          </label>
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm sm:text-base font-extrabold text-white hover:bg-emerald-700 shadow-md transition cursor-pointer"
+          >
+            <Plus className="w-5 h-5" />
+            ลงข่าว / เขียนบทความใหม่
+          </button>
+        </div>
       </div>
 
-      {/* Simple Search & Filter Tabs */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white rounded-2xl p-4 border border-slate-200">
-        <div className="relative flex-1">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="พิมพ์ค้นหาชื่อข่าว หรือบทความ..."
-            className="w-full rounded-xl border-2 border-slate-200 pl-10 pr-4 py-2.5 text-base focus:border-[#0d2546] focus:outline-none"
-          />
-          <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        </div>
+      {/* Search, Category Filter, Sort & Quick Filter Tabs */}
+      <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="relative md:col-span-5">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="พิมพ์ค้นหาชื่อข่าว, เนื้อหา หรือแท็ก..."
+              className="w-full rounded-xl border-2 border-slate-200 pl-10 pr-4 py-2.5 text-sm sm:text-base focus:border-[#0d2546] focus:outline-none"
+            />
+            <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          </div>
 
-        <div className="flex flex-wrap gap-2">
-          {[
-            { id: 'all', label: `ทั้งหมด (${posts.length})` },
-            {
-              id: 'published',
-              label: `แสดงบนเว็บ (${posts.filter((p) => p.status === 'published').length})`,
-            },
-            {
-              id: 'draft',
-              label: `ซ่อนไว้ (${posts.filter((p) => p.status === 'draft').length})`,
-            },
-            {
-              id: 'video',
-              label: `คลิปวิดีโอ (${posts.filter((p) => p.contentType === 'video' || Boolean(p.videoUrl)).length})`,
-            },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setQuickFilter(tab.id as any)}
-              className={`rounded-xl px-4 py-2.5 text-sm font-extrabold transition cursor-pointer ${
-                quickFilter === tab.id
-                  ? 'bg-[#0d2546] text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
+          <div className="md:col-span-4">
+            <select
+              value={categoryFilter}
+              onChange={(e) => {
+                setCategoryFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-xl border-2 border-slate-200 px-3.5 py-2.5 text-sm font-bold text-[#0d2546] bg-white focus:border-[#0d2546] focus:outline-none"
             >
-              {tab.label}
+              <option value="all">ทุกหมวดหมู่ ({posts.length})</option>
+              {CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  หมวด: {c.nameTh} ({posts.filter((p) => p.category === c.id).length})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-3 flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-slate-400 shrink-0" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="w-full rounded-xl border-2 border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 bg-white focus:border-[#0d2546] focus:outline-none"
+            >
+              <option value="newest">เรียง: ใหม่ล่าสุด + ข่าวเด่น</option>
+              <option value="updated_desc">เรียง: แก้ไขล่าสุด</option>
+              <option value="views_desc">เรียง: ยอดอ่านสูงสุด</option>
+              <option value="oldest">เรียง: เก่าสุดก่อน</option>
+              <option value="title_asc">เรียง: ชื่อ ก-ฮ / A-Z</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'all', label: `ทั้งหมด (${posts.length})` },
+              {
+                id: 'published',
+                label: `แสดงบนเว็บ (${posts.filter((p) => p.status === 'published').length})`,
+              },
+              {
+                id: 'draft',
+                label: `ซ่อนไว้ (${posts.filter((p) => p.status === 'draft').length})`,
+              },
+              {
+                id: 'video',
+                label: `คลิปวิดีโอ (${posts.filter((p) => p.contentType === 'video' || Boolean(p.videoUrl)).length})`,
+              },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setQuickFilter(tab.id as any);
+                  setCurrentPage(1);
+                }}
+                className={`rounded-xl px-4 py-2 text-xs sm:text-sm font-extrabold transition cursor-pointer ${
+                  quickFilter === tab.id
+                    ? 'bg-[#0d2546] text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleSelectAllFiltered}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-extrabold text-[#0d2546] hover:bg-slate-100 cursor-pointer"
+            >
+              {allFilteredSelected ? (
+                <CheckSquare className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Square className="w-4 h-4 text-slate-400" />
+              )}
+              {allFilteredSelected
+                ? `ยกเลิกเลือกทั้งหมด (${filtered.length})`
+                : `เลือกทั้งหมดในหน้านี้ (${filtered.length})`}
             </button>
-          ))}
+          </div>
         </div>
       </div>
+
+      {/* Production Bulk Actions Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="rounded-2xl bg-[#0d2546] text-white p-4 shadow-md flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-extrabold">
+            <CheckSquare className="w-5 h-5 text-amber-300" />
+            <span>เลือกไว้ {selectedIds.length} รายการ</span>
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="ml-2 text-xs text-slate-300 underline hover:text-white cursor-pointer"
+            >
+              ล้างที่เลือก
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => handleBulkAction('publish')}
+              className="rounded-xl bg-emerald-500 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-emerald-600 cursor-pointer disabled:opacity-50"
+            >
+              🟢 เปิดแสดงบนเว็บทั้งหมด
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => handleBulkAction('draft')}
+              className="rounded-xl bg-slate-700 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-slate-600 cursor-pointer disabled:opacity-50"
+            >
+              ⚪ ซ่อนเป็นฉบับร่างทั้งหมด
+            </button>
+
+            <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
+              <select
+                value={bulkCategoryTarget}
+                onChange={(e) => setBulkCategoryTarget(e.target.value as CategoryId)}
+                className="rounded-lg bg-[#0a1930] text-white px-2.5 py-1.5 text-xs font-bold"
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nameTh}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => handleBulkAction('category', bulkCategoryTarget)}
+                className="rounded-lg bg-amber-400 px-2.5 py-1.5 text-xs font-extrabold text-[#0b1e38] hover:brightness-105 cursor-pointer disabled:opacity-50"
+              >
+                ย้ายหมวด
+              </button>
+            </div>
+
+            {bulkDeleteConfirm ? (
+              <div className="flex items-center gap-1.5 bg-rose-900/80 border border-rose-400 rounded-xl p-1">
+                <button
+                  type="button"
+                  disabled={bulkBusy}
+                  onClick={() => handleBulkAction('delete')}
+                  className="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-extrabold text-white cursor-pointer"
+                >
+                  ยืนยันลบ {selectedIds.length} เรื่อง
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteConfirm(false)}
+                  className="rounded-lg bg-white/15 px-2.5 py-1.5 text-xs font-bold text-white cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => setBulkDeleteConfirm(true)}
+                className="rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-rose-700 cursor-pointer disabled:opacity-50"
+              >
+                🗑️ ลบที่เลือก
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Posts List with Large, Clear Thai Action Buttons */}
       <div className="space-y-3.5">
-        {filtered.length === 0 ? (
+        {paginatedPosts.length === 0 ? (
           <div className="rounded-2xl bg-white p-12 text-center border border-slate-200 space-y-3">
             <p className="text-slate-600 text-base font-bold">ยังไม่มีข่าวในหมวดที่เลือก</p>
             <button
@@ -1024,18 +1356,35 @@ export const PostCrudManager: React.FC<Props> = ({
             </button>
           </div>
         ) : (
-          filtered.map((post) => {
+          paginatedPosts.map((post) => {
             const cat =
               CATEGORIES.find((c) => c.id === post.category) || CATEGORIES[0];
             const isBusy = busyId === post.id;
+            const isSelected = selectedIds.includes(post.id);
             return (
               <div
                 key={post.id}
                 className={`rounded-2xl bg-white border-2 p-4 sm:p-5 shadow-2xs transition flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
-                  post.isFeatured ? 'border-amber-400' : 'border-slate-200/90'
+                  isSelected
+                    ? 'border-[#0d2546] bg-sky-50/20'
+                    : post.isFeatured
+                    ? 'border-amber-400'
+                    : 'border-slate-200/90'
                 } ${isBusy ? 'opacity-60 pointer-events-none' : ''}`}
               >
-                <div className="flex items-start sm:items-center gap-4 min-w-0">
+                <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => toggleSelectOne(post.id)}
+                    className="mt-1 sm:mt-0 text-slate-400 hover:text-[#0d2546] cursor-pointer shrink-0"
+                    title="เลือกรายการนี้"
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="w-5 h-5 text-[#0d2546]" />
+                    ) : (
+                      <Square className="w-5 h-5" />
+                    )}
+                  </button>
                   <img
                     src={post.coverImage}
                     alt={post.title}
@@ -1075,12 +1424,20 @@ export const PostCrudManager: React.FC<Props> = ({
                 </div>
 
                 {/* Big Labeled Thai Buttons */}
-                <div className="flex flex-wrap items-center gap-2.5 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
+                <div className="flex flex-wrap items-center gap-2 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
                   <button
                     onClick={() => openEdit(post)}
                     className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d2546] px-4 py-2.5 text-sm font-extrabold text-white hover:bg-[#193d6e] cursor-pointer shadow-2xs"
                   >
                     <Edit3 className="w-4 h-4 text-amber-300" /> แก้ไขข่าว
+                  </button>
+
+                  <button
+                    onClick={() => handleDuplicatePost(post)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3.5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-200 cursor-pointer"
+                    title="คัดลอกข่าวนี้เป็นฉบับร่าง"
+                  >
+                    <Copy className="w-4 h-4" /> คัดลอก
                   </button>
 
                   <button
@@ -1146,6 +1503,51 @@ export const PostCrudManager: React.FC<Props> = ({
           })
         )}
       </div>
+
+      {/* Pagination Bar */}
+      {filtered.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-2xl p-4 border border-slate-200 text-xs sm:text-sm">
+          <div className="text-slate-600 font-bold">
+            แสดง {(safePage - 1) * pageSize + 1}–
+            {Math.min(safePage * pageSize, filtered.length)} จากทั้งหมด {filtered.length} เรื่อง
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700"
+            >
+              <option value={10}>10 เรื่อง / หน้า</option>
+              <option value={20}>20 เรื่อง / หน้า</option>
+              <option value={50}>50 เรื่อง / หน้า</option>
+              <option value={200}>ทั้งหมด (200)</option>
+            </select>
+
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="rounded-xl border border-slate-200 px-3 py-1.5 font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+            >
+              ← ก่อนหน้า
+            </button>
+            <span className="font-extrabold text-[#0d2546] px-2">
+              หน้า {safePage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="rounded-xl border border-slate-200 px-3 py-1.5 font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+            >
+              ถัดไป →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

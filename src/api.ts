@@ -186,8 +186,40 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  duplicatePost: (id: number) =>
+    request<Post>(`/api/posts/${id}/duplicate`, {
+      method: 'POST',
+    }),
+  bulkPostsAction: (payload: {
+    ids: number[];
+    action: 'publish' | 'draft' | 'delete' | 'category';
+    category?: string;
+  }) =>
+    request<{ ok: boolean; affected: number; action: string }>('/api/posts/bulk', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   deletePost: (id: number) =>
     request<{ ok: boolean }>(`/api/posts/${id}`, { method: 'DELETE' }),
+
+  exportCmsBackup: () =>
+    request<{
+      version: string;
+      exportedAt: string;
+      counts: Record<string, number>;
+      data: Record<string, any[]>;
+    }>('/api/admin/export-json'),
+  importCmsBackup: (payload: {
+    data: Record<string, any[]>;
+    mode?: 'merge' | 'replace';
+  }) =>
+    request<{ ok: boolean; importedPosts: number; importedKnowledge: number }>(
+      '/api/admin/import-json',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    ),
 
   uploadFile: async (file: File): Promise<string> => {
     const fd = new FormData();
@@ -224,6 +256,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  updateComment: (
+    id: number,
+    payload: Partial<{
+      authorName: string;
+      authorRole: string;
+      message: string;
+      rating: number;
+    }>
+  ) =>
+    request<PostComment>(`/api/comments/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   deleteComment: (id: number) =>
     request<{ ok: boolean }>(`/api/comments/${id}`, { method: 'DELETE' }),
 
@@ -244,11 +289,18 @@ export const api = {
 
   // 5-Pillar Business Model
   getPillars: () => request<BusinessPillarItem[]>('/api/pillars'),
+  createPillar: (payload: Partial<BusinessPillarItem>) =>
+    request<BusinessPillarItem>('/api/pillars', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updatePillar: (id: number, payload: Partial<BusinessPillarItem>) =>
     request<{ ok: boolean }>(`/api/pillars/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  deletePillar: (id: number) =>
+    request<{ ok: boolean }>(`/api/pillars/${id}`, { method: 'DELETE' }),
 
   // Real Multi-LLM Interactive Chat (Claude, DeepSeek, ChatGPT, Gemini)
   getChatSessions: () => request<AiChatSession[]>('/api/ai/chat-sessions'),
@@ -496,6 +548,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  updateSubscriber: (
+    id: number,
+    payload: { email?: string; name?: string; role?: string }
+  ) =>
+    request<{ ok: boolean; id: number; email: string; name: string; role: string }>(
+      `/api/subscribers/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    ),
   deleteSubscriber: (id: number) =>
     request<{ ok: boolean }>(`/api/subscribers/${id}`, { method: 'DELETE' }),
 
@@ -508,6 +571,11 @@ export const api = {
   }) =>
     request<{ ok: boolean }>('/api/contacts', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateContact: (id: number, payload: Partial<ContactMessage>) =>
+    request<{ ok: boolean }>(`/api/contacts/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(payload),
     }),
   markContactRead: (id: number) =>
@@ -603,6 +671,11 @@ export const api = {
         body: JSON.stringify(payload),
       }
     ),
+  updatePublishLog: (id: number, payload: Partial<PublishLog>) =>
+    request<{ ok: boolean }>(`/api/publish/logs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   deletePublishLog: (id: number) =>
     request<{ ok: boolean }>(`/api/publish/logs/${id}`, { method: 'DELETE' }),
 
@@ -619,6 +692,11 @@ export const api = {
   }) =>
     request<{ id: number; ok: boolean }>('/api/surveys', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateSurvey: (id: number, payload: Partial<AudienceSurvey>) =>
+    request<{ ok: boolean; id: number }>(`/api/surveys/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(payload),
     }),
   deleteSurvey: (id: number) =>
