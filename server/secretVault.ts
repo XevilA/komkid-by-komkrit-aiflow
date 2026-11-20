@@ -15,6 +15,8 @@ export const SECRET_SETTING_KEYS = new Set<string>([
   'elevenlabs_api_key',
   'resend_api_key',
   'local_api_key',
+  'oauth_facebook_app_secret',
+  'oauth_tiktok_client_secret',
 ]);
 
 export const NEVER_EXPORT_SETTING_KEYS = new Set<string>([

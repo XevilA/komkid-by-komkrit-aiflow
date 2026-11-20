@@ -4,6 +4,7 @@ import { db } from './db.ts';
 import { getSettingValue, UPLOADS_ROOT } from './mediaEngine.ts';
 import { decryptSecretValue } from './secretVault.ts';
 import { ensurePostSlug } from './slug.ts';
+import { getUsableToken } from './channelConnect.ts';
 
 export interface DispatchChannelInput {
   channelKey: string;
@@ -56,7 +57,10 @@ export async function dispatchSingleChannelReal(
     .get(input.channelKey) as any;
 
   const chName = cfg ? String(cfg.channel_name) : input.channelKey;
-  const token = decryptSecretValue(cfg?.access_token, `channel:${input.channelKey}`);
+  const token =
+    input.channelKey === 'tiktok'
+      ? await getUsableToken('tiktok') // refreshes the short-lived TikTok token when needed
+      : decryptSecretValue(cfg?.access_token, `channel:${input.channelKey}`);
   const targetId = String(cfg?.target_id || '').trim();
   const webhookUrl = String(cfg?.webhook_url || '').trim();
   const now = new Date().toISOString();
@@ -688,9 +692,11 @@ export async function dispatchSingleChannelReal(
           mode: 'live_api',
           status: 'failed',
           externalUrl: '',
-          responseNote: `TikTok API Init Error (HTTP ${initResp.status}): ${
-            initJson?.error?.message || JSON.stringify(initJson).slice(0, 150)
-          }`,
+          responseNote: /unaudited|private/i.test(JSON.stringify(initJson))
+            ? 'TikTok ไม่อนุญาตให้แอปที่ยังไม่ผ่านการตรวจสอบ (audit) โพสต์แบบสาธารณะ กรุณาส่งแอปขอตรวจสอบกับ TikTok หรือเปลี่ยนบัญชีที่เชื่อมต่อเป็นบัญชีส่วนตัวเพื่อทดสอบ'
+            : `TikTok API Init Error (HTTP ${initResp.status}): ${
+                initJson?.error?.message || JSON.stringify(initJson).slice(0, 150)
+              }`,
         };
       }
 

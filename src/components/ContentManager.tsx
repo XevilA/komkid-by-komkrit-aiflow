@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, ExternalLink, Search, Upload } from 'lucide-react';
 import { api, formatThaiDate, formatViews } from '../api';
-import { CATEGORIES, CategoryId, ContentType, Post, PostStatus } from '../types';
+import { CATEGORIES, CategoryId, ContentType, Post, PostStatus, SampleDataReport } from '../types';
 import { renderRichMarkdown } from './RichContent';
 import { Button, Card, ConfirmDialog, Field, Input, Notice, Select, StatusText, Textarea } from './ui';
 
@@ -119,10 +119,32 @@ export const ContentManager: React.FC<Props> = ({
   const [deleteTarget, setDeleteTarget] = useState<Post | null>(null);
   const [bulkDelete, setBulkDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sample, setSample] = useState<SampleDataReport | null>(null);
+  const [sampleOpen, setSampleOpen] = useState(false);
   const [dialogError, setDialogError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<'coverImage' | 'videoUrl' | 'audioUrl'>('coverImage');
+
+  useEffect(() => {
+    api.getSampleData().then(setSample).catch(() => setSample(null));
+  }, [posts.length]);
+
+  const removeSample = async () => {
+    setBusy(true);
+    setDialogError('');
+    try {
+      const out = await api.removeSampleData();
+      setSample(null);
+      setSampleOpen(false);
+      await onRefresh();
+      say('ok', `ลบข้อมูลตัวอย่างแล้ว ${out.removed.total} รายการ`);
+    } catch (e) {
+      setDialogError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const say = (type: 'ok' | 'error', text: string) => {
     setNotice({ type, text });
@@ -512,6 +534,53 @@ export const ContentManager: React.FC<Props> = ({
       </div>
 
       {notice && <Notice tone={notice.type === 'ok' ? 'ok' : 'error'}>{notice.text}</Notice>}
+
+      {sample && sample.total > 0 && (
+        <div className="flex flex-col justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 sm:flex-row sm:items-center">
+          <div>
+            <div className="text-sm font-medium text-slate-900">พบข้อมูลตัวอย่างที่ติดมากับระบบตอนติดตั้ง ({sample.total} รายการ)</div>
+            <p className="mt-0.5 text-sm text-slate-600">
+              เป็นบทความสาธิต ความคิดเห็น รายชื่อ และตัวเลขสมมติ ไม่ใช่ข้อมูลจริงของคุณ ควรลบออกก่อนใช้งานจริง ระบบจะลบเฉพาะรายการที่ตรงกับข้อมูลตัวอย่างเท่านั้น
+              สิ่งที่คุณเขียนหรือแก้ไขเองจะไม่ถูกแตะ
+            </p>
+          </div>
+          <Button variant="primary" onClick={() => setSampleOpen(true)} className="shrink-0">
+            ตรวจดูและลบ
+          </Button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={sampleOpen}
+        title="ลบข้อมูลตัวอย่าง"
+        danger
+        busy={busy}
+        error={dialogError}
+        confirmLabel="ลบข้อมูลตัวอย่างทั้งหมด"
+        message={
+          sample && (
+            <div className="space-y-2">
+              <p>รายการที่จะถูกลบถาวร (ไม่สามารถกู้คืนได้):</p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {sample.posts.length > 0 && <li>บทความสาธิต {sample.posts.length} เรื่อง พร้อมยอดเข้าชมสมมติ</li>}
+                {sample.comments > 0 && <li>ความคิดเห็นสมมติ {sample.comments} รายการ</li>}
+                {sample.knowledge > 0 && <li>คลังความรู้ตัวอย่าง {sample.knowledge} รายการ</li>}
+                {sample.subscribers > 0 && <li>รายชื่อสมาชิกสมมติ {sample.subscribers} รายชื่อ</li>}
+                {sample.surveys > 0 && <li>แบบสอบถามสมมติ {sample.surveys} รายการ</li>}
+                {sample.campaigns > 0 && <li>แคมเปญ AI ตัวอย่าง {sample.campaigns} รายการ</li>}
+                {sample.publishLogs > 0 && <li>ประวัติการเผยแพร่สมมติ {sample.publishLogs} รายการ</li>}
+                {sample.pillarsWithInventedMetrics > 0 && <li>ตัวเลขสมมติในโมเดลธุรกิจหน้าแรก {sample.pillarsWithInventedMetrics} รายการ (จะถูกล้างค่า)</li>}
+                {sample.channelsWithExampleHandles > 0 && <li>ลิงก์บัญชีโซเชียลตัวอย่าง {sample.channelsWithExampleHandles} ช่องทาง (จะถูกล้างค่า)</li>}
+              </ul>
+            </div>
+          )
+        }
+        onConfirm={removeSample}
+        onCancel={() => {
+          setSampleOpen(false);
+          setDialogError('');
+        }}
+      />
 
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-2">

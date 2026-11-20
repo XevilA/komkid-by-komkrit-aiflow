@@ -48,6 +48,7 @@ import { ContentManager } from './ContentManager';
 import { MediaGenStudio, MediaAgentHandoff } from './MediaGenStudio';
 import { SiteAndDomainManager } from './SiteAndDomainManager';
 import { AiRoutingPanel } from './AiRoutingPanel';
+import { ChannelConnect } from './ChannelConnect';
 import { SiteConfig, SpecialProject } from '../types';
 
 interface Props {
@@ -113,7 +114,9 @@ export const AdminLayout: React.FC<Props> = ({
       return false;
     }
   });
-  const [settingsTab, setSettingsTab] = useState<SettingsSubTab>('inbox');
+  const [settingsTab, setSettingsTab] = useState<SettingsSubTab>(() =>
+    new URLSearchParams(window.location.search).get('connect') ? 'channels' : 'inbox'
+  );
   const [aiStatus, setAiStatus] = useState<AiEngineSettings | null>(null);
   const [blueprintOpen, setBlueprintOpen] = useState(false);
 
@@ -771,6 +774,8 @@ export const AdminLayout: React.FC<Props> = ({
               )}
 
               {settingsTab === 'channels' && (
+                <div className="space-y-8">
+                <ChannelConnect />
                 <OmnichannelPublishHub
                   posts={posts}
                   workflows={workflows}
@@ -790,6 +795,7 @@ export const AdminLayout: React.FC<Props> = ({
                     setActiveMenu('ai-command');
                   }}
                 />
+                </div>
               )}
 
               {settingsTab === 'knowledge' && (

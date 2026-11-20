@@ -18,6 +18,9 @@ import { createWorkflowRecord } from './workflowStore.ts';
 import { deletePostCascade, deletePostRows } from './postsRepo.ts';
 import { registerWorkspaceRoutes } from './workspaceRoutes.ts';
 import { createLimiter } from './limits.ts';
+import { registerChannelRoutes } from './channelRoutes.ts';
+import { connectionStatus } from './channelConnect.ts';
+import { detectSampleData, removeSampleData } from './sampleData.ts';
 import { buildArticleShell, buildNotFoundShell } from './articleShell.ts';
 import {
   validateSlug,
@@ -318,6 +321,7 @@ app.use('/api', (req, res, next) => {
   if (p === '/auth/login' || p === '/auth/me') return next();
   if (m === 'GET' && (p === '/posts' || /^\/posts\/\d+$/.test(p))) return next();
   if (m === 'GET' && /^\/posts\/by-slug\/[^/]+$/.test(p)) return next();
+  if (m === 'GET' && p === '/channels/oauth/callback') return next(); // signed state proves the admin started it
   if (m === 'POST' && /^\/posts\/\d+\/comments$/.test(p)) return next();
   if (m === 'GET' && p === '/pillars') return next();
   if (m === 'GET' && (p === '/site-config' || p === '/projects')) return next();
@@ -2716,6 +2720,8 @@ app.post('/api/settings/test-extra', async (req, res) => {
 // ============================================================================
 // OMNICHANNEL PUBLISH & DISTRIBUTE (8 CHANNELS — 100% REAL API / WEBHOOK / DB)
 // ============================================================================
+registerChannelRoutes(app);
+
 app.get('/api/channels', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store, private');
   const resendGlobalKey = getProviderConfigs().resend.apiKey;
@@ -2739,6 +2745,10 @@ app.get('/api/channels', (_req, res) => {
         targetId: c.target_id || '',
         webhookUrl: c.webhook_url || '',
         updatedAt: c.updated_at,
+        accountName: c.account_name || '',
+        connectionMode: c.connection_mode || '',
+        lastVerifiedAt: c.last_verified_at || '',
+        connected: connectionStatus(c.channel_key).connected,
       };
     });
   res.json(rows);
@@ -3260,6 +3270,22 @@ app.post('/api/admin/import-json', (req, res) => {
       // ignore
     }
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Sample data that older installs were pre-filled with (admin reviews, then removes on request)
+app.get('/api/admin/sample-data', (_req, res) => {
+  res.json(detectSampleData());
+});
+app.post('/api/admin/sample-data/remove', (req, res) => {
+  if (req.body?.confirm !== true) {
+    res.status(400).json({ error: 'ต้องยืนยันการลบข้อมูลตัวอย่าง' });
+    return;
+  }
+  try {
+    res.json({ ok: true, removed: removeSampleData() });
+  } catch {
+    res.status(500).json({ error: 'ลบข้อมูลตัวอย่างไม่สำเร็จ ข้อมูลยังอยู่ครบ กรุณาลองใหม่' });
   }
 });
 

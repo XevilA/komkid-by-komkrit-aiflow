@@ -778,6 +778,49 @@ export const api = {
       results: import('./types').DomainStatusItem[];
     }>('/api/domains/status'),
 
+  getChannelConnectInfo: () =>
+    request<{
+      redirectUri: string;
+      facebook: { hasApp: boolean; appId: string };
+      tiktok: { hasApp: boolean; appId: string };
+      status: Record<string, { key: string; connected: boolean; accountName: string; mode: string; lastVerifiedAt: string }>;
+    }>('/api/channels/connect-info'),
+  connectLine: (token: string) =>
+    request<{ ok: boolean; accountName: string; detail: string }>('/api/channels/line_oa/connect', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+  connectFacebookManual: (pageId: string, token: string) =>
+    request<{ ok: boolean; accountName: string }>('/api/channels/facebook/connect-manual', {
+      method: 'POST',
+      body: JSON.stringify({ pageId, token }),
+    }),
+  saveChannelApp: (key: 'facebook' | 'tiktok', appId: string, appSecret: string) =>
+    request<{ ok: boolean; hasApp: boolean }>(`/api/channels/${key}/app`, {
+      method: 'POST',
+      body: JSON.stringify({ appId, appSecret }),
+    }),
+  startChannelOauth: (key: 'facebook' | 'tiktok') =>
+    request<{ url: string }>(`/api/channels/${key}/oauth/start`, { method: 'POST' }),
+  listFacebookPages: (nonce: string) =>
+    request<{ pages: { id: string; name: string }[] }>(`/api/channels/facebook/pages?nonce=${encodeURIComponent(nonce)}`),
+  chooseFacebookPage: (nonce: string, pageId: string) =>
+    request<{ ok: boolean; accountName: string }>('/api/channels/facebook/choose-page', {
+      method: 'POST',
+      body: JSON.stringify({ nonce, pageId }),
+    }),
+  verifyChannel: (key: string) =>
+    request<{ ok: boolean; accountName: string; detail: string }>(`/api/channels/${key}/verify`, { method: 'POST' }),
+  disconnectChannel: (key: string) =>
+    request<{ ok: boolean }>(`/api/channels/${key}/disconnect`, { method: 'POST' }),
+
+  getSampleData: () => request<import('./types').SampleDataReport>('/api/admin/sample-data'),
+  removeSampleData: () =>
+    request<{ ok: boolean; removed: import('./types').SampleDataReport }>('/api/admin/sample-data/remove', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
+
   // Content workspaces (CEO agent team)
   listWorkspaces: () =>
     request<{ workspaces: import('./types').WsListItem[]; capabilities: import('./types').WsCapabilities }>(

@@ -10,13 +10,27 @@ const mk = (over: Record<string, unknown> = {}) => ({
   title: 'บทความทดสอบ', content: '## หัวข้อ\nเนื้อหา', category: 'education', status: 'published', ...over,
 });
 
-test('every seeded post already has a unique slug', async () => {
-  const r = await srv.api('GET', '/api/posts', undefined, { auth: false });
-  assert.equal(r.status, 200);
-  assert.ok(r.json.length > 0);
-  const slugs = r.json.map((p: any) => p.slug);
-  assert.ok(slugs.every((s: string) => s && s.length > 0));
-  assert.equal(new Set(slugs).size, slugs.length);
+test('a new site starts with NO demo content, and older sample data can be reviewed and removed safely', async () => {
+  const fresh = await srv.api('GET', '/api/posts', undefined, { auth: false });
+  assert.equal(fresh.json.length, 0, 'no pre-filled articles');
+  assert.equal((await srv.api('GET', '/api/pillars', undefined, { auth: false })).json.length, 0, 'no invented business statistics');
+  const ch = (await srv.api('GET', '/api/channels')).json as any[];
+  assert.ok(ch.length >= 6);
+  assert.ok(ch.every((c) => !c.handleOrUrl || !/komkidbykomkrit|localhost|komkrit\.com/.test(c.handleOrUrl)), 'no example social accounts');
+  assert.equal((await srv.api('GET', '/api/admin/sample-data')).json.total, 0);
+
+  // an older install: demo article from the old seed next to a real one
+  const sample = await srv.api('POST', '/api/posts', { title: 'การศึกษาไทย ในยุค AI', content: 'x'.repeat(60), category: 'education', status: 'published' });
+  const real = await srv.api('POST', '/api/posts', { title: 'บทความจริงของเจ้าของเว็บ', content: 'y'.repeat(60), category: 'education', status: 'published' });
+  const rep = (await srv.api('GET', '/api/admin/sample-data')).json;
+  assert.equal(rep.posts.length, 1);
+  assert.equal(rep.posts[0].id, sample.json.id);
+  assert.equal((await srv.api('POST', '/api/admin/sample-data/remove', {})).status, 400, 'needs explicit confirmation');
+  assert.equal((await srv.api('POST', '/api/admin/sample-data/remove', { confirm: true }, { auth: false })).status, 401);
+  const done = await srv.api('POST', '/api/admin/sample-data/remove', { confirm: true });
+  assert.equal(done.status, 200);
+  assert.equal((await srv.api('GET', `/api/posts/${sample.json.id}`)).status, 404);
+  assert.equal((await srv.api('GET', `/api/posts/${real.json.id}`)).status, 200, 'real content is never touched');
 });
 
 test('create derives a Thai slug; same title gets -2; explicit slug honoured; invalid/conflicting rejected', async () => {

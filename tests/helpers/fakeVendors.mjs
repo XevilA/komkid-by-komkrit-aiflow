@@ -62,8 +62,47 @@ function chatText(system, user) {
   return { ok: true };
 }
 
+// ---- social platforms (LINE / Facebook / TikTok) --------------------------------------------
+async function social(url, init, j) {
+  const c = ctrl();
+  const bearer = String(init?.headers?.Authorization || init?.headers?.authorization || '');
+  if (url.startsWith('https://api.line.me/v2/bot/info')) {
+    return bearer.includes('bad') ? j({ message: 'Authentication failed' }, 401) : j({ userId: 'U123', basicId: '@komkid', displayName: 'คมคิด Official' });
+  }
+  if (url.startsWith('https://api.line.me/v2/bot/message/broadcast')) {
+    log('line broadcast ' + bearer.slice(0, 20));
+    return j({});
+  }
+  if (url.includes('graph.facebook.com') && url.includes('/oauth/access_token')) {
+    log('fb token ' + (url.includes('fb_exchange_token') ? 'long' : 'short'));
+    return url.includes('code=denied') ? j({ error: { message: 'Invalid code' } }, 400) : j({ access_token: url.includes('fb_exchange_token') ? 'LONG_USER_TOKEN_' + 'x'.repeat(30) : 'SHORT_USER_TOKEN_' + 'x'.repeat(30) });
+  }
+  if (url.includes('graph.facebook.com') && url.includes('/me/accounts')) {
+    if (c.includes('fb-no-pages')) return j({ data: [] });
+    const pages = [{ id: '1000000001', name: 'เพจคมคิด', access_token: 'PAGE_TOKEN_ONE_' + 'p'.repeat(30) }];
+    if (c.includes('fb-two-pages')) pages.push({ id: '1000000002', name: 'เพจโครงการพิเศษ', access_token: 'PAGE_TOKEN_TWO_' + 'p'.repeat(30) });
+    return j({ data: pages });
+  }
+  if (url.includes('graph.facebook.com') && /\/\d{5,}\?fields=name/.test(url)) {
+    return url.includes('REVOKED') ? j({ error: { code: 190, message: 'Error validating access token' } }, 400) : j({ name: url.includes('1000000002') ? 'เพจโครงการพิเศษ' : 'เพจคมคิด', fan_count: 1234 });
+  }
+  if (url.includes('graph.facebook.com') && url.includes('/feed')) { log('fb feed'); return j({ id: '1000000001_999' }); }
+  if (url.startsWith('https://open.tiktokapis.com/v2/oauth/token/')) {
+    const body = String(init?.body || '');
+    if (body.includes('grant_type=refresh_token')) { log('tiktok refresh'); return j({ access_token: 'TT_REFRESHED_' + 'r'.repeat(30), refresh_token: 'TT_REFRESH2_' + 'r'.repeat(30), expires_in: 86400 }); }
+    return j({ access_token: 'TT_ACCESS_' + 'a'.repeat(30), refresh_token: 'TT_REFRESH_' + 'r'.repeat(30), expires_in: 60, open_id: 'tt-open-1' });
+  }
+  if (url.startsWith('https://open.tiktokapis.com/v2/user/info')) {
+    return bearer.includes('TT_') ? j({ data: { user: { open_id: 'tt-open-1', display_name: 'คมคิดทีวี' } } }) : j({ error: { code: 'access_token_invalid' } }, 401);
+  }
+  return null;
+}
+
 globalThis.fetch = async (input, init) => {
   const url = String(typeof input === 'string' ? input : input.url);
+  const jj = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+  const soc = await social(url, init, jj);
+  if (soc) return soc;
   const vendor = url.includes('api.deepseek.com') ? 'deepseek' : url.includes('api.openai.com') ? 'openai' : null;
   if (!vendor) return realFetch(input, init);
   const j = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });

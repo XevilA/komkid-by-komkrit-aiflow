@@ -822,3 +822,16 @@ export interface WsCapabilities {
   channels: { key: string; name: string }[];
   serverless: boolean;
 }
+
+export interface SampleDataReport {
+  posts: { id: number; title: string; views: number }[];
+  comments: number;
+  knowledge: number;
+  subscribers: number;
+  surveys: number;
+  campaigns: number;
+  publishLogs: number;
+  pillarsWithInventedMetrics: number;
+  channelsWithExampleHandles: number;
+  total: number;
+}

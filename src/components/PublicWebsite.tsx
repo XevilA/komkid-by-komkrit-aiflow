@@ -1208,7 +1208,8 @@ export const PublicWebsite: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* KOMKID 5-Pillar Business Model (Exact match to LINE Image 4!) */}
+            {/* Business model pillars (shown only when the admin has defined them) */}
+            {pillars.length > 0 && (
             <div className="rounded-lg bg-white border border-slate-200 p-6 sm:p-8 ">
               <div className="text-center max-w-2xl mx-auto mb-6">
                 <div className="inline-flex items-center gap-2 rounded bg-[#0d2546] px-4 py-1 text-xs font-extrabold text-slate-200">
@@ -1249,16 +1250,19 @@ export const PublicWebsite: React.FC<Props> = ({
                         {p.description}
                       </p>
                     </div>
+                    {p.metricValue && (
                     <div className="mt-4 pt-2.5 border-t border-slate-100">
                       <div className="text-xs text-slate-400">{p.metricLabel}</div>
                       <div className="text-sm font-extrabold text-[#0d2546]">
                         {p.metricValue}
                       </div>
                     </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
+            )}
           </div>
         )}
 
