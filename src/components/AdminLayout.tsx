@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Zap,
   FileText,
   Database,
   Share2,
@@ -46,6 +47,7 @@ import { OmnichannelPublishHub } from './OmnichannelPublishHub';
 import { AiChatStudio, MediaAgentHandoff } from './AiChatStudio';
 import { MediaGenStudio } from './MediaGenStudio';
 import { SiteAndDomainManager } from './SiteAndDomainManager';
+import { AiRoutingPanel } from './AiRoutingPanel';
 import { SiteConfig, SpecialProject } from '../types';
 
 interface Props {
@@ -70,6 +72,7 @@ interface Props {
 
 type SettingsSubTab =
   | 'site_domain'
+  | 'ai_routing'
   | 'inbox'
   | 'channels'
   | 'knowledge'
@@ -242,6 +245,11 @@ export const AdminLayout: React.FC<Props> = ({
       id: 'site_domain',
       label: 'เว็บไซต์ โครงการ และโดเมน',
       icon: <Globe className="w-4 h-4" />,
+    },
+    {
+      id: 'ai_routing',
+      label: 'AI สลับอัตโนมัติ',
+      icon: <Zap className="w-4 h-4" />,
     },
     {
       id: 'inbox',
@@ -796,6 +804,8 @@ export const AdminLayout: React.FC<Props> = ({
                   onRefreshAll={onRefreshAll}
                 />
               )}
+
+              {settingsTab === 'ai_routing' && <AiRoutingPanel />}
 
               {settingsTab === 'inbox' && (
                 <AudienceAndSettingsHub

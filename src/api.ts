@@ -771,6 +771,55 @@ export const api = {
       results: import('./types').DomainStatusItem[];
     }>('/api/domains/status'),
 
+  // AI routing health (automatic failover) & Batch runs
+  getAiHealth: () => request<import('./types').AiHealthResponse>('/api/ai/health'),
+  resetAiHealth: (provider?: string) =>
+    request<{ ok: boolean }>('/api/ai/health/reset', {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+  saveAiRouting: (payload: {
+    failoverEnabled?: boolean;
+    fallbackOrder?: string[];
+    economyOrder?: string[];
+  }) =>
+    request<{ failoverEnabled: boolean; fallbackOrder: string[]; economyOrder: string[] }>(
+      '/api/ai/routing',
+      { method: 'PUT', body: JSON.stringify(payload) }
+    ),
+  listAiBatches: () =>
+    request<{
+      maxItems: number;
+      backgroundCapable: boolean;
+      batches: import('./types').AiBatchSummary[];
+    }>('/api/ai/batches'),
+  createAiBatch: (payload: {
+    name?: string;
+    topics: string[];
+    mode: 'economy' | 'standard';
+    category?: string;
+    targetAudience?: string;
+    businessPillar?: string;
+    inputSource?: string;
+    flowMode?: 'core_3agent' | 'full_8agent';
+  }) =>
+    request<import('./types').AiBatchSummary>('/api/ai/batches', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getAiBatch: (id: number) => request<import('./types').AiBatchSummary>(`/api/ai/batches/${id}`),
+  processAiBatch: (id: number) =>
+    request<import('./types').AiBatchSummary>(`/api/ai/batches/${id}/process`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  cancelAiBatch: (id: number) =>
+    request<import('./types').AiBatchSummary>(`/api/ai/batches/${id}/cancel`, { method: 'POST' }),
+  retryFailedAiBatch: (id: number) =>
+    request<import('./types').AiBatchSummary>(`/api/ai/batches/${id}/retry-failed`, {
+      method: 'POST',
+    }),
+
   // Special Projects Real-Time CRUD
   getSpecialProjects: () => request<import('./types').SpecialProject[]>('/api/projects'),
   createSpecialProject: (payload: Partial<import('./types').SpecialProject>) =>

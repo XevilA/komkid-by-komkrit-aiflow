@@ -637,3 +637,94 @@ export interface DomainStatusItem {
   httpStatus: number | null;
   checkedAt: string;
 }
+
+export type AiProviderState = 'ok' | 'degraded' | 'cooldown' | 'unconfigured';
+
+export interface AiProviderHealth {
+  id: string;
+  label: string;
+  configured: boolean;
+  state: AiProviderState;
+  cooldownRemainingSec: number;
+  consecutiveFailures: number;
+  lastError: string;
+  lastErrorKind: string;
+  lastErrorAt: string | null;
+  lastOkAt: string | null;
+}
+
+export interface AiHealthResponse {
+  failoverEnabled: boolean;
+  fallbackOrder: string[];
+  economyOrder: string[];
+  providers: AiProviderHealth[];
+  last24h: {
+    calls: number;
+    failures: number;
+    failovers: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+  };
+  recentEvents: {
+    created_at: string;
+    provider: string;
+    model: string;
+    tier: string;
+    ok: number;
+    error: string;
+    error_kind: string;
+    failed_over_from: string;
+  }[];
+}
+
+export type AiBatchStatus =
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'completed_with_errors'
+  | 'cancelled';
+
+export interface AiBatchItem {
+  id: number;
+  idx: number;
+  topic: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+  attempts: number;
+  workflowId: number | null;
+  error: string;
+  provider: string;
+  model: string;
+  tier: string;
+  cacheHit: boolean;
+  failedOver: boolean;
+}
+
+export interface AiBatchSummary {
+  id: number;
+  name: string;
+  status: AiBatchStatus;
+  mode: 'economy' | 'standard';
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  total: number;
+  done: number;
+  failed: number;
+  pending: number;
+  running: number;
+  cancelled: number;
+  duplicatesRemoved?: number;
+  stats: {
+    cacheHits: number;
+    failedOver: number;
+    escalatedToStandard: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cachedInputPercent: number;
+    byProvider: Record<string, number>;
+  };
+  items?: AiBatchItem[];
+}

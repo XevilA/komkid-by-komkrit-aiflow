@@ -1,7 +1,18 @@
+import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
-import { db } from './db.ts';
+import { db, IS_SERVERLESS } from './db.ts';
 import { generateRealImage, getSettingValue } from './mediaEngine.ts';
-import { getGeminiModelMethods, resolveLatestModel } from './modelRegistry.ts';
+import {
+  getGeminiModelMethods,
+  resolveLatestModel,
+  resolveEconomyTextModel,
+} from './modelRegistry.ts';
+import {
+  runWithFailover,
+  AllProvidersFailedError,
+  type AttemptSpec,
+  type AttemptLog,
+} from './aiRouter.ts';
 
 export type LlmProviderId =
   | 'auto'
@@ -22,6 +33,12 @@ export interface RunWorkflowInput {
   model?: string;
   autoGenerateCoverImage?: boolean;
   revisionNote?: string;
+  /** Batch economy options */
+  tier?: 'economy' | 'standard';
+  cache?: boolean;
+  batchId?: number;
+  /** Pre-selected shared Knowledge Base so every item in a batch has an identical cacheable prefix. */
+  kbItems?: { title: string; summary: string; content: string; source_ref: string }[];
 }
 
 export interface ChatTurnMessage {
@@ -36,6 +53,32 @@ export interface LlmCallResult {
   model: string;
   engineLabel: string;
   latencyMs: number;
+  usage?: { inputTokens: number; outputTokens: number; cachedTokens: number };
+  tier?: 'economy' | 'standard';
+  cacheHit?: boolean;
+  failedOverFrom?: string[];
+  attempts?: AttemptLog[];
+}
+
+export interface LlmCallParams {
+  provider?: LlmProviderId;
+  model?: string;
+  apiKeyOverride?: string;
+  systemInstruction?: string;
+  messages: ChatTurnMessage[];
+  temperature?: number;
+  jsonMode?: boolean;
+  /** 'economy' = cheapest capable model class first, escalating to standard only on failure. */
+  tier?: 'economy' | 'standard';
+  /** Automatic provider switching (default on; off when an explicit apiKeyOverride is used). */
+  failover?: boolean;
+  /** Extra acceptance check; throw to reject a result and switch provider. */
+  validate?: (text: string) => void;
+  /** Reuse identical previous answers (zero cost). */
+  cache?: boolean;
+  /** Mark the system prompt as a cacheable prefix (Anthropic explicit prompt caching). */
+  cacheSystem?: boolean;
+  batchId?: number;
 }
 
 export function getProviderConfigs() {
@@ -160,15 +203,7 @@ function sanitizeApiError(rawMsg: string, secret?: string): string {
 // ============================================================================
 // CORE REAL MULTI-PROVIDER LLM EXECUTION (GEMINI, CLAUDE, DEEPSEEK, CHATGPT)
 // ============================================================================
-export async function callRealLlm(params: {
-  provider?: LlmProviderId;
-  model?: string;
-  apiKeyOverride?: string;
-  systemInstruction?: string;
-  messages: ChatTurnMessage[];
-  temperature?: number;
-  jsonMode?: boolean;
-}): Promise<LlmCallResult> {
+async function callProviderOnce(params: LlmCallParams): Promise<LlmCallResult> {
   const cfg = getProviderConfigs();
   const provider =
     params.provider && params.provider !== 'auto'
@@ -187,12 +222,7 @@ export async function callRealLlm(params: {
     }
 
     try {
-      const model = await resolveLatestModel({
-        provider: 'gemini',
-        capability: 'text',
-        requestedModel: params.model || cfg.gemini.model,
-        apiKeyOverride: apiKey,
-      });
+      const model = await pickTextModel('gemini', params, cfg.gemini.model, apiKey);
       const methods = await getGeminiModelMethods(apiKey, model);
       const supportsGenerateContent =
         methods.length === 0 || methods.includes('generateContent');
@@ -278,6 +308,7 @@ export async function callRealLlm(params: {
       if (!text) {
         throw new Error(`Google Gemini (${model}) ตอบกลับเป็นค่าว่าง`);
       }
+      const gu = (genResp as any).usageMetadata || {};
 
       return {
         text,
@@ -285,6 +316,11 @@ export async function callRealLlm(params: {
         model,
         engineLabel: `Google Gemini (${model})`,
         latencyMs: Date.now() - startedAt,
+        usage: {
+          inputTokens: Number(gu.promptTokenCount || 0),
+          outputTokens: Number(gu.candidatesTokenCount || 0),
+          cachedTokens: Number(gu.cachedContentTokenCount || 0),
+        },
       };
     } catch (err) {
       throw new Error(sanitizeApiError((err as Error).message, apiKey));
@@ -299,12 +335,7 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ Anthropic Claude API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
       );
     }
-    const model = await resolveLatestModel({
-      provider: 'claude',
-      capability: 'text',
-      requestedModel: params.model || cfg.claude.model,
-      apiKeyOverride: apiKey,
-    });
+    const model = await pickTextModel('claude', params, cfg.claude.model, apiKey);
 
     const body: Record<string, any> = {
       model,
@@ -315,7 +346,15 @@ export async function callRealLlm(params: {
       })),
     };
     if (params.systemInstruction) {
-      body.system = params.systemInstruction;
+      body.system = params.cacheSystem
+        ? [
+            {
+              type: 'text',
+              text: params.systemInstruction,
+              cache_control: { type: 'ephemeral' },
+            },
+          ]
+        : params.systemInstruction;
     }
     if (typeof params.temperature === 'number') {
       body.temperature = params.temperature;
@@ -371,6 +410,14 @@ export async function callRealLlm(params: {
       model,
       engineLabel: `Anthropic Claude (${model})`,
       latencyMs: Date.now() - startedAt,
+      usage: {
+        inputTokens:
+          Number(data?.usage?.input_tokens || 0) +
+          Number(data?.usage?.cache_read_input_tokens || 0) +
+          Number(data?.usage?.cache_creation_input_tokens || 0),
+        outputTokens: Number(data?.usage?.output_tokens || 0),
+        cachedTokens: Number(data?.usage?.cache_read_input_tokens || 0),
+      },
     };
   }
 
@@ -382,12 +429,7 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ DeepSeek API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
       );
     }
-    const model = await resolveLatestModel({
-      provider: 'deepseek',
-      capability: 'text',
-      requestedModel: params.model || cfg.deepseek.model,
-      apiKeyOverride: apiKey,
-    });
+    const model = await pickTextModel('deepseek', params, cfg.deepseek.model, apiKey);
     const isReasoner = /reasoner/i.test(model);
 
     const apiMessages: any[] = [];
@@ -455,6 +497,11 @@ export async function callRealLlm(params: {
       model,
       engineLabel: `DeepSeek (${model})`,
       latencyMs: Date.now() - startedAt,
+      usage: {
+        inputTokens: Number(data?.usage?.prompt_tokens || 0),
+        outputTokens: Number(data?.usage?.completion_tokens || 0),
+        cachedTokens: Number(data?.usage?.prompt_cache_hit_tokens || 0),
+      },
     };
   }
 
@@ -466,12 +513,7 @@ export async function callRealLlm(params: {
         'ยังไม่ได้ใส่ OpenAI (ChatGPT) API Key — กรุณาตั้งค่าในหน้า "ตั้งค่า API Keys & Providers"'
       );
     }
-    const model = await resolveLatestModel({
-      provider: 'openai',
-      capability: 'text',
-      requestedModel: params.model || cfg.openai.model,
-      apiKeyOverride: apiKey,
-    });
+    const model = await pickTextModel('openai', params, cfg.openai.model, apiKey);
     const isReasoningSeries = /^o\d/i.test(model);
 
     const apiMessages: any[] = [];
@@ -621,18 +663,22 @@ export async function callRealLlm(params: {
       model,
       engineLabel: `OpenAI ChatGPT (${model})`,
       latencyMs: Date.now() - startedAt,
+      usage: {
+        inputTokens: Number(data?.usage?.prompt_tokens ?? data?.usage?.input_tokens ?? 0),
+        outputTokens: Number(data?.usage?.completion_tokens ?? data?.usage?.output_tokens ?? 0),
+        cachedTokens: Number(
+          data?.usage?.prompt_tokens_details?.cached_tokens ??
+            data?.usage?.input_tokens_details?.cached_tokens ??
+            0
+        ),
+      },
     };
   }
 
   // 5. CUSTOM / LOCAL OPENAI-COMPATIBLE SERVER (Live /models discovery)
   const endpoint = cfg.localOpenAi.endpoint.replace(/\/$/, '');
   const localKey = params.apiKeyOverride?.trim() || cfg.localOpenAi.apiKey;
-  const localModel = await resolveLatestModel({
-    provider: 'openai_compatible',
-    capability: 'text',
-    requestedModel: params.model || cfg.localOpenAi.model,
-    apiKeyOverride: localKey,
-  });
+  const localModel = await pickTextModel('openai_compatible', params, cfg.localOpenAi.model, localKey);
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (localKey) {
@@ -689,7 +735,290 @@ export async function callRealLlm(params: {
     model: localModel,
     engineLabel: `OpenAI-Compatible (${localModel})`,
     latencyMs: Date.now() - startedAt,
+    usage: {
+      inputTokens: Number(data?.usage?.prompt_tokens || 0),
+      outputTokens: Number(data?.usage?.completion_tokens || 0),
+      cachedTokens: Number(data?.usage?.prompt_tokens_details?.cached_tokens || 0),
+    },
   };
+}
+
+// ============================================================================
+// MODEL TIER SELECTION (economy = cost-efficient class discovered from the LIVE catalog)
+// ============================================================================
+async function pickTextModel(
+  provider: 'gemini' | 'claude' | 'deepseek' | 'openai' | 'openai_compatible',
+  params: LlmCallParams,
+  configuredModel: string,
+  apiKey: string
+): Promise<string> {
+  const explicit = (params.model || '').trim();
+  if (!explicit && params.tier === 'economy') {
+    const eco = await resolveEconomyTextModel({ provider, apiKeyOverride: apiKey });
+    if (eco) return eco;
+  }
+  return resolveLatestModel({
+    provider,
+    capability: 'text',
+    requestedModel: explicit || configuredModel,
+    apiKeyOverride: apiKey,
+  });
+}
+
+// ============================================================================
+// AUTOMATIC FAILOVER ROUTER — provider chain, response cache, call log
+// ============================================================================
+type ConcreteProvider = Exclude<LlmProviderId, 'auto'>;
+export const STANDARD_ORDER: ConcreteProvider[] = ['gemini', 'openai', 'claude', 'deepseek'];
+export const ECONOMY_ORDER: ConcreteProvider[] = ['deepseek', 'gemini', 'openai', 'claude'];
+const ALL_PROVIDERS: ConcreteProvider[] = [
+  'gemini',
+  'openai',
+  'claude',
+  'deepseek',
+  'openai_compatible',
+];
+const CACHE_TTL_MS = 30 * 24 * 3600 * 1000;
+
+export function configuredProviderSet(): Set<ConcreteProvider> {
+  const cfg = getProviderConfigs();
+  const set = new Set<ConcreteProvider>();
+  if (cfg.gemini.apiKey) set.add('gemini');
+  if (cfg.openai.apiKey) set.add('openai');
+  if (cfg.claude.apiKey) set.add('claude');
+  if (cfg.deepseek.apiKey) set.add('deepseek');
+  // A local/self-hosted endpoint only counts when the admin really configured it — the
+  // seeded placeholder (http://localhost:1234/v1) must not look like a working provider.
+  const localEndpoint = getSettingValue('local_endpoint').trim();
+  const customEndpoint = Boolean(localEndpoint) && localEndpoint !== 'http://localhost:1234/v1';
+  if (customEndpoint || getSettingValue('local_model').trim() || getSettingValue('local_api_key').trim()) {
+    set.add('openai_compatible');
+  }
+  return set;
+}
+
+export function readProviderOrder(
+  settingKey: 'ai_fallback_order' | 'ai_economy_order',
+  fallback: ConcreteProvider[]
+): ConcreteProvider[] {
+  const raw = getSettingValue(settingKey).trim();
+  let list: string[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed.map(String);
+    } catch {
+      list = raw.split(',').map((x) => x.trim());
+    }
+  }
+  const valid = list.filter((x): x is ConcreteProvider =>
+    (ALL_PROVIDERS as string[]).includes(x)
+  );
+  const merged = [...valid, ...fallback].filter((p, i, a) => a.indexOf(p) === i);
+  return merged;
+}
+
+/** Builds the ordered list of (provider, tier) attempts for one logical AI call. */
+export function buildAttempts(params: LlmCallParams): AttemptSpec[] {
+  const cfg = getProviderConfigs();
+  const configured = configuredProviderSet();
+  const economy = params.tier === 'economy';
+
+  const requested: ConcreteProvider | null =
+    params.provider && params.provider !== 'auto'
+      ? params.provider
+      : cfg.defaultProvider && cfg.defaultProvider !== 'auto'
+      ? cfg.defaultProvider
+      : null;
+
+  const baseOrder = readProviderOrder(
+    economy ? 'ai_economy_order' : 'ai_fallback_order',
+    economy ? ECONOMY_ORDER : STANDARD_ORDER
+  );
+  // Local server is appended last: free but usually weakest/slowest.
+  const full = [...baseOrder, 'openai_compatible' as ConcreteProvider].filter(
+    (p, i, a) => a.indexOf(p) === i
+  );
+  const ordered = [...(requested ? [requested] : []), ...full]
+    .filter((p, i, a) => a.indexOf(p) === i)
+    .filter((p) => configured.has(p));
+
+  if (ordered.length === 0) {
+    // Surfaces the familiar "no API key" error instead of a silent no-op.
+    resolveActiveProvider(params.provider);
+    throw new Error('ยังไม่ได้ตั้งค่า API Key จริงสำหรับ AI — กรุณาเพิ่มคีย์ในหน้าตั้งค่า');
+  }
+
+  const standard = ordered.map((provider): AttemptSpec => ({ provider, tier: 'standard' }));
+  if (!economy || params.model) return standard;
+  const cheap = ordered.map((provider): AttemptSpec => ({ provider, tier: 'economy' }));
+  return [...cheap, ...standard]; // cheap first, escalate to the full model only on failure
+}
+
+function cacheKeyFor(params: LlmCallParams): string {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify([
+        params.systemInstruction || '',
+        params.messages,
+        params.temperature ?? null,
+        Boolean(params.jsonMode),
+        params.tier === 'economy' ? 'e' : 's',
+      ])
+    )
+    .digest('hex');
+}
+
+function readLlmCache(key: string): LlmCallResult | null {
+  try {
+    const row = db
+      .prepare('SELECT response_text, provider, model, created_at FROM ai_cache WHERE cache_key = ?')
+      .get(key) as
+      | { response_text: string; provider: string; model: string; created_at: string }
+      | undefined;
+    if (!row) return null;
+    if (Date.now() - new Date(row.created_at).getTime() > CACHE_TTL_MS) {
+      db.prepare('DELETE FROM ai_cache WHERE cache_key = ?').run(key);
+      return null;
+    }
+    db.prepare('UPDATE ai_cache SET hits = hits + 1, last_hit_at = ? WHERE cache_key = ?').run(
+      new Date().toISOString(),
+      key
+    );
+    return {
+      text: row.response_text,
+      provider: (row.provider || 'gemini') as ConcreteProvider,
+      model: row.model,
+      engineLabel: `แคชผลลัพธ์เดิม (${row.provider} ${row.model}) • ไม่เสียค่า API`,
+      latencyMs: 0,
+      cacheHit: true,
+      usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0 },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeLlmCache(key: string, r: LlmCallResult) {
+  try {
+    db.prepare(
+      `INSERT OR REPLACE INTO ai_cache (cache_key, response_text, provider, model, hits, created_at)
+       VALUES (?, ?, ?, ?, 0, ?)`
+    ).run(key, r.text, r.provider, r.model, new Date().toISOString());
+  } catch {
+    /* cache is best-effort */
+  }
+}
+
+function logAiAttempts(attempts: AttemptLog[], result: LlmCallResult | null, batchId?: number) {
+  try {
+    const ins = db.prepare(
+      `INSERT INTO ai_call_log (
+        created_at, provider, model, tier, ok, latency_ms, error, error_kind,
+        failed_over_from, batch_id, input_tokens, output_tokens, cached_tokens
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const now = new Date().toISOString();
+    let firstFailed = '';
+    for (const a of attempts) {
+      ins.run(
+        now,
+        a.provider,
+        a.ok && result ? result.model : '',
+        a.tier,
+        a.ok ? 1 : 0,
+        a.latencyMs,
+        a.error || '',
+        a.kind || '',
+        a.ok ? firstFailed : '',
+        batchId ?? null,
+        a.ok && result?.usage ? result.usage.inputTokens : 0,
+        a.ok && result?.usage ? result.usage.outputTokens : 0,
+        a.ok && result?.usage ? result.usage.cachedTokens : 0
+      );
+      if (!a.ok && !firstFailed) firstFailed = a.provider;
+    }
+    if (Math.random() < 0.02) {
+      db.prepare("DELETE FROM ai_call_log WHERE created_at < datetime('now','-30 day')").run();
+    }
+  } catch {
+    /* logging must never break a user request */
+  }
+}
+
+const ATTEMPT_TIMEOUT_MS = Number(process.env.AI_ATTEMPT_TIMEOUT_MS) || (IS_SERVERLESS ? 45000 : 150000);
+
+/**
+ * Single entry point for every AI text call in the system.
+ * - switches provider automatically when one is down / rate-limited / returns unusable output
+ * - optional economy tier (cheap model first, escalate on failure) and response cache
+ */
+export async function callRealLlm(params: LlmCallParams): Promise<LlmCallResult> {
+  const hasOverride = Boolean(params.apiKeyOverride?.trim());
+  const useFailover =
+    params.failover !== false && !hasOverride && getSettingValue('ai_failover_enabled') !== '0';
+  const validateText = (text: string) => {
+    if (params.jsonMode) extractStrictJson(text);
+    params.validate?.(text);
+  };
+
+  const useCache = Boolean(params.cache) && !hasOverride;
+  const key = useCache ? cacheKeyFor(params) : '';
+  if (useCache) {
+    const hit = readLlmCache(key);
+    if (hit) return hit;
+  }
+
+  // Direct path: connection tests with a user-supplied key, or failover switched off.
+  if (!useFailover) {
+    const r = await callProviderOnce(params);
+    validateText(r.text);
+    if (useCache) writeLlmCache(key, r);
+    return r;
+  }
+
+  const attempts = buildAttempts(params);
+  const requested =
+    params.provider && params.provider !== 'auto' ? params.provider : null;
+
+  try {
+    const out = await runWithFailover<LlmCallResult>({
+      attempts,
+      call: (spec) =>
+        callProviderOnce({
+          ...params,
+          provider: spec.provider as ConcreteProvider,
+          tier: spec.tier,
+          // an explicit model id belongs to the provider it was chosen for
+          model: spec.provider === requested ? params.model : undefined,
+        }),
+      validate: (r) => validateText(r.text),
+      timeoutMs: ATTEMPT_TIMEOUT_MS,
+      totalBudgetMs: IS_SERVERLESS ? 55000 : undefined,
+    });
+
+    const failed = Array.from(
+      new Set(out.attempts.filter((a) => !a.ok).map((a) => a.provider))
+    );
+    const result: LlmCallResult = {
+      ...out.result,
+      tier: out.spec.tier,
+      attempts: out.attempts,
+      failedOverFrom: failed.length ? failed : undefined,
+      engineLabel: failed.length
+        ? `${out.result.engineLabel} • สลับอัตโนมัติจาก ${failed.join(', ')}`
+        : out.result.engineLabel,
+    };
+    logAiAttempts(out.attempts, result, params.batchId);
+    if (useCache) writeLlmCache(key, result);
+    return result;
+  } catch (err) {
+    if (err instanceof AllProvidersFailedError) {
+      logAiAttempts(err.attempts, null, params.batchId);
+    }
+    throw err;
+  }
 }
 
 function extractStrictJson(rawText: string): any {
@@ -723,6 +1052,7 @@ export async function testProviderConnection(params: {
     provider: params.provider,
     model: params.model,
     apiKeyOverride: params.apiKey,
+    failover: false,
     systemInstruction: 'You are an API connectivity verifier. Reply concisely in Thai.',
     messages: [
       {
@@ -904,11 +1234,25 @@ ${kbText}
   };
 }
 
+/** Rejects truncated / hollow answers so the router switches provider instead of saving junk. */
+function validateWorkflowText(text: string) {
+  const parsed = extractStrictJson(text);
+  const article = parsed?.scriptOutput?.fullArticleMarkdown;
+  if (
+    !parsed ||
+    typeof parsed.ceoOutput !== 'object' ||
+    typeof article !== 'string' ||
+    article.trim().length < 200
+  ) {
+    throw new Error('ผลลัพธ์ไม่ครบ: ขาด ceoOutput หรือเนื้อหาบทความสั้นผิดปกติ');
+  }
+}
+
 // ============================================================================
 // REAL 8-AGENT MULTI-AGENT CONTENT CREATION WORKFLOW (100% REAL API — NO MOCKUP!)
 // ============================================================================
 export async function executeMultiAgentWorkflow(input: RunWorkflowInput) {
-  const kbItems = getActiveKnowledgeContext(input.topic);
+  const kbItems = input.kbItems && input.kbItems.length ? input.kbItems : getActiveKnowledgeContext(input.topic);
   const kbContextString = kbItems
     .map(
       (k, i) =>
@@ -932,18 +1276,9 @@ export async function executeMultiAgentWorkflow(input: RunWorkflowInput) {
 โดยยึดข้อมูลจากฐานความรู้ (Knowledge Base) ด้านล่างอย่างเคร่งครัด เนื้อหาบทความ (fullArticleMarkdown) ต้องเขียนฉบับเต็มอย่างละเอียด ลึกซึ้ง ใช้ Markdown หัวข้อ ## และ ### พร้อมข้อเสนอเชิงปฏิบัติจริง
 ตอบกลับเป็น JSON Object ที่ถูกต้องตามโครงสร้างที่ระบุเท่านั้น ห้ามครอบข้อความอธิบายอื่น`;
 
-  const userPrompt = `หัวข้อโจทย์ (Topic): ${input.topic}
-แหล่งที่มาไอเดีย (Input Source): ${input.inputSource}
-หมวดหมู่: ${catLabel}
-กลุ่มผู้เรียน/เป้าหมาย: ${input.targetAudience}
-เสาหลักธุรกิจ (KOMKID 5-Pillar): ${input.businessPillar}
-โหมดการทำงาน: ${input.flowMode}
-${input.revisionNote ? `คำสั่งแก้ไขเพิ่มเติมจากผู้บริหาร (Human Approval Revision Note): ${input.revisionNote}` : ''}
-
-ฐานความรู้ (Knowledge Base):
-${kbContextString}
-
-จงส่งคืน JSON Object ที่มีโครงสร้างและชนิดข้อมูลครบทุกฟิลด์ดังนี้:
+  // STATIC prefix first (system prompt + schema + shared KB) so vendor prompt-caching can reuse it;
+  // only the small per-item request varies.
+  const schemaBlock = `จงส่งคืน JSON Object ที่มีโครงสร้างและชนิดข้อมูลครบทุกฟิลด์ดังนี้:
 {
   "ceoOutput": {
     "goal": "string",
@@ -1037,14 +1372,34 @@ ${kbContextString}
   }
 }`;
 
-  // Execute REAL API call — throws real error if API key is missing or invalid (ZERO MOCKUPS!)
+  const fullSystemPrompt = `${systemPrompt}
+
+ฐานความรู้ (Knowledge Base):
+${kbContextString}
+
+${schemaBlock}`;
+
+  const userPrompt = `หัวข้อโจทย์ (Topic): ${input.topic}
+แหล่งที่มาไอเดีย (Input Source): ${input.inputSource}
+หมวดหมู่: ${catLabel}
+กลุ่มผู้เรียน/เป้าหมาย: ${input.targetAudience}
+เสาหลักธุรกิจ (KOMKID 5-Pillar): ${input.businessPillar}
+โหมดการทำงาน: ${input.flowMode}
+${input.revisionNote ? `คำสั่งแก้ไขเพิ่มเติมจากผู้บริหาร (Human Approval Revision Note): ${input.revisionNote}` : ''}`;
+
+  // Execute REAL API call. Automatic provider failover + output validation happen inside callRealLlm.
   const llmResult = await callRealLlm({
     provider: input.provider,
     model: input.model,
-    systemInstruction: systemPrompt,
+    systemInstruction: fullSystemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
     temperature: 0.6,
     jsonMode: true,
+    tier: input.tier,
+    cache: input.cache,
+    cacheSystem: true,
+    batchId: input.batchId,
+    validate: validateWorkflowText,
   });
 
   const parsed = extractStrictJson(llmResult.text);
@@ -1079,6 +1434,14 @@ ${kbContextString}
   };
 
   return {
+    meta: {
+      provider: llmResult.provider,
+      model: llmResult.model,
+      tier: llmResult.tier || input.tier || 'standard',
+      cacheHit: Boolean(llmResult.cacheHit),
+      failedOver: Boolean(llmResult.failedOverFrom?.length),
+      usage: llmResult.usage || { inputTokens: 0, outputTokens: 0, cachedTokens: 0 },
+    },
     engineUsed: `${llmResult.engineLabel} • ${llmResult.latencyMs}ms`,
     ceoOutput: parsed.ceoOutput || {},
     researchOutput: parsed.researchOutput || {},

@@ -47,6 +47,7 @@ import {
 } from '../types';
 import { api, formatThaiDate } from '../api';
 import { renderRichMarkdown } from './ArticleReaderModal';
+import { AiBatchStudio } from './AiBatchStudio';
 
 interface Props {
   workflows: AiWorkflow[];
@@ -1018,6 +1019,8 @@ export const AiCommandCenter: React.FC<Props> = ({
           )}
         </form>
       </div>
+
+      <AiBatchStudio onRefreshAll={onRefreshAll} />
 
       {/* ===================================================================== */}
       {/* INTERACTIVE 01–08 MULTI-AGENT FLOW PIPELINE BAR (MATCHES IMAGE 1)     */}

@@ -4,6 +4,25 @@ import fs from 'node:fs';
 import multer from 'multer';
 import { db, initDatabase, IS_SERVERLESS, DEFAULT_SITE_CONFIG } from './db.ts';
 import {
+  createBatch,
+  summarizeBatch,
+  listBatches,
+  processBatch,
+  cancelBatch,
+  retryFailed,
+  startBackground,
+  resumeBatchesOnBoot,
+  MAX_BATCH_ITEMS,
+} from './batchRunner.ts';
+import { createWorkflowRecord } from './workflowStore.ts';
+import { getHealthSnapshot, resetHealth } from './aiRouter.ts';
+import {
+  configuredProviderSet,
+  readProviderOrder,
+  STANDARD_ORDER,
+  ECONOMY_ORDER,
+} from './aiEngine.ts';
+import {
   executeMultiAgentWorkflow,
   assistPostContent,
   getProviderConfigs,
@@ -1842,52 +1861,18 @@ app.post('/api/ai/workflows/run', async (req, res) => {
       autoGenerateCoverImage: Boolean(autoGenerateCoverImage),
     });
 
-    const now = new Date().toISOString();
-    const initialApproval = {
-      isAccurate: true,
-      isAppropriate: true,
-      isOnBrand: true,
-      isReady: false,
-      reviewerNote: '',
-      publishedPostId: null,
-    };
-
-    const insertRes = db
-      .prepare(
-        `INSERT INTO ai_workflows (
-          topic, input_source, category, target_audience, business_pillar,
-          flow_mode, engine_used, status,
-          ceo_json, research_json, script_json, design_json, visual_json,
-          video_json, audio_json, qa_json, analytics_json, omnichannel_json, approval_json,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        String(topic).trim(),
-        String(inputSource),
-        String(category),
-        String(targetAudience),
-        String(businessPillar),
-        flowMode === 'core_3agent' ? 'core_3agent' : 'full_8agent',
-        result.engineUsed,
-        JSON.stringify(result.ceoOutput),
-        JSON.stringify(result.researchOutput),
-        JSON.stringify(result.scriptOutput),
-        JSON.stringify(result.designOutput),
-        JSON.stringify(result.visualOutput),
-        JSON.stringify(result.videoOutput),
-        JSON.stringify(result.audioOutput),
-        JSON.stringify(result.qaOutput),
-        JSON.stringify(result.analyticsOutput),
-        JSON.stringify(result.omnichannelOutput),
-        JSON.stringify(initialApproval),
-        now,
-        now
-      );
-
-    const created = db
-      .prepare('SELECT * FROM ai_workflows WHERE id = ?')
-      .get(Number(insertRes.lastInsertRowid));
+    const newId = createWorkflowRecord(
+      {
+        topic: String(topic).trim(),
+        inputSource: String(inputSource),
+        category: String(category),
+        targetAudience: String(targetAudience),
+        businessPillar: String(businessPillar),
+        flowMode: flowMode === 'core_3agent' ? 'core_3agent' : 'full_8agent',
+      },
+      result
+    );
+    const created = db.prepare('SELECT * FROM ai_workflows WHERE id = ?').get(newId);
     res.status(201).json(mapWorkflowRow(created));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
@@ -3133,6 +3118,189 @@ app.post('/api/admin/import-json', (req, res) => {
 });
 
 // ============================================================================
+// AI ROUTING HEALTH (automatic failover) & BATCH RUNS (economy mode)
+// ============================================================================
+const PROVIDER_LABELS: Record<string, string> = {
+  gemini: 'Google Gemini',
+  openai: 'OpenAI ChatGPT',
+  claude: 'Anthropic Claude',
+  deepseek: 'DeepSeek',
+  openai_compatible: 'เซิร์ฟเวอร์ภายใน (OpenAI-Compatible)',
+};
+
+function readRoutingConfig() {
+  const enabledRow = db.prepare("SELECT value FROM settings WHERE key = 'ai_failover_enabled'").get() as
+    | { value: string }
+    | undefined;
+  return {
+    failoverEnabled: enabledRow?.value !== '0',
+    fallbackOrder: readProviderOrder('ai_fallback_order', STANDARD_ORDER),
+    economyOrder: readProviderOrder('ai_economy_order', ECONOMY_ORDER),
+  };
+}
+
+app.get('/api/ai/health', (_req, res) => {
+  const configured = configuredProviderSet();
+  const snap = new Map(getHealthSnapshot().map((h) => [h.provider, h]));
+  const now = Date.now();
+  const providers = Object.keys(PROVIDER_LABELS).map((id) => {
+    const h = snap.get(id);
+    const isConfigured = configured.has(id as any);
+    const cooling = Boolean(h && h.openUntil > now);
+    return {
+      id,
+      label: PROVIDER_LABELS[id],
+      configured: isConfigured,
+      state: !isConfigured ? 'unconfigured' : cooling ? 'cooldown' : h?.consecutiveFailures ? 'degraded' : 'ok',
+      cooldownRemainingSec: cooling ? Math.ceil((h!.openUntil - now) / 1000) : 0,
+      consecutiveFailures: h?.consecutiveFailures || 0,
+      lastError: h?.lastError || '',
+      lastErrorKind: h?.lastKind || '',
+      lastErrorAt: h?.lastErrorAt ? new Date(h.lastErrorAt).toISOString() : null,
+      lastOkAt: h?.lastOkAt ? new Date(h.lastOkAt).toISOString() : null,
+    };
+  });
+  const day = db
+    .prepare(
+      `SELECT COUNT(*) AS calls, SUM(ok = 0) AS failures,
+              SUM(ok = 1 AND failed_over_from != '') AS failovers,
+              SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+              SUM(cached_tokens) AS cached_tokens
+       FROM ai_call_log WHERE created_at > datetime('now','-1 day')`
+    )
+    .get() as any;
+  const recent = db
+    .prepare(
+      `SELECT created_at, provider, model, tier, ok, error, error_kind, failed_over_from
+       FROM ai_call_log WHERE ok = 0 OR failed_over_from != '' ORDER BY id DESC LIMIT 8`
+    )
+    .all();
+  res.json({
+    ...readRoutingConfig(),
+    providers,
+    last24h: {
+      calls: day.calls || 0,
+      failures: day.failures || 0,
+      failovers: day.failovers || 0,
+      inputTokens: day.input_tokens || 0,
+      outputTokens: day.output_tokens || 0,
+      cachedInputTokens: day.cached_tokens || 0,
+    },
+    recentEvents: recent,
+  });
+});
+
+app.post('/api/ai/health/reset', (req, res) => {
+  const provider = req.body?.provider ? String(req.body.provider) : undefined;
+  if (provider && !PROVIDER_LABELS[provider]) {
+    res.status(400).json({ error: 'ไม่รู้จักค่าย AI ที่ระบุ' });
+    return;
+  }
+  resetHealth(provider);
+  res.json({ ok: true });
+});
+
+app.put('/api/ai/routing', (req, res) => {
+  const b = req.body || {};
+  const valid = Object.keys(PROVIDER_LABELS);
+  const cleanOrder = (v: unknown): string[] | null => {
+    if (v === undefined) return null;
+    if (!Array.isArray(v)) throw new Error('ลำดับค่ายต้องเป็นรายการ');
+    const list = v.map(String);
+    const bad = list.find((x) => !valid.includes(x));
+    if (bad) throw new Error(`ไม่รู้จักค่าย AI: ${bad}`);
+    return Array.from(new Set(list));
+  };
+  try {
+    const fb = cleanOrder(b.fallbackOrder);
+    const eco = cleanOrder(b.economyOrder);
+    const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    if (fb) set.run('ai_fallback_order', JSON.stringify(fb));
+    if (eco) set.run('ai_economy_order', JSON.stringify(eco));
+    if (typeof b.failoverEnabled === 'boolean') {
+      set.run('ai_failover_enabled', b.failoverEnabled ? '1' : '0');
+    }
+    res.json(readRoutingConfig());
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/ai/batches', (_req, res) => {
+  res.json({
+    maxItems: MAX_BATCH_ITEMS,
+    backgroundCapable: !IS_SERVERLESS,
+    batches: listBatches(20),
+  });
+});
+
+app.post('/api/ai/batches', (req, res) => {
+  try {
+    const b = req.body || {};
+    const { id, duplicates } = createBatch({
+      name: b.name,
+      topics: b.topics,
+      options: {
+        mode: b.mode,
+        concurrency: b.concurrency,
+        category: b.category,
+        inputSource: b.inputSource,
+        targetAudience: b.targetAudience,
+        businessPillar: b.businessPillar,
+        flowMode: b.flowMode,
+        provider: b.provider,
+        autoGenerateCoverImage: b.autoGenerateCoverImage,
+      },
+    });
+    startBackground(id); // no-op on serverless: the UI drives /process slices there
+    res.status(201).json({ ...summarizeBatch(id), duplicatesRemoved: duplicates });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/ai/batches/:id', (req, res) => {
+  const s2 = summarizeBatch(Number(req.params.id));
+  if (!s2) {
+    res.status(404).json({ error: 'ไม่พบ Batch ที่ต้องการ' });
+    return;
+  }
+  res.json(s2);
+});
+
+app.post('/api/ai/batches/:id/process', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    // Serverless functions are time-limited, so work in short slices the UI keeps calling.
+    const budgetMs = IS_SERVERLESS
+      ? Math.min(Number(req.body?.budgetMs) || 40000, 45000)
+      : Math.min(Number(req.body?.budgetMs) || 20000, 120000);
+    res.json(await processBatch(id, { budgetMs }));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/ai/batches/:id/cancel', (req, res) => {
+  try {
+    res.json(cancelBatch(Number(req.params.id)));
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/ai/batches/:id/retry-failed', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const out = retryFailed(id);
+    startBackground(id);
+    res.json(out);
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================================
 // SITE CMS CONFIG, SPECIAL PROJECTS CRUD & LIVE DOMAIN/DNS VERIFICATION
 // ============================================================================
 const SITE_TEXT_LIMITS: Record<string, number> = {
@@ -3577,6 +3745,7 @@ async function startServer() {
 
 if (!IS_SERVERLESS) {
   startServer();
+  resumeBatchesOnBoot();
 }
 
 export { app };

@@ -11,6 +11,7 @@ import {
   resolveLatestModel,
 } from './modelRegistry.ts';
 import { SECRET_SETTING_KEYS, decryptSecretValue } from './secretVault.ts';
+import { runWithFailover } from './aiRouter.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -215,7 +216,7 @@ async function recordMediaAsset(params: {
 // ============================================================================
 // 1. REAL AI IMAGE GENERATION (Live Model Discovery: Google Gemini / Imagen / OpenAI)
 // ============================================================================
-export async function generateRealImage(params: {
+async function generateRealImageOnce(params: {
   prompt: string;
   provider?: 'gemini' | 'openai';
   model?: string;
@@ -1219,7 +1220,7 @@ function wrapPcm16InWavHeader(
   return Buffer.concat([header, pcmData]);
 }
 
-export async function generateRealAudio(params: {
+async function generateRealAudioOnce(params: {
   text: string;
   provider?: 'gemini' | 'openai' | 'elevenlabs';
   model?: string;
@@ -1442,4 +1443,82 @@ export async function generateRealAudio(params: {
     mimeType: 'audio/mpeg',
     workflowId: params.workflowId ?? null,
   });
+}
+
+// ============================================================================
+// MEDIA FAILOVER — image / voice generation switch provider automatically when one is down
+// ============================================================================
+export async function withMediaFailover<T>(
+  kind: 'image' | 'audio',
+  requested: string | undefined,
+  defaultOrder: string[],
+  hasKey: Record<string, boolean>,
+  run: (provider: string, isRequested: boolean) => Promise<T>
+): Promise<T> {
+  const failoverOn = getSettingValue('ai_failover_enabled') !== '0';
+  const candidates = [...(requested ? [requested] : []), ...defaultOrder]
+    .filter((p, i, a) => a.indexOf(p) === i)
+    .filter((p) => hasKey[p]);
+
+  // Nothing configured (or failover off): run the originally chosen provider so the user
+  // gets the precise "please add your key" message.
+  if (candidates.length === 0 || !failoverOn) {
+    return run(requested || defaultOrder[0], true);
+  }
+  const out = await runWithFailover<T>({
+    attempts: candidates.map((p) => ({ provider: `${kind}:${p}`, tier: 'standard' as const })),
+    call: (a) => {
+      const p = a.provider.slice(kind.length + 1);
+      return run(p, p === requested);
+    },
+    timeoutMs: IS_SERVERLESS ? 50000 : 180000,
+  });
+  return out.result;
+}
+
+export async function generateRealImage(
+  params: Parameters<typeof generateRealImageOnce>[0]
+): Promise<Awaited<ReturnType<typeof generateRealImageOnce>>> {
+  const hasKey = {
+    gemini: Boolean(
+      getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
+        getSettingValue('gemini_api_key', 'GOOGLE_API_KEY')
+    ),
+    openai: Boolean(getSettingValue('openai_api_key', 'OPENAI_API_KEY')),
+  };
+  return withMediaFailover('image', params.provider, ['gemini', 'openai'], hasKey, (p, isReq) =>
+    generateRealImageOnce({
+      ...params,
+      provider: p as 'gemini' | 'openai',
+      // a model id belongs to the provider it was picked for
+      model: isReq ? params.model : undefined,
+    })
+  );
+}
+
+export async function generateRealAudio(
+  params: Parameters<typeof generateRealAudioOnce>[0]
+): Promise<Awaited<ReturnType<typeof generateRealAudioOnce>>> {
+  const hasKey = {
+    gemini: Boolean(
+      getSettingValue('gemini_api_key', 'GEMINI_API_KEY') ||
+        getSettingValue('gemini_api_key', 'GOOGLE_API_KEY')
+    ),
+    elevenlabs: Boolean(getSettingValue('elevenlabs_api_key', 'ELEVENLABS_API_KEY')),
+    openai: Boolean(getSettingValue('openai_api_key', 'OPENAI_API_KEY')),
+  };
+  return withMediaFailover(
+    'audio',
+    params.provider,
+    ['gemini', 'elevenlabs', 'openai'],
+    hasKey,
+    (p, isReq) =>
+      generateRealAudioOnce({
+        ...params,
+        provider: p as 'gemini' | 'openai' | 'elevenlabs',
+        // voice names and model ids are provider-specific
+        model: isReq ? params.model : undefined,
+        voice: isReq ? params.voice : undefined,
+      })
+  );
 }

@@ -934,6 +934,52 @@ export async function resolveLatestModel(params: {
   );
 }
 
+
+/**
+ * Picks the cost-efficient text model from a provider's LIVE model list without hardcoding names.
+ * Prefers balanced low-cost classes (flash / mini / haiku / chat), then ultra-light ones
+ * (lite / nano / small), and always skips reasoning, preview, media and flagship tiers.
+ * Returns null when nothing suitable exists so callers fall back to the normal model.
+ */
+export function pickEconomyModelId(ids: string[]): string | null {
+  const exclude =
+    /(^|[-_/.])o\d|pro\b|opus|sonnet|ultra|reasoner|think|preview|exp\b|experimental|image|imagen|veo|tts|audio|live|vision|embed|search|realtime|transcribe|codex|moderation|dall|whisper|computer|robotics|gemma|learnlm/i;
+  const balanced = /flash|mini|haiku|chat/i;
+  const light = /lite|nano|small|turbo/i;
+  let best: { id: string; rank: number; score: number } | null = null;
+  for (const id of ids) {
+    const lower = id.toLowerCase();
+    if (exclude.test(lower)) continue;
+    let rank = 0;
+    if (light.test(lower)) rank = 1;
+    if (balanced.test(lower)) rank = 2;
+    if (rank === 0) continue;
+    // Balanced class beats light class; a light model that is also "flash-lite" stays light.
+    if (/lite|nano/.test(lower)) rank = 1;
+    const score = scoreModelRecency(id);
+    if (!best || rank > best.rank || (rank === best.rank && score > best.score)) {
+      best = { id, rank, score };
+    }
+  }
+  return best ? best.id : null;
+}
+
+export async function resolveEconomyTextModel(params: {
+  provider: DiscoverableProvider;
+  apiKeyOverride?: string;
+}): Promise<string | null> {
+  try {
+    const catalog = await fetchSingleProviderLiveCatalog({
+      provider: params.provider,
+      apiKey: params.apiKeyOverride,
+      forceRefresh: false,
+    });
+    return pickEconomyModelId(catalog.textModels.map((m) => m.id));
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveLatestElevenLabsVoice(
   requestedVoiceId?: string,
   apiKeyOverride?: string

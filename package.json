@@ -12,7 +12,8 @@
     "build:api": "esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=api/index.js",
     "build": "vite build && npm run build:api",
     "preview": "TMPDIR=/tmp PORT=4173 NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts",
-    "start": "TMPDIR=/tmp NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts"
+    "start": "TMPDIR=/tmp NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts",
+    "test": "TMPDIR=/tmp node --no-warnings --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.29.1",

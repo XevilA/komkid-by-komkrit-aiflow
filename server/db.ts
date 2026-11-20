@@ -281,6 +281,69 @@ export function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS ai_call_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT DEFAULT '',
+      tier TEXT DEFAULT 'standard',
+      ok INTEGER NOT NULL DEFAULT 0,
+      latency_ms INTEGER DEFAULT 0,
+      error TEXT DEFAULT '',
+      error_kind TEXT DEFAULT '',
+      failed_over_from TEXT DEFAULT '',
+      batch_id INTEGER,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cached_tokens INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_cache (
+      cache_key TEXT PRIMARY KEY,
+      response_text TEXT NOT NULL,
+      provider TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      hits INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      last_hit_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'queued',
+      mode TEXT NOT NULL DEFAULT 'economy',
+      options_json TEXT NOT NULL DEFAULT '{}',
+      kb_json TEXT NOT NULL DEFAULT '[]',
+      total INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_batch_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      idx INTEGER NOT NULL DEFAULT 0,
+      topic TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      workflow_id INTEGER,
+      error TEXT DEFAULT '',
+      provider TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      tier TEXT DEFAULT '',
+      cache_hit INTEGER NOT NULL DEFAULT 0,
+      failed_over INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cached_tokens INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_call_log_created ON ai_call_log(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_batch_items_batch ON ai_batch_items(batch_id, status, idx);
+
     CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, is_featured DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category, content_type);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, created_at DESC);

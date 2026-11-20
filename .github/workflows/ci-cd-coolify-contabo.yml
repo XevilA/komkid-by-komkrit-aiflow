@@ -27,9 +27,10 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Typecheck & Production Build (Vite + Serverless API Bundle)
+      - name: Typecheck, Unit/Integration Tests & Production Build (Vite + Serverless API Bundle)
         run: |
           npx tsc --noEmit
+          npm test
           npm run build
 
   deploy-contabo-coolify:

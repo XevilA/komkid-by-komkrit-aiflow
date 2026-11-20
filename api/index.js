@@ -475,6 +475,69 @@ function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS ai_call_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT DEFAULT '',
+      tier TEXT DEFAULT 'standard',
+      ok INTEGER NOT NULL DEFAULT 0,
+      latency_ms INTEGER DEFAULT 0,
+      error TEXT DEFAULT '',
+      error_kind TEXT DEFAULT '',
+      failed_over_from TEXT DEFAULT '',
+      batch_id INTEGER,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cached_tokens INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_cache (
+      cache_key TEXT PRIMARY KEY,
+      response_text TEXT NOT NULL,
+      provider TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      hits INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      last_hit_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'queued',
+      mode TEXT NOT NULL DEFAULT 'economy',
+      options_json TEXT NOT NULL DEFAULT '{}',
+      kb_json TEXT NOT NULL DEFAULT '[]',
+      total INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_batch_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      idx INTEGER NOT NULL DEFAULT 0,
+      topic TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      workflow_id INTEGER,
+      error TEXT DEFAULT '',
+      provider TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      tier TEXT DEFAULT '',
+      cache_hit INTEGER NOT NULL DEFAULT 0,
+      failed_over INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      cached_tokens INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_call_log_created ON ai_call_log(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_batch_items_batch ON ai_batch_items(batch_id, status, idx);
+
     CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, is_featured DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category, content_type);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, created_at DESC);
@@ -1282,6 +1345,7 @@ function seedIfEmpty() {
 }
 
 // server/aiEngine.ts
+import crypto3 from "node:crypto";
 import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 
 // server/mediaEngine.ts
@@ -2141,6 +2205,38 @@ async function resolveLatestModel(params) {
     `\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E42\u0E21\u0E40\u0E14\u0E25\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17 ${params.capability} \u0E08\u0E32\u0E01 API \u0E02\u0E2D\u0E07\u0E04\u0E48\u0E32\u0E22 ${params.provider} \u0E42\u0E14\u0E22\u0E15\u0E23\u0E07${detail} \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E27\u0E48\u0E32 API Key \u0E21\u0E35\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E42\u0E21\u0E40\u0E14\u0E25\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17\u0E19\u0E35\u0E49`
   );
 }
+function pickEconomyModelId(ids) {
+  const exclude = /(^|[-_/.])o\d|pro\b|opus|sonnet|ultra|reasoner|think|preview|exp\b|experimental|image|imagen|veo|tts|audio|live|vision|embed|search|realtime|transcribe|codex|moderation|dall|whisper|computer|robotics|gemma|learnlm/i;
+  const balanced = /flash|mini|haiku|chat/i;
+  const light = /lite|nano|small|turbo/i;
+  let best = null;
+  for (const id of ids) {
+    const lower = id.toLowerCase();
+    if (exclude.test(lower)) continue;
+    let rank = 0;
+    if (light.test(lower)) rank = 1;
+    if (balanced.test(lower)) rank = 2;
+    if (rank === 0) continue;
+    if (/lite|nano/.test(lower)) rank = 1;
+    const score = scoreModelRecency(id);
+    if (!best || rank > best.rank || rank === best.rank && score > best.score) {
+      best = { id, rank, score };
+    }
+  }
+  return best ? best.id : null;
+}
+async function resolveEconomyTextModel(params) {
+  try {
+    const catalog = await fetchSingleProviderLiveCatalog({
+      provider: params.provider,
+      apiKey: params.apiKeyOverride,
+      forceRefresh: false
+    });
+    return pickEconomyModelId(catalog.textModels.map((m) => m.id));
+  } catch {
+    return null;
+  }
+}
 async function resolveLatestElevenLabsVoice(requestedVoiceId, apiKeyOverride) {
   const candidate = (requestedVoiceId || "").trim();
   const catalog = await fetchElevenLabsLiveCatalog(apiKeyOverride, false);
@@ -2155,6 +2251,196 @@ async function resolveLatestElevenLabsVoice(requestedVoiceId, apiKeyOverride) {
     return candidate;
   }
   throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1E\u0E32\u0E01\u0E22\u0E4C (Voices) \u0E08\u0E32\u0E01 ElevenLabs API");
+}
+
+// server/aiRouter.ts
+var SEC = 1e3;
+function classifyError(rawMessage) {
+  const m = String(rawMessage || "");
+  if (/ยังไม่ได้ใส่|ยังไม่ได้ตั้งค่า|no api key|api key (is )?(missing|not set)/i.test(m)) {
+    return "config";
+  }
+  if (/insufficient[_ ]quota|billing|credit balance|out of credit|payment required|\b402\b|exceeded your current quota|account.*(suspended|disabled|deactivated)/i.test(
+    m
+  )) {
+    return "billing";
+  }
+  if (/\b401\b|\b403\b|unauthori[sz]ed|invalid[^a-z]*(x-?api-?)?key|incorrect api key|api key not valid|authentication|permission[_ ]denied|forbidden/i.test(
+    m
+  )) {
+    return "auth";
+  }
+  if (/\b429\b|rate[ _-]?limit|too many requests|resource[_ ]exhausted|quota/i.test(m)) {
+    return "rate";
+  }
+  if (/\b5\d\d\b|overload|unavailable|timed? ?out|timeout|etimedout|econn|enotfound|eai_again|fetch failed|network|socket|temporar|capacity|busy|bad gateway|gateway/i.test(
+    m
+  )) {
+    return "transient";
+  }
+  if (/ไม่ใช่รูปแบบ json|ตอบกลับเป็นค่าว่าง|ไม่ได้ส่งข้อความ|ปฏิเสธคำขอ|validation|ผลลัพธ์ไม่ครบ/i.test(m)) {
+    return "output";
+  }
+  return "other";
+}
+var health = /* @__PURE__ */ new Map();
+function ensure(provider) {
+  let h = health.get(provider);
+  if (!h) {
+    h = {
+      provider,
+      consecutiveFailures: 0,
+      openUntil: 0,
+      lastError: "",
+      lastKind: "",
+      lastErrorAt: 0,
+      lastOkAt: 0,
+      totalCalls: 0,
+      totalFailures: 0
+    };
+    health.set(provider, h);
+  }
+  return h;
+}
+function getHealthSnapshot() {
+  return Array.from(health.values()).map((h) => ({ ...h }));
+}
+function resetHealth(provider) {
+  if (provider) health.delete(provider);
+  else health.clear();
+}
+function isCoolingDown(provider, now = Date.now()) {
+  return ensure(provider).openUntil > now;
+}
+function recordSuccess(provider, now = Date.now()) {
+  const h = ensure(provider);
+  h.totalCalls += 1;
+  h.consecutiveFailures = 0;
+  h.openUntil = 0;
+  h.lastOkAt = now;
+}
+function recordFailure(provider, kind, message, now = Date.now()) {
+  if (kind === "config") return;
+  const h = ensure(provider);
+  h.totalCalls += 1;
+  h.totalFailures += 1;
+  h.lastError = String(message || "").slice(0, 300);
+  h.lastKind = kind;
+  h.lastErrorAt = now;
+  if (kind === "output") {
+    return;
+  }
+  h.consecutiveFailures += 1;
+  const n = h.consecutiveFailures;
+  let cooldownMs = 0;
+  if (kind === "billing") cooldownMs = 30 * 60 * SEC;
+  else if (kind === "auth") cooldownMs = 15 * 60 * SEC;
+  else if (kind === "rate") cooldownMs = Math.min(10 * 60 * SEC, 60 * SEC * 2 ** (n - 1));
+  else if (kind === "transient" && n >= 2) {
+    cooldownMs = Math.min(5 * 60 * SEC, 30 * SEC * 2 ** (n - 2));
+  } else if (kind === "other" && n >= 3) {
+    cooldownMs = Math.min(5 * 60 * SEC, 30 * SEC * 2 ** (n - 3));
+  }
+  if (cooldownMs > 0) h.openUntil = Math.max(h.openUntil, now + cooldownMs);
+}
+var AllProvidersFailedError = class extends Error {
+  attempts;
+  constructor(message, attempts) {
+    super(message);
+    this.name = "AllProvidersFailedError";
+    this.attempts = attempts;
+  }
+};
+function withTimeout(p, ms, label) {
+  if (!Number.isFinite(ms) || ms <= 0) return p;
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timeout \u0E2B\u0E25\u0E31\u0E07\u0E23\u0E2D ${Math.round(ms / 1e3)} \u0E27\u0E34\u0E19\u0E32\u0E17\u0E35`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+async function runWithFailover(opts) {
+  const now = opts.now || Date.now;
+  const sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const startedAt = now();
+  const ready = [];
+  const cooling = [];
+  for (const a of opts.attempts) {
+    (isCoolingDown(a.provider, now()) ? cooling : ready).push(a);
+  }
+  cooling.sort((a, b) => ensure(a.provider).openUntil - ensure(b.provider).openUntil);
+  const ordered = [...ready, ...cooling];
+  const logs = [];
+  const soleCandidate = new Set(ordered.map((a) => a.provider)).size === 1;
+  for (const spec of ordered) {
+    const remaining = opts.totalBudgetMs !== void 0 ? opts.totalBudgetMs - (now() - startedAt) : Infinity;
+    if (remaining < 3e3 && logs.length > 0) {
+      logs.push({
+        provider: spec.provider,
+        tier: spec.tier,
+        ok: false,
+        error: "\u0E2B\u0E21\u0E14\u0E40\u0E27\u0E25\u0E32\u0E23\u0E27\u0E21\u0E02\u0E2D\u0E07\u0E04\u0E33\u0E02\u0E2D \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E25\u0E2D\u0E07\u0E04\u0E48\u0E32\u0E22\u0E19\u0E35\u0E49",
+        kind: "transient",
+        latencyMs: 0
+      });
+      break;
+    }
+    const perAttempt = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : Infinity;
+    const timeoutMs = Math.min(perAttempt, remaining);
+    const wasCooling = cooling.includes(spec);
+    const tries = soleCandidate ? 2 : 1;
+    for (let t = 0; t < tries; t++) {
+      const t0 = now();
+      try {
+        const result = await withTimeout(
+          opts.call(spec),
+          Number.isFinite(timeoutMs) ? timeoutMs : 0,
+          `${spec.provider}`
+        );
+        if (opts.validate) opts.validate(result, spec);
+        recordSuccess(spec.provider, now());
+        logs.push({
+          provider: spec.provider,
+          tier: spec.tier,
+          ok: true,
+          latencyMs: now() - t0,
+          skippedCooldown: wasCooling
+        });
+        return { result, spec, attempts: logs };
+      } catch (err) {
+        const msg = String(err?.message || err);
+        const kind = classifyError(msg);
+        recordFailure(spec.provider, kind, msg, now());
+        logs.push({
+          provider: spec.provider,
+          tier: spec.tier,
+          ok: false,
+          error: msg.slice(0, 300),
+          kind,
+          latencyMs: now() - t0,
+          skippedCooldown: wasCooling
+        });
+        if (t + 1 < tries && (kind === "transient" || kind === "rate")) {
+          await sleep(800);
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  const summary = logs.filter((l) => !l.ok).map((l) => `${l.provider}${l.tier === "economy" ? "(economy)" : ""}: ${l.error}`).join(" | ");
+  throw new AllProvidersFailedError(
+    logs.length === 0 ? "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35 AI \u0E04\u0E48\u0E32\u0E22\u0E43\u0E14\u0E17\u0E35\u0E48\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Key \u0E44\u0E27\u0E49 \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E04\u0E35\u0E22\u0E4C\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 1 \u0E04\u0E48\u0E32\u0E22\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32" : `AI \u0E17\u0E38\u0E01\u0E04\u0E48\u0E32\u0E22\u0E17\u0E35\u0E48\u0E25\u0E2D\u0E07\u0E25\u0E49\u0E21\u0E40\u0E2B\u0E25\u0E27 \u2192 ${summary}`,
+    logs
+  );
 }
 
 // server/mediaEngine.ts
@@ -2315,7 +2601,7 @@ async function recordMediaAsset(params) {
     createdAt: now
   };
 }
-async function generateRealImage(params) {
+async function generateRealImageOnce(params) {
   const prompt = params.prompt?.trim();
   if (!prompt) {
     throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38 Prompt \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E");
@@ -3133,7 +3419,7 @@ function wrapPcm16InWavHeader(pcmData, sampleRate = 24e3, numChannels = 1) {
   header.writeUInt32LE(pcmData.length, 40);
   return Buffer.concat([header, pcmData]);
 }
-async function generateRealAudio(params) {
+async function generateRealAudioOnce(params) {
   const rawText = params.text?.trim();
   if (!rawText) {
     throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E1A\u0E17\u0E1E\u0E32\u0E01\u0E22\u0E4C\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E08\u0E23\u0E34\u0E07");
@@ -3322,6 +3608,64 @@ async function generateRealAudio(params) {
     workflowId: params.workflowId ?? null
   });
 }
+async function withMediaFailover(kind, requested, defaultOrder, hasKey, run) {
+  const failoverOn = getSettingValue("ai_failover_enabled") !== "0";
+  const candidates = [...requested ? [requested] : [], ...defaultOrder].filter((p, i, a) => a.indexOf(p) === i).filter((p) => hasKey[p]);
+  if (candidates.length === 0 || !failoverOn) {
+    return run(requested || defaultOrder[0], true);
+  }
+  const out = await runWithFailover({
+    attempts: candidates.map((p) => ({ provider: `${kind}:${p}`, tier: "standard" })),
+    call: (a) => {
+      const p = a.provider.slice(kind.length + 1);
+      return run(p, p === requested);
+    },
+    timeoutMs: IS_SERVERLESS ? 5e4 : 18e4
+  });
+  return out.result;
+}
+async function generateRealImage(params) {
+  const hasKey = {
+    gemini: Boolean(
+      getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY")
+    ),
+    openai: Boolean(getSettingValue("openai_api_key", "OPENAI_API_KEY"))
+  };
+  return withMediaFailover(
+    "image",
+    params.provider,
+    ["gemini", "openai"],
+    hasKey,
+    (p, isReq) => generateRealImageOnce({
+      ...params,
+      provider: p,
+      // a model id belongs to the provider it was picked for
+      model: isReq ? params.model : void 0
+    })
+  );
+}
+async function generateRealAudio(params) {
+  const hasKey = {
+    gemini: Boolean(
+      getSettingValue("gemini_api_key", "GEMINI_API_KEY") || getSettingValue("gemini_api_key", "GOOGLE_API_KEY")
+    ),
+    elevenlabs: Boolean(getSettingValue("elevenlabs_api_key", "ELEVENLABS_API_KEY")),
+    openai: Boolean(getSettingValue("openai_api_key", "OPENAI_API_KEY"))
+  };
+  return withMediaFailover(
+    "audio",
+    params.provider,
+    ["gemini", "elevenlabs", "openai"],
+    hasKey,
+    (p, isReq) => generateRealAudioOnce({
+      ...params,
+      provider: p,
+      // voice names and model ids are provider-specific
+      model: isReq ? params.model : void 0,
+      voice: isReq ? params.voice : void 0
+    })
+  );
+}
 
 // server/aiEngine.ts
 function getProviderConfigs() {
@@ -3417,7 +3761,7 @@ function sanitizeApiError(rawMsg, secret) {
   }
   return msg;
 }
-async function callRealLlm(params) {
+async function callProviderOnce(params) {
   const cfg = getProviderConfigs();
   const provider = params.provider && params.provider !== "auto" ? params.provider : resolveActiveProvider(params.provider);
   const startedAt = Date.now();
@@ -3429,12 +3773,7 @@ async function callRealLlm(params) {
       );
     }
     try {
-      const model = await resolveLatestModel({
-        provider: "gemini",
-        capability: "text",
-        requestedModel: params.model || cfg.gemini.model,
-        apiKeyOverride: apiKey
-      });
+      const model = await pickTextModel("gemini", params, cfg.gemini.model, apiKey);
       const methods = await getGeminiModelMethods(apiKey, model);
       const supportsGenerateContent = methods.length === 0 || methods.includes("generateContent");
       const ai = new GoogleGenAI2({ apiKey });
@@ -3508,12 +3847,18 @@ ${m.content}` : m.content
       if (!text2) {
         throw new Error(`Google Gemini (${model}) \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19\u0E04\u0E48\u0E32\u0E27\u0E48\u0E32\u0E07`);
       }
+      const gu = genResp.usageMetadata || {};
       return {
         text: text2,
         provider: "gemini",
         model,
         engineLabel: `Google Gemini (${model})`,
-        latencyMs: Date.now() - startedAt
+        latencyMs: Date.now() - startedAt,
+        usage: {
+          inputTokens: Number(gu.promptTokenCount || 0),
+          outputTokens: Number(gu.candidatesTokenCount || 0),
+          cachedTokens: Number(gu.cachedContentTokenCount || 0)
+        }
       };
     } catch (err) {
       throw new Error(sanitizeApiError(err.message, apiKey));
@@ -3526,12 +3871,7 @@ ${m.content}` : m.content
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 Anthropic Claude API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model = await resolveLatestModel({
-      provider: "claude",
-      capability: "text",
-      requestedModel: params.model || cfg.claude.model,
-      apiKeyOverride: apiKey
-    });
+    const model = await pickTextModel("claude", params, cfg.claude.model, apiKey);
     const body = {
       model,
       max_tokens: 8192,
@@ -3541,7 +3881,13 @@ ${m.content}` : m.content
       }))
     };
     if (params.systemInstruction) {
-      body.system = params.systemInstruction;
+      body.system = params.cacheSystem ? [
+        {
+          type: "text",
+          text: params.systemInstruction,
+          cache_control: { type: "ephemeral" }
+        }
+      ] : params.systemInstruction;
     }
     if (typeof params.temperature === "number") {
       body.temperature = params.temperature;
@@ -3582,7 +3928,12 @@ ${m.content}` : m.content
       provider: "claude",
       model,
       engineLabel: `Anthropic Claude (${model})`,
-      latencyMs: Date.now() - startedAt
+      latencyMs: Date.now() - startedAt,
+      usage: {
+        inputTokens: Number(data2?.usage?.input_tokens || 0) + Number(data2?.usage?.cache_read_input_tokens || 0) + Number(data2?.usage?.cache_creation_input_tokens || 0),
+        outputTokens: Number(data2?.usage?.output_tokens || 0),
+        cachedTokens: Number(data2?.usage?.cache_read_input_tokens || 0)
+      }
     };
   }
   if (provider === "deepseek") {
@@ -3592,12 +3943,7 @@ ${m.content}` : m.content
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 DeepSeek API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model = await resolveLatestModel({
-      provider: "deepseek",
-      capability: "text",
-      requestedModel: params.model || cfg.deepseek.model,
-      apiKeyOverride: apiKey
-    });
+    const model = await pickTextModel("deepseek", params, cfg.deepseek.model, apiKey);
     const isReasoner = /reasoner/i.test(model);
     const apiMessages2 = [];
     if (params.systemInstruction) {
@@ -3656,7 +4002,12 @@ ${m.content}` : m.content
       provider: "deepseek",
       model,
       engineLabel: `DeepSeek (${model})`,
-      latencyMs: Date.now() - startedAt
+      latencyMs: Date.now() - startedAt,
+      usage: {
+        inputTokens: Number(data2?.usage?.prompt_tokens || 0),
+        outputTokens: Number(data2?.usage?.completion_tokens || 0),
+        cachedTokens: Number(data2?.usage?.prompt_cache_hit_tokens || 0)
+      }
     };
   }
   if (provider === "openai") {
@@ -3666,12 +4017,7 @@ ${m.content}` : m.content
         '\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E43\u0E2A\u0E48 OpenAI (ChatGPT) API Key \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32 "\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Keys & Providers"'
       );
     }
-    const model = await resolveLatestModel({
-      provider: "openai",
-      capability: "text",
-      requestedModel: params.model || cfg.openai.model,
-      apiKeyOverride: apiKey
-    });
+    const model = await pickTextModel("openai", params, cfg.openai.model, apiKey);
     const isReasoningSeries = /^o\d/i.test(model);
     const apiMessages2 = [];
     if (params.systemInstruction) {
@@ -3796,17 +4142,19 @@ Return valid JSON.` : params.systemInstruction;
       provider: "openai",
       model,
       engineLabel: `OpenAI ChatGPT (${model})`,
-      latencyMs: Date.now() - startedAt
+      latencyMs: Date.now() - startedAt,
+      usage: {
+        inputTokens: Number(data2?.usage?.prompt_tokens ?? data2?.usage?.input_tokens ?? 0),
+        outputTokens: Number(data2?.usage?.completion_tokens ?? data2?.usage?.output_tokens ?? 0),
+        cachedTokens: Number(
+          data2?.usage?.prompt_tokens_details?.cached_tokens ?? data2?.usage?.input_tokens_details?.cached_tokens ?? 0
+        )
+      }
     };
   }
   const endpoint = cfg.localOpenAi.endpoint.replace(/\/$/, "");
   const localKey = params.apiKeyOverride?.trim() || cfg.localOpenAi.apiKey;
-  const localModel = await resolveLatestModel({
-    provider: "openai_compatible",
-    capability: "text",
-    requestedModel: params.model || cfg.localOpenAi.model,
-    apiKeyOverride: localKey
-  });
+  const localModel = await pickTextModel("openai_compatible", params, cfg.localOpenAi.model, localKey);
   const headers = { "Content-Type": "application/json" };
   if (localKey) {
     headers.Authorization = `Bearer ${localKey}`;
@@ -3854,8 +4202,224 @@ Return valid JSON.` : params.systemInstruction;
     provider: "openai_compatible",
     model: localModel,
     engineLabel: `OpenAI-Compatible (${localModel})`,
-    latencyMs: Date.now() - startedAt
+    latencyMs: Date.now() - startedAt,
+    usage: {
+      inputTokens: Number(data?.usage?.prompt_tokens || 0),
+      outputTokens: Number(data?.usage?.completion_tokens || 0),
+      cachedTokens: Number(data?.usage?.prompt_tokens_details?.cached_tokens || 0)
+    }
   };
+}
+async function pickTextModel(provider, params, configuredModel, apiKey) {
+  const explicit = (params.model || "").trim();
+  if (!explicit && params.tier === "economy") {
+    const eco = await resolveEconomyTextModel({ provider, apiKeyOverride: apiKey });
+    if (eco) return eco;
+  }
+  return resolveLatestModel({
+    provider,
+    capability: "text",
+    requestedModel: explicit || configuredModel,
+    apiKeyOverride: apiKey
+  });
+}
+var STANDARD_ORDER = ["gemini", "openai", "claude", "deepseek"];
+var ECONOMY_ORDER = ["deepseek", "gemini", "openai", "claude"];
+var ALL_PROVIDERS = [
+  "gemini",
+  "openai",
+  "claude",
+  "deepseek",
+  "openai_compatible"
+];
+var CACHE_TTL_MS2 = 30 * 24 * 3600 * 1e3;
+function configuredProviderSet() {
+  const cfg = getProviderConfigs();
+  const set = /* @__PURE__ */ new Set();
+  if (cfg.gemini.apiKey) set.add("gemini");
+  if (cfg.openai.apiKey) set.add("openai");
+  if (cfg.claude.apiKey) set.add("claude");
+  if (cfg.deepseek.apiKey) set.add("deepseek");
+  const localEndpoint = getSettingValue("local_endpoint").trim();
+  const customEndpoint = Boolean(localEndpoint) && localEndpoint !== "http://localhost:1234/v1";
+  if (customEndpoint || getSettingValue("local_model").trim() || getSettingValue("local_api_key").trim()) {
+    set.add("openai_compatible");
+  }
+  return set;
+}
+function readProviderOrder(settingKey, fallback) {
+  const raw = getSettingValue(settingKey).trim();
+  let list = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed.map(String);
+    } catch {
+      list = raw.split(",").map((x) => x.trim());
+    }
+  }
+  const valid = list.filter(
+    (x) => ALL_PROVIDERS.includes(x)
+  );
+  const merged = [...valid, ...fallback].filter((p, i, a) => a.indexOf(p) === i);
+  return merged;
+}
+function buildAttempts(params) {
+  const cfg = getProviderConfigs();
+  const configured = configuredProviderSet();
+  const economy = params.tier === "economy";
+  const requested = params.provider && params.provider !== "auto" ? params.provider : cfg.defaultProvider && cfg.defaultProvider !== "auto" ? cfg.defaultProvider : null;
+  const baseOrder = readProviderOrder(
+    economy ? "ai_economy_order" : "ai_fallback_order",
+    economy ? ECONOMY_ORDER : STANDARD_ORDER
+  );
+  const full = [...baseOrder, "openai_compatible"].filter(
+    (p, i, a) => a.indexOf(p) === i
+  );
+  const ordered = [...requested ? [requested] : [], ...full].filter((p, i, a) => a.indexOf(p) === i).filter((p) => configured.has(p));
+  if (ordered.length === 0) {
+    resolveActiveProvider(params.provider);
+    throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Key \u0E08\u0E23\u0E34\u0E07\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A AI \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32");
+  }
+  const standard = ordered.map((provider) => ({ provider, tier: "standard" }));
+  if (!economy || params.model) return standard;
+  const cheap = ordered.map((provider) => ({ provider, tier: "economy" }));
+  return [...cheap, ...standard];
+}
+function cacheKeyFor(params) {
+  return crypto3.createHash("sha256").update(
+    JSON.stringify([
+      params.systemInstruction || "",
+      params.messages,
+      params.temperature ?? null,
+      Boolean(params.jsonMode),
+      params.tier === "economy" ? "e" : "s"
+    ])
+  ).digest("hex");
+}
+function readLlmCache(key) {
+  try {
+    const row = db.prepare("SELECT response_text, provider, model, created_at FROM ai_cache WHERE cache_key = ?").get(key);
+    if (!row) return null;
+    if (Date.now() - new Date(row.created_at).getTime() > CACHE_TTL_MS2) {
+      db.prepare("DELETE FROM ai_cache WHERE cache_key = ?").run(key);
+      return null;
+    }
+    db.prepare("UPDATE ai_cache SET hits = hits + 1, last_hit_at = ? WHERE cache_key = ?").run(
+      (/* @__PURE__ */ new Date()).toISOString(),
+      key
+    );
+    return {
+      text: row.response_text,
+      provider: row.provider || "gemini",
+      model: row.model,
+      engineLabel: `\u0E41\u0E04\u0E0A\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E40\u0E14\u0E34\u0E21 (${row.provider} ${row.model}) \u2022 \u0E44\u0E21\u0E48\u0E40\u0E2A\u0E35\u0E22\u0E04\u0E48\u0E32 API`,
+      latencyMs: 0,
+      cacheHit: true,
+      usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0 }
+    };
+  } catch {
+    return null;
+  }
+}
+function writeLlmCache(key, r) {
+  try {
+    db.prepare(
+      `INSERT OR REPLACE INTO ai_cache (cache_key, response_text, provider, model, hits, created_at)
+       VALUES (?, ?, ?, ?, 0, ?)`
+    ).run(key, r.text, r.provider, r.model, (/* @__PURE__ */ new Date()).toISOString());
+  } catch {
+  }
+}
+function logAiAttempts(attempts, result, batchId) {
+  try {
+    const ins = db.prepare(
+      `INSERT INTO ai_call_log (
+        created_at, provider, model, tier, ok, latency_ms, error, error_kind,
+        failed_over_from, batch_id, input_tokens, output_tokens, cached_tokens
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let firstFailed = "";
+    for (const a of attempts) {
+      ins.run(
+        now,
+        a.provider,
+        a.ok && result ? result.model : "",
+        a.tier,
+        a.ok ? 1 : 0,
+        a.latencyMs,
+        a.error || "",
+        a.kind || "",
+        a.ok ? firstFailed : "",
+        batchId ?? null,
+        a.ok && result?.usage ? result.usage.inputTokens : 0,
+        a.ok && result?.usage ? result.usage.outputTokens : 0,
+        a.ok && result?.usage ? result.usage.cachedTokens : 0
+      );
+      if (!a.ok && !firstFailed) firstFailed = a.provider;
+    }
+    if (Math.random() < 0.02) {
+      db.prepare("DELETE FROM ai_call_log WHERE created_at < datetime('now','-30 day')").run();
+    }
+  } catch {
+  }
+}
+var ATTEMPT_TIMEOUT_MS = Number(process.env.AI_ATTEMPT_TIMEOUT_MS) || (IS_SERVERLESS ? 45e3 : 15e4);
+async function callRealLlm(params) {
+  const hasOverride = Boolean(params.apiKeyOverride?.trim());
+  const useFailover = params.failover !== false && !hasOverride && getSettingValue("ai_failover_enabled") !== "0";
+  const validateText = (text) => {
+    if (params.jsonMode) extractStrictJson(text);
+    params.validate?.(text);
+  };
+  const useCache = Boolean(params.cache) && !hasOverride;
+  const key = useCache ? cacheKeyFor(params) : "";
+  if (useCache) {
+    const hit = readLlmCache(key);
+    if (hit) return hit;
+  }
+  if (!useFailover) {
+    const r = await callProviderOnce(params);
+    validateText(r.text);
+    if (useCache) writeLlmCache(key, r);
+    return r;
+  }
+  const attempts = buildAttempts(params);
+  const requested = params.provider && params.provider !== "auto" ? params.provider : null;
+  try {
+    const out = await runWithFailover({
+      attempts,
+      call: (spec) => callProviderOnce({
+        ...params,
+        provider: spec.provider,
+        tier: spec.tier,
+        // an explicit model id belongs to the provider it was chosen for
+        model: spec.provider === requested ? params.model : void 0
+      }),
+      validate: (r) => validateText(r.text),
+      timeoutMs: ATTEMPT_TIMEOUT_MS,
+      totalBudgetMs: IS_SERVERLESS ? 55e3 : void 0
+    });
+    const failed = Array.from(
+      new Set(out.attempts.filter((a) => !a.ok).map((a) => a.provider))
+    );
+    const result = {
+      ...out.result,
+      tier: out.spec.tier,
+      attempts: out.attempts,
+      failedOverFrom: failed.length ? failed : void 0,
+      engineLabel: failed.length ? `${out.result.engineLabel} \u2022 \u0E2A\u0E25\u0E31\u0E1A\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34\u0E08\u0E32\u0E01 ${failed.join(", ")}` : out.result.engineLabel
+    };
+    logAiAttempts(out.attempts, result, params.batchId);
+    if (useCache) writeLlmCache(key, result);
+    return result;
+  } catch (err) {
+    if (err instanceof AllProvidersFailedError) {
+      logAiAttempts(err.attempts, null, params.batchId);
+    }
+    throw err;
+  }
 }
 function extractStrictJson(rawText) {
   const cleaned = rawText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -3875,6 +4439,7 @@ async function testProviderConnection(params) {
     provider: params.provider,
     model: params.model,
     apiKeyOverride: params.apiKey,
+    failover: false,
     systemInstruction: "You are an API connectivity verifier. Reply concisely in Thai.",
     messages: [
       {
@@ -4017,8 +4582,15 @@ ${kbText}
     scenes
   };
 }
+function validateWorkflowText(text) {
+  const parsed = extractStrictJson(text);
+  const article = parsed?.scriptOutput?.fullArticleMarkdown;
+  if (!parsed || typeof parsed.ceoOutput !== "object" || typeof article !== "string" || article.trim().length < 200) {
+    throw new Error("\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E44\u0E21\u0E48\u0E04\u0E23\u0E1A: \u0E02\u0E32\u0E14 ceoOutput \u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E2A\u0E31\u0E49\u0E19\u0E1C\u0E34\u0E14\u0E1B\u0E01\u0E15\u0E34");
+  }
+}
 async function executeMultiAgentWorkflow(input) {
-  const kbItems = getActiveKnowledgeContext(input.topic);
+  const kbItems = input.kbItems && input.kbItems.length ? input.kbItems : getActiveKnowledgeContext(input.topic);
   const kbContextString = kbItems.map(
     (k, i) => `[KB-${i + 1}] ${k.title}: ${k.summary} \u2014 ${k.content} (\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07: ${k.source_ref})`
   ).join("\n");
@@ -4036,18 +4608,7 @@ async function executeMultiAgentWorkflow(input) {
 \u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19\u0E08\u0E23\u0E34\u0E07\u0E02\u0E2D\u0E07\u0E17\u0E35\u0E21 AI Agents \u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14 (CEO Agent, 01 Research Agent, 02 Idea & Script Agent, 03 Content Design Agent, 04 Visual Creator Agent, 05 Video Production Agent \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A Google Veo & Flow, 06 Audio Production Agent \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A AI Speech TTS, 07 QA Agent 4 \u0E21\u0E34\u0E15\u0E34 \u0E41\u0E25\u0E30 08 Analytics & Omnichannel 8 \u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07)
 \u0E42\u0E14\u0E22\u0E22\u0E36\u0E14\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E32\u0E01\u0E10\u0E32\u0E19\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 (Knowledge Base) \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E04\u0E23\u0E48\u0E07\u0E04\u0E23\u0E31\u0E14 \u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 (fullArticleMarkdown) \u0E15\u0E49\u0E2D\u0E07\u0E40\u0E02\u0E35\u0E22\u0E19\u0E09\u0E1A\u0E31\u0E1A\u0E40\u0E15\u0E47\u0E21\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14 \u0E25\u0E36\u0E01\u0E0B\u0E36\u0E49\u0E07 \u0E43\u0E0A\u0E49 Markdown \u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D ## \u0E41\u0E25\u0E30 ### \u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E02\u0E49\u0E2D\u0E40\u0E2A\u0E19\u0E2D\u0E40\u0E0A\u0E34\u0E07\u0E1B\u0E0F\u0E34\u0E1A\u0E31\u0E15\u0E34\u0E08\u0E23\u0E34\u0E07
 \u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A\u0E40\u0E1B\u0E47\u0E19 JSON Object \u0E17\u0E35\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E15\u0E32\u0E21\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E17\u0E35\u0E48\u0E23\u0E30\u0E1A\u0E38\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19 \u0E2B\u0E49\u0E32\u0E21\u0E04\u0E23\u0E2D\u0E1A\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22\u0E2D\u0E37\u0E48\u0E19`;
-  const userPrompt = `\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E42\u0E08\u0E17\u0E22\u0E4C (Topic): ${input.topic}
-\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E17\u0E35\u0E48\u0E21\u0E32\u0E44\u0E2D\u0E40\u0E14\u0E35\u0E22 (Input Source): ${input.inputSource}
-\u0E2B\u0E21\u0E27\u0E14\u0E2B\u0E21\u0E39\u0E48: ${catLabel}
-\u0E01\u0E25\u0E38\u0E48\u0E21\u0E1C\u0E39\u0E49\u0E40\u0E23\u0E35\u0E22\u0E19/\u0E40\u0E1B\u0E49\u0E32\u0E2B\u0E21\u0E32\u0E22: ${input.targetAudience}
-\u0E40\u0E2A\u0E32\u0E2B\u0E25\u0E31\u0E01\u0E18\u0E38\u0E23\u0E01\u0E34\u0E08 (KOMKID 5-Pillar): ${input.businessPillar}
-\u0E42\u0E2B\u0E21\u0E14\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19: ${input.flowMode}
-${input.revisionNote ? `\u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07\u0E41\u0E01\u0E49\u0E44\u0E02\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E40\u0E15\u0E34\u0E21\u0E08\u0E32\u0E01\u0E1C\u0E39\u0E49\u0E1A\u0E23\u0E34\u0E2B\u0E32\u0E23 (Human Approval Revision Note): ${input.revisionNote}` : ""}
-
-\u0E10\u0E32\u0E19\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 (Knowledge Base):
-${kbContextString}
-
-\u0E08\u0E07\u0E2A\u0E48\u0E07\u0E04\u0E37\u0E19 JSON Object \u0E17\u0E35\u0E48\u0E21\u0E35\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E41\u0E25\u0E30\u0E0A\u0E19\u0E34\u0E14\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E04\u0E23\u0E1A\u0E17\u0E38\u0E01\u0E1F\u0E34\u0E25\u0E14\u0E4C\u0E14\u0E31\u0E07\u0E19\u0E35\u0E49:
+  const schemaBlock = `\u0E08\u0E07\u0E2A\u0E48\u0E07\u0E04\u0E37\u0E19 JSON Object \u0E17\u0E35\u0E48\u0E21\u0E35\u0E42\u0E04\u0E23\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E41\u0E25\u0E30\u0E0A\u0E19\u0E34\u0E14\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E04\u0E23\u0E1A\u0E17\u0E38\u0E01\u0E1F\u0E34\u0E25\u0E14\u0E4C\u0E14\u0E31\u0E07\u0E19\u0E35\u0E49:
 {
   "ceoOutput": {
     "goal": "string",
@@ -4140,13 +4701,31 @@ ${kbContextString}
     "publishedChannels": []
   }
 }`;
+  const fullSystemPrompt = `${systemPrompt}
+
+\u0E10\u0E32\u0E19\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 (Knowledge Base):
+${kbContextString}
+
+${schemaBlock}`;
+  const userPrompt = `\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E42\u0E08\u0E17\u0E22\u0E4C (Topic): ${input.topic}
+\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E17\u0E35\u0E48\u0E21\u0E32\u0E44\u0E2D\u0E40\u0E14\u0E35\u0E22 (Input Source): ${input.inputSource}
+\u0E2B\u0E21\u0E27\u0E14\u0E2B\u0E21\u0E39\u0E48: ${catLabel}
+\u0E01\u0E25\u0E38\u0E48\u0E21\u0E1C\u0E39\u0E49\u0E40\u0E23\u0E35\u0E22\u0E19/\u0E40\u0E1B\u0E49\u0E32\u0E2B\u0E21\u0E32\u0E22: ${input.targetAudience}
+\u0E40\u0E2A\u0E32\u0E2B\u0E25\u0E31\u0E01\u0E18\u0E38\u0E23\u0E01\u0E34\u0E08 (KOMKID 5-Pillar): ${input.businessPillar}
+\u0E42\u0E2B\u0E21\u0E14\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19: ${input.flowMode}
+${input.revisionNote ? `\u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07\u0E41\u0E01\u0E49\u0E44\u0E02\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E40\u0E15\u0E34\u0E21\u0E08\u0E32\u0E01\u0E1C\u0E39\u0E49\u0E1A\u0E23\u0E34\u0E2B\u0E32\u0E23 (Human Approval Revision Note): ${input.revisionNote}` : ""}`;
   const llmResult = await callRealLlm({
     provider: input.provider,
     model: input.model,
-    systemInstruction: systemPrompt,
+    systemInstruction: fullSystemPrompt,
     messages: [{ role: "user", content: userPrompt }],
     temperature: 0.6,
-    jsonMode: true
+    jsonMode: true,
+    tier: input.tier,
+    cache: input.cache,
+    cacheSystem: true,
+    batchId: input.batchId,
+    validate: validateWorkflowText
   });
   const parsed = extractStrictJson(llmResult.text);
   let generatedImageUrl = "";
@@ -4170,6 +4749,14 @@ ${kbContextString}
     ]
   };
   return {
+    meta: {
+      provider: llmResult.provider,
+      model: llmResult.model,
+      tier: llmResult.tier || input.tier || "standard",
+      cacheHit: Boolean(llmResult.cacheHit),
+      failedOver: Boolean(llmResult.failedOverFrom?.length),
+      usage: llmResult.usage || { inputTokens: 0, outputTokens: 0, cachedTokens: 0 }
+    },
     engineUsed: `${llmResult.engineLabel} \u2022 ${llmResult.latencyMs}ms`,
     ceoOutput: parsed.ceoOutput || {},
     researchOutput: parsed.researchOutput || {},
@@ -4398,6 +4985,380 @@ ${idea}` : "",
     suggestedImagePrompt: String(parsed.suggestedImagePrompt || "").trim(),
     engineUsed: res.engineLabel
   };
+}
+
+// server/workflowStore.ts
+function createWorkflowRecord(input, result) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const initialApproval = {
+    isAccurate: true,
+    isAppropriate: true,
+    isOnBrand: true,
+    isReady: false,
+    reviewerNote: "",
+    publishedPostId: null
+  };
+  const insertRes = db.prepare(
+    `INSERT INTO ai_workflows (
+        topic, input_source, category, target_audience, business_pillar,
+        flow_mode, engine_used, status,
+        ceo_json, research_json, script_json, design_json, visual_json,
+        video_json, audio_json, qa_json, analytics_json, omnichannel_json, approval_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.topic,
+    input.inputSource,
+    input.category,
+    input.targetAudience,
+    input.businessPillar,
+    input.flowMode,
+    result.engineUsed,
+    JSON.stringify(result.ceoOutput),
+    JSON.stringify(result.researchOutput),
+    JSON.stringify(result.scriptOutput),
+    JSON.stringify(result.designOutput),
+    JSON.stringify(result.visualOutput),
+    JSON.stringify(result.videoOutput),
+    JSON.stringify(result.audioOutput),
+    JSON.stringify(result.qaOutput),
+    JSON.stringify(result.analyticsOutput),
+    JSON.stringify(result.omnichannelOutput),
+    JSON.stringify(initialApproval),
+    now,
+    now
+  );
+  return Number(insertRes.lastInsertRowid);
+}
+
+// server/batchRunner.ts
+var MAX_BATCH_ITEMS = 50;
+var MAX_TOPIC_LEN = 300;
+var STOP_AFTER_CONSECUTIVE_FAILURES = 3;
+var STUCK_RUNNING_MS = 10 * 60 * 1e3;
+var running = /* @__PURE__ */ new Set();
+function nowIso() {
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+function normalizeTopics(raw) {
+  const list = Array.isArray(raw) ? raw.map((x) => String(x ?? "")) : String(raw ?? "").split(/\r?\n/);
+  const seen = /* @__PURE__ */ new Set();
+  const topics = [];
+  let duplicates = 0;
+  for (const t of list) {
+    const clean = t.replace(/\s+/g, " ").trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+    topics.push(clean);
+  }
+  return { topics, duplicates };
+}
+function createBatch(input) {
+  const { topics, duplicates } = normalizeTopics(input.topics);
+  if (topics.length === 0) throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E2A\u0E48\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 1 \u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D (\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E1A\u0E23\u0E23\u0E17\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D)");
+  if (topics.length > MAX_BATCH_ITEMS) {
+    throw new Error(`\u0E23\u0E31\u0E19\u0E44\u0E14\u0E49\u0E2A\u0E39\u0E07\u0E2A\u0E38\u0E14 ${MAX_BATCH_ITEMS} \u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E15\u0E48\u0E2D\u0E2B\u0E19\u0E36\u0E48\u0E07 Batch (\u0E15\u0E2D\u0E19\u0E19\u0E35\u0E49 ${topics.length})`);
+  }
+  const tooLong = topics.find((t) => t.length > MAX_TOPIC_LEN);
+  if (tooLong) throw new Error(`\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E22\u0E32\u0E27\u0E40\u0E01\u0E34\u0E19 ${MAX_TOPIC_LEN} \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23: "${tooLong.slice(0, 40)}\u2026"`);
+  const o = input.options || {};
+  const options = {
+    mode: o.mode === "standard" ? "standard" : "economy",
+    concurrency: Math.max(1, Math.min(5, Math.floor(Number(o.concurrency) || 3))),
+    category: String(o.category || "ai-tech"),
+    inputSource: String(o.inputSource || "\u0E41\u0E19\u0E27\u0E42\u0E19\u0E49\u0E21\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32 (Trend & Research)"),
+    targetAudience: String(o.targetAudience || "\u0E04\u0E23\u0E39 / \u0E1A\u0E38\u0E04\u0E25\u0E32\u0E01\u0E23\u0E17\u0E32\u0E07\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32"),
+    businessPillar: String(o.businessPillar || "1. VIEWS | \u0E22\u0E2D\u0E14\u0E27\u0E34\u0E27"),
+    flowMode: o.flowMode === "core_3agent" ? "core_3agent" : "full_8agent",
+    provider: o.provider,
+    autoGenerateCoverImage: Boolean(o.autoGenerateCoverImage)
+  };
+  const kb = getActiveKnowledgeContext(topics.join(" "));
+  const kbSlim = kb.map((k) => ({
+    title: k.title,
+    summary: k.summary,
+    content: k.content,
+    source_ref: k.source_ref
+  }));
+  const now = nowIso();
+  const res = db.prepare(
+    `INSERT INTO ai_batches (name, status, mode, options_json, kb_json, total, created_at, updated_at)
+       VALUES (?, 'queued', ?, ?, ?, ?, ?, ?)`
+  ).run(
+    String(input.name || "").trim().slice(0, 120) || `Batch ${now.slice(0, 16).replace("T", " ")}`,
+    options.mode,
+    JSON.stringify(options),
+    JSON.stringify(kbSlim),
+    topics.length,
+    now,
+    now
+  );
+  const id = Number(res.lastInsertRowid);
+  const ins = db.prepare(
+    `INSERT INTO ai_batch_items (batch_id, idx, topic, status, updated_at) VALUES (?, ?, ?, 'pending', ?)`
+  );
+  topics.forEach((t, i) => ins.run(id, i, t, now));
+  return { id, duplicates };
+}
+function batchRow(id) {
+  return db.prepare("SELECT * FROM ai_batches WHERE id = ?").get(id);
+}
+function summarizeBatch(id) {
+  const b = batchRow(id);
+  if (!b) return null;
+  const items = db.prepare("SELECT * FROM ai_batch_items WHERE batch_id = ? ORDER BY idx ASC").all(id);
+  const count = (s) => items.filter((i) => i.status === s).length;
+  const sum = (k) => items.reduce((a, i) => a + Number(i[k] || 0), 0);
+  const done = count("done");
+  const cacheHits = items.filter((i) => i.status === "done" && i.cache_hit).length;
+  const inputTokens = sum("input_tokens");
+  const cachedTokens = sum("cached_tokens");
+  const byProvider = {};
+  for (const i of items) {
+    if (i.status === "done" && !i.cache_hit && i.provider) {
+      byProvider[i.provider] = (byProvider[i.provider] || 0) + 1;
+    }
+  }
+  return {
+    id: b.id,
+    name: b.name,
+    status: b.status,
+    mode: b.mode,
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+    finishedAt: b.finished_at || null,
+    total: items.length,
+    done,
+    failed: count("failed"),
+    pending: count("pending"),
+    running: count("running"),
+    cancelled: count("cancelled"),
+    stats: {
+      cacheHits,
+      failedOver: items.filter((i) => i.failed_over).length,
+      escalatedToStandard: b.mode === "economy" ? items.filter((i) => i.status === "done" && i.tier === "standard").length : 0,
+      inputTokens,
+      outputTokens: sum("output_tokens"),
+      cachedInputTokens: cachedTokens,
+      cachedInputPercent: inputTokens > 0 ? Math.round(cachedTokens / inputTokens * 100) : 0,
+      byProvider
+    },
+    items: items.map((i) => ({
+      id: i.id,
+      idx: i.idx,
+      topic: i.topic,
+      status: i.status,
+      attempts: i.attempts,
+      workflowId: i.workflow_id || null,
+      error: i.error || "",
+      provider: i.provider || "",
+      model: i.model || "",
+      tier: i.tier || "",
+      cacheHit: Boolean(i.cache_hit),
+      failedOver: Boolean(i.failed_over)
+    }))
+  };
+}
+function listBatches(limit = 20) {
+  const rows = db.prepare("SELECT id FROM ai_batches ORDER BY id DESC LIMIT ?").all(limit);
+  return rows.map((r) => summarizeBatch(r.id)).filter(Boolean).map((b) => ({ ...b, items: void 0 }));
+}
+function refreshBatchStatus(id) {
+  const b = batchRow(id);
+  if (!b || b.status === "cancelled") return;
+  const c = db.prepare(
+    `SELECT
+        SUM(status='pending') AS pending, SUM(status='running') AS running,
+        SUM(status='failed') AS failed, SUM(status='done') AS done
+       FROM ai_batch_items WHERE batch_id = ?`
+  ).get(id);
+  let status = b.status;
+  let finished = null;
+  if (!c.pending && !c.running) {
+    status = c.failed ? "completed_with_errors" : "completed";
+    finished = nowIso();
+  } else if (b.status === "paused") {
+    status = "paused";
+  } else {
+    status = "running";
+  }
+  db.prepare("UPDATE ai_batches SET status = ?, updated_at = ?, finished_at = ? WHERE id = ?").run(
+    status,
+    nowIso(),
+    finished,
+    id
+  );
+}
+function recoverStuckItems(id) {
+  const cutoff = new Date(Date.now() - STUCK_RUNNING_MS).toISOString();
+  db.prepare(
+    `UPDATE ai_batch_items SET status = 'pending', updated_at = ?
+     WHERE batch_id = ? AND status = 'running' AND updated_at < ?`
+  ).run(nowIso(), id, cutoff);
+}
+async function runOneItem(batchId, item, options, kb) {
+  db.prepare(
+    `UPDATE ai_batch_items SET status = 'running', attempts = attempts + 1, error = '', updated_at = ? WHERE id = ?`
+  ).run(nowIso(), item.id);
+  try {
+    const result = await executeMultiAgentWorkflow({
+      topic: item.topic,
+      inputSource: options.inputSource,
+      category: options.category,
+      targetAudience: options.targetAudience,
+      businessPillar: options.businessPillar,
+      flowMode: options.flowMode,
+      provider: options.provider,
+      autoGenerateCoverImage: options.autoGenerateCoverImage,
+      tier: options.mode === "economy" ? "economy" : "standard",
+      cache: true,
+      batchId,
+      kbItems: kb
+    });
+    const workflowId = createWorkflowRecord(
+      {
+        topic: item.topic,
+        inputSource: options.inputSource,
+        category: options.category,
+        targetAudience: options.targetAudience,
+        businessPillar: options.businessPillar,
+        flowMode: options.flowMode
+      },
+      result
+    );
+    const m = result.meta;
+    db.prepare(
+      `UPDATE ai_batch_items SET status = 'done', workflow_id = ?, provider = ?, model = ?, tier = ?,
+        cache_hit = ?, failed_over = ?, input_tokens = ?, output_tokens = ?, cached_tokens = ?,
+        error = '', updated_at = ? WHERE id = ?`
+    ).run(
+      workflowId,
+      m.provider,
+      m.model,
+      m.tier,
+      m.cacheHit ? 1 : 0,
+      m.failedOver ? 1 : 0,
+      m.usage.inputTokens,
+      m.usage.outputTokens,
+      m.usage.cachedTokens,
+      nowIso(),
+      item.id
+    );
+    return true;
+  } catch (err) {
+    db.prepare(
+      `UPDATE ai_batch_items SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
+    ).run(String(err.message || err).slice(0, 600), nowIso(), item.id);
+    return false;
+  }
+}
+async function processBatch(id, opts = {}) {
+  if (running.has(id)) return summarizeBatch(id);
+  const b = batchRow(id);
+  if (!b) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A Batch \u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23");
+  if (b.status === "cancelled") return summarizeBatch(id);
+  running.add(id);
+  try {
+    recoverStuckItems(id);
+    const options = JSON.parse(b.options_json);
+    const kb = JSON.parse(b.kb_json || "[]");
+    const deadline = Date.now() + (opts.budgetMs ?? Infinity);
+    db.prepare("UPDATE ai_batches SET status = 'running', updated_at = ? WHERE id = ?").run(nowIso(), id);
+    let consecutiveFailures = 0;
+    let stop = false;
+    const takeNext = () => {
+      if (stop || Date.now() >= deadline) return null;
+      const cur = batchRow(id);
+      if (!cur || cur.status === "cancelled") return null;
+      const next = db.prepare(
+        `SELECT * FROM ai_batch_items WHERE batch_id = ? AND status = 'pending' ORDER BY idx ASC LIMIT 1`
+      ).get(id);
+      if (!next) return null;
+      db.prepare("UPDATE ai_batch_items SET status = 'running', updated_at = ? WHERE id = ?").run(
+        nowIso(),
+        next.id
+      );
+      return next;
+    };
+    const work = async (item) => {
+      const ok = await runOneItem(id, item, options, kb);
+      if (ok) consecutiveFailures = 0;
+      else {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= STOP_AFTER_CONSECUTIVE_FAILURES) {
+          stop = true;
+          db.prepare("UPDATE ai_batches SET status = 'paused', updated_at = ? WHERE id = ?").run(
+            nowIso(),
+            id
+          );
+        }
+      }
+    };
+    const doneSoFar = db.prepare("SELECT COUNT(*) c FROM ai_batch_items WHERE batch_id = ? AND status = 'done'").get(id).c;
+    const pendingCount = db.prepare("SELECT COUNT(*) c FROM ai_batch_items WHERE batch_id = ? AND status = 'pending'").get(id).c;
+    if (doneSoFar === 0 && pendingCount >= 3 && options.concurrency > 1) {
+      const first = takeNext();
+      if (first) await work(first);
+    }
+    const workers = Array.from({ length: options.concurrency }, async () => {
+      for (; ; ) {
+        const item = takeNext();
+        if (!item) return;
+        await work(item);
+      }
+    });
+    await Promise.all(workers);
+    refreshBatchStatus(id);
+  } finally {
+    running.delete(id);
+  }
+  return summarizeBatch(id);
+}
+function cancelBatch(id) {
+  const b = batchRow(id);
+  if (!b) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A Batch \u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23");
+  db.prepare("UPDATE ai_batch_items SET status = 'cancelled', updated_at = ? WHERE batch_id = ? AND status = 'pending'").run(
+    nowIso(),
+    id
+  );
+  db.prepare("UPDATE ai_batches SET status = 'cancelled', updated_at = ?, finished_at = ? WHERE id = ?").run(
+    nowIso(),
+    nowIso(),
+    id
+  );
+  return summarizeBatch(id);
+}
+function retryFailed(id) {
+  const b = batchRow(id);
+  if (!b) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A Batch \u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23");
+  db.prepare("UPDATE ai_batch_items SET status = 'pending', error = '', updated_at = ? WHERE batch_id = ? AND status = 'failed'").run(
+    nowIso(),
+    id
+  );
+  db.prepare("UPDATE ai_batches SET status = 'queued', finished_at = NULL, updated_at = ? WHERE id = ?").run(
+    nowIso(),
+    id
+  );
+  return summarizeBatch(id);
+}
+function startBackground(id) {
+  if (IS_SERVERLESS) return;
+  void processBatch(id).catch((e) => console.error("Batch runner error:", e.message));
+}
+function resumeBatchesOnBoot() {
+  if (IS_SERVERLESS) return;
+  const rows = db.prepare("SELECT id FROM ai_batches WHERE status IN ('queued','running')").all();
+  for (const r of rows) {
+    db.prepare(
+      "UPDATE ai_batch_items SET status = 'pending', updated_at = ? WHERE batch_id = ? AND status = 'running'"
+    ).run(nowIso(), r.id);
+    startBackground(r.id);
+  }
 }
 
 // server/publishEngine.ts
@@ -5040,7 +6001,7 @@ ${input.content}`.slice(0, 275);
 }
 
 // server/auth.ts
-import crypto3 from "node:crypto";
+import crypto4 from "node:crypto";
 import fs5 from "node:fs";
 import path5 from "node:path";
 var TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
@@ -5060,7 +6021,7 @@ function getOrCreateLocalAuthSecret() {
         return existing;
       }
     }
-    const fresh = crypto3.randomBytes(32).toString("hex");
+    const fresh = crypto4.randomBytes(32).toString("hex");
     fs5.writeFileSync(keyFile, fresh, { encoding: "utf8", mode: 384 });
     try {
       fs5.chmodSync(keyFile, 384);
@@ -5069,7 +6030,7 @@ function getOrCreateLocalAuthSecret() {
     cachedAuthSecret = fresh;
     return fresh;
   } catch {
-    const ephemeral = crypto3.randomBytes(32).toString("hex");
+    const ephemeral = crypto4.randomBytes(32).toString("hex");
     cachedAuthSecret = ephemeral;
     return ephemeral;
   }
@@ -5077,16 +6038,16 @@ function getOrCreateLocalAuthSecret() {
 function getAuthSecret() {
   const configured = getSettingValue("admin_auth_secret", "ADMIN_AUTH_SECRET") || (process.env.VAULT_MASTER_KEY || process.env.KOMKRIT_VAULT_SECRET || "").trim() || (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
   if (configured) {
-    return crypto3.createHash("sha256").update(`komkrit-hmac-v2:${configured}`).digest("hex");
+    return crypto4.createHash("sha256").update(`komkrit-hmac-v2:${configured}`).digest("hex");
   }
   if (IS_SERVERLESS && process.env.VERCEL_PROJECT_ID) {
-    return crypto3.createHash("sha256").update(`komkrit-vercel-hmac:${process.env.VERCEL_PROJECT_ID}:${process.env.VERCEL_URL || ""}`).digest("hex");
+    return crypto4.createHash("sha256").update(`komkrit-vercel-hmac:${process.env.VERCEL_PROJECT_ID}:${process.env.VERCEL_URL || ""}`).digest("hex");
   }
   return getOrCreateLocalAuthSecret();
 }
 function hashPasswordScrypt(plain) {
-  const salt = crypto3.randomBytes(16).toString("base64url");
-  const derived = crypto3.scryptSync(plain, salt, 32).toString("base64url");
+  const salt = crypto4.randomBytes(16).toString("base64url");
+  const derived = crypto4.scryptSync(plain, salt, 32).toString("base64url");
   return `${SCRYPT_PREFIX}${salt}:${derived}`;
 }
 function verifyPasswordHash(input, stored) {
@@ -5096,7 +6057,7 @@ function verifyPasswordHash(input, stored) {
     const [salt, hashB64] = rest.split(":");
     if (!salt || !hashB64) return false;
     try {
-      const derived = crypto3.scryptSync(input, salt, 32).toString("base64url");
+      const derived = crypto4.scryptSync(input, salt, 32).toString("base64url");
       return safeEqual(derived, hashB64);
     } catch {
       return false;
@@ -5115,7 +6076,7 @@ function safeEqual(a, b) {
   const bufA = Buffer.from(a, "utf8");
   const bufB = Buffer.from(b, "utf8");
   if (bufA.length !== bufB.length) return false;
-  return crypto3.timingSafeEqual(bufA, bufB);
+  return crypto4.timingSafeEqual(bufA, bufB);
 }
 function getClientIp(req) {
   const xff = req.headers["x-forwarded-for"];
@@ -5169,7 +6130,7 @@ function createAdminToken(username) {
     JSON.stringify({ u: username, exp: expiresAt }),
     "utf8"
   ).toString("base64url");
-  const sig = crypto3.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  const sig = crypto4.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
   return {
     token: `${payload}.${sig}`,
     expiresAt
@@ -5179,7 +6140,7 @@ function verifyAdminToken(token) {
   if (!token || !token.includes(".")) return { valid: false };
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return { valid: false };
-  const expectedSig = crypto3.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
+  const expectedSig = crypto4.createHmac("sha256", getAuthSecret()).update(payload).digest("base64url");
   if (!safeEqual(sig, expectedSig)) return { valid: false };
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
@@ -6697,46 +7658,18 @@ app.post("/api/ai/workflows/run", async (req, res) => {
       model: model ? String(model) : void 0,
       autoGenerateCoverImage: Boolean(autoGenerateCoverImage)
     });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const initialApproval = {
-      isAccurate: true,
-      isAppropriate: true,
-      isOnBrand: true,
-      isReady: false,
-      reviewerNote: "",
-      publishedPostId: null
-    };
-    const insertRes = db.prepare(
-      `INSERT INTO ai_workflows (
-          topic, input_source, category, target_audience, business_pillar,
-          flow_mode, engine_used, status,
-          ceo_json, research_json, script_json, design_json, visual_json,
-          video_json, audio_json, qa_json, analytics_json, omnichannel_json, approval_json,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      String(topic).trim(),
-      String(inputSource),
-      String(category),
-      String(targetAudience),
-      String(businessPillar),
-      flowMode === "core_3agent" ? "core_3agent" : "full_8agent",
-      result.engineUsed,
-      JSON.stringify(result.ceoOutput),
-      JSON.stringify(result.researchOutput),
-      JSON.stringify(result.scriptOutput),
-      JSON.stringify(result.designOutput),
-      JSON.stringify(result.visualOutput),
-      JSON.stringify(result.videoOutput),
-      JSON.stringify(result.audioOutput),
-      JSON.stringify(result.qaOutput),
-      JSON.stringify(result.analyticsOutput),
-      JSON.stringify(result.omnichannelOutput),
-      JSON.stringify(initialApproval),
-      now,
-      now
+    const newId = createWorkflowRecord(
+      {
+        topic: String(topic).trim(),
+        inputSource: String(inputSource),
+        category: String(category),
+        targetAudience: String(targetAudience),
+        businessPillar: String(businessPillar),
+        flowMode: flowMode === "core_3agent" ? "core_3agent" : "full_8agent"
+      },
+      result
     );
-    const created = db.prepare("SELECT * FROM ai_workflows WHERE id = ?").get(Number(insertRes.lastInsertRowid));
+    const created = db.prepare("SELECT * FROM ai_workflows WHERE id = ?").get(newId);
     res.status(201).json(mapWorkflowRow(created));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -7394,10 +8327,10 @@ app.put("/api/channels/:key", (req, res) => {
   res.json({ ok: true });
 });
 async function processDueScheduledPublishes() {
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16);
+  const nowIso2 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16);
   const dueRows = db.prepare(
     "SELECT * FROM publish_logs WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?"
-  ).all(nowIso);
+  ).all(nowIso2);
   if (dueRows.length === 0) return false;
   for (const row of dueRows) {
     const outcome = await dispatchSingleChannelReal({
@@ -7797,6 +8730,166 @@ app.post("/api/admin/import-json", (req, res) => {
     } catch {
     }
     res.status(500).json({ error: err.message });
+  }
+});
+var PROVIDER_LABELS = {
+  gemini: "Google Gemini",
+  openai: "OpenAI ChatGPT",
+  claude: "Anthropic Claude",
+  deepseek: "DeepSeek",
+  openai_compatible: "\u0E40\u0E0B\u0E34\u0E23\u0E4C\u0E1F\u0E40\u0E27\u0E2D\u0E23\u0E4C\u0E20\u0E32\u0E22\u0E43\u0E19 (OpenAI-Compatible)"
+};
+function readRoutingConfig() {
+  const enabledRow = db.prepare("SELECT value FROM settings WHERE key = 'ai_failover_enabled'").get();
+  return {
+    failoverEnabled: enabledRow?.value !== "0",
+    fallbackOrder: readProviderOrder("ai_fallback_order", STANDARD_ORDER),
+    economyOrder: readProviderOrder("ai_economy_order", ECONOMY_ORDER)
+  };
+}
+app.get("/api/ai/health", (_req, res) => {
+  const configured = configuredProviderSet();
+  const snap = new Map(getHealthSnapshot().map((h) => [h.provider, h]));
+  const now = Date.now();
+  const providers = Object.keys(PROVIDER_LABELS).map((id) => {
+    const h = snap.get(id);
+    const isConfigured = configured.has(id);
+    const cooling = Boolean(h && h.openUntil > now);
+    return {
+      id,
+      label: PROVIDER_LABELS[id],
+      configured: isConfigured,
+      state: !isConfigured ? "unconfigured" : cooling ? "cooldown" : h?.consecutiveFailures ? "degraded" : "ok",
+      cooldownRemainingSec: cooling ? Math.ceil((h.openUntil - now) / 1e3) : 0,
+      consecutiveFailures: h?.consecutiveFailures || 0,
+      lastError: h?.lastError || "",
+      lastErrorKind: h?.lastKind || "",
+      lastErrorAt: h?.lastErrorAt ? new Date(h.lastErrorAt).toISOString() : null,
+      lastOkAt: h?.lastOkAt ? new Date(h.lastOkAt).toISOString() : null
+    };
+  });
+  const day = db.prepare(
+    `SELECT COUNT(*) AS calls, SUM(ok = 0) AS failures,
+              SUM(ok = 1 AND failed_over_from != '') AS failovers,
+              SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+              SUM(cached_tokens) AS cached_tokens
+       FROM ai_call_log WHERE created_at > datetime('now','-1 day')`
+  ).get();
+  const recent = db.prepare(
+    `SELECT created_at, provider, model, tier, ok, error, error_kind, failed_over_from
+       FROM ai_call_log WHERE ok = 0 OR failed_over_from != '' ORDER BY id DESC LIMIT 8`
+  ).all();
+  res.json({
+    ...readRoutingConfig(),
+    providers,
+    last24h: {
+      calls: day.calls || 0,
+      failures: day.failures || 0,
+      failovers: day.failovers || 0,
+      inputTokens: day.input_tokens || 0,
+      outputTokens: day.output_tokens || 0,
+      cachedInputTokens: day.cached_tokens || 0
+    },
+    recentEvents: recent
+  });
+});
+app.post("/api/ai/health/reset", (req, res) => {
+  const provider = req.body?.provider ? String(req.body.provider) : void 0;
+  if (provider && !PROVIDER_LABELS[provider]) {
+    res.status(400).json({ error: "\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E08\u0E31\u0E01\u0E04\u0E48\u0E32\u0E22 AI \u0E17\u0E35\u0E48\u0E23\u0E30\u0E1A\u0E38" });
+    return;
+  }
+  resetHealth(provider);
+  res.json({ ok: true });
+});
+app.put("/api/ai/routing", (req, res) => {
+  const b = req.body || {};
+  const valid = Object.keys(PROVIDER_LABELS);
+  const cleanOrder = (v) => {
+    if (v === void 0) return null;
+    if (!Array.isArray(v)) throw new Error("\u0E25\u0E33\u0E14\u0E31\u0E1A\u0E04\u0E48\u0E32\u0E22\u0E15\u0E49\u0E2D\u0E07\u0E40\u0E1B\u0E47\u0E19\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23");
+    const list = v.map(String);
+    const bad = list.find((x) => !valid.includes(x));
+    if (bad) throw new Error(`\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E08\u0E31\u0E01\u0E04\u0E48\u0E32\u0E22 AI: ${bad}`);
+    return Array.from(new Set(list));
+  };
+  try {
+    const fb = cleanOrder(b.fallbackOrder);
+    const eco = cleanOrder(b.economyOrder);
+    const set = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    if (fb) set.run("ai_fallback_order", JSON.stringify(fb));
+    if (eco) set.run("ai_economy_order", JSON.stringify(eco));
+    if (typeof b.failoverEnabled === "boolean") {
+      set.run("ai_failover_enabled", b.failoverEnabled ? "1" : "0");
+    }
+    res.json(readRoutingConfig());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get("/api/ai/batches", (_req, res) => {
+  res.json({
+    maxItems: MAX_BATCH_ITEMS,
+    backgroundCapable: !IS_SERVERLESS,
+    batches: listBatches(20)
+  });
+});
+app.post("/api/ai/batches", (req, res) => {
+  try {
+    const b = req.body || {};
+    const { id, duplicates } = createBatch({
+      name: b.name,
+      topics: b.topics,
+      options: {
+        mode: b.mode,
+        concurrency: b.concurrency,
+        category: b.category,
+        inputSource: b.inputSource,
+        targetAudience: b.targetAudience,
+        businessPillar: b.businessPillar,
+        flowMode: b.flowMode,
+        provider: b.provider,
+        autoGenerateCoverImage: b.autoGenerateCoverImage
+      }
+    });
+    startBackground(id);
+    res.status(201).json({ ...summarizeBatch(id), duplicatesRemoved: duplicates });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get("/api/ai/batches/:id", (req, res) => {
+  const s2 = summarizeBatch(Number(req.params.id));
+  if (!s2) {
+    res.status(404).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A Batch \u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23" });
+    return;
+  }
+  res.json(s2);
+});
+app.post("/api/ai/batches/:id/process", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const budgetMs = IS_SERVERLESS ? Math.min(Number(req.body?.budgetMs) || 4e4, 45e3) : Math.min(Number(req.body?.budgetMs) || 2e4, 12e4);
+    res.json(await processBatch(id, { budgetMs }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post("/api/ai/batches/:id/cancel", (req, res) => {
+  try {
+    res.json(cancelBatch(Number(req.params.id)));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+app.post("/api/ai/batches/:id/retry-failed", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const out = retryFailed(id);
+    startBackground(id);
+    res.json(out);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
   }
 });
 var SITE_TEXT_LIMITS = {
@@ -8203,6 +9296,7 @@ async function startServer() {
 }
 if (!IS_SERVERLESS) {
   startServer();
+  resumeBatchesOnBoot();
 }
 var index_default = app;
 export {
