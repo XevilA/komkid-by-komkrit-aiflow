@@ -4,6 +4,8 @@ import {
   KnowledgeItem,
   BusinessPillarItem,
   AiWorkflow,
+  SiteConfig,
+  SpecialProject,
 } from './types';
 import { api, DashboardStats, getStoredAdminToken } from './api';
 import { PublicWebsite } from './components/PublicWebsite';
@@ -30,6 +32,8 @@ export const App: React.FC = () => {
   const [workflows, setWorkflows] = useState<AiWorkflow[]>([]);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [pillars, setPillars] = useState<BusinessPillarItem[]>([]);
+  const [siteConfig, setSiteConfig] = useState<SiteConfig | null>(null);
+  const [specialProjects, setSpecialProjects] = useState<SpecialProject[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -84,9 +88,16 @@ export const App: React.FC = () => {
 
   const loadPublicData = useCallback(async () => {
     try {
-      const [p, pil] = await Promise.all([api.getPosts(), api.getPillars()]);
+      const [p, pil, cfg, projs] = await Promise.all([
+        api.getPosts(),
+        api.getPillars(),
+        api.getSiteConfig().catch(() => null),
+        api.getSpecialProjects().catch(() => [] as SpecialProject[]),
+      ]);
       setPosts(p);
       setPillars(pil);
+      setSiteConfig(cfg);
+      setSpecialProjects(projs);
     } finally {
       setLoading(false);
     }
@@ -94,18 +105,22 @@ export const App: React.FC = () => {
 
   const loadAdminData = useCallback(async () => {
     try {
-      const [p, w, kb, pil, st] = await Promise.all([
+      const [p, w, kb, pil, st, cfg, projs] = await Promise.all([
         api.getPosts(),
         api.getWorkflows(),
         api.getKnowledgeBase(),
         api.getPillars(),
         api.getStats(),
+        api.getSiteConfig().catch(() => null),
+        api.getSpecialProjects().catch(() => [] as SpecialProject[]),
       ]);
       setPosts(p);
       setWorkflows(w);
       setKnowledgeItems(kb);
       setPillars(pil);
       setStats(st);
+      setSiteConfig(cfg);
+      setSpecialProjects(projs);
     } finally {
       setLoading(false);
     }
@@ -173,6 +188,8 @@ export const App: React.FC = () => {
         <PublicWebsite
           posts={posts}
           pillars={pillars}
+          siteConfig={siteConfig}
+          specialProjects={specialProjects}
           onOpenPost={(id) => setReadingPostId(id)}
         />
       ) : !adminUsername ? (
@@ -192,6 +209,8 @@ export const App: React.FC = () => {
           workflows={workflows}
           knowledgeItems={knowledgeItems}
           pillars={pillars}
+          siteConfig={siteConfig}
+          specialProjects={specialProjects}
           initialEditPost={initialEditPost}
           openCreateImmediately={openCreateImmediately}
           onClearInitialEdit={() => {

@@ -45,6 +45,8 @@ import {
 import { OmnichannelPublishHub } from './OmnichannelPublishHub';
 import { AiChatStudio, MediaAgentHandoff } from './AiChatStudio';
 import { MediaGenStudio } from './MediaGenStudio';
+import { SiteAndDomainManager } from './SiteAndDomainManager';
+import { SiteConfig, SpecialProject } from '../types';
 
 interface Props {
   activeMenu: string;
@@ -54,6 +56,8 @@ interface Props {
   workflows: AiWorkflow[];
   knowledgeItems: KnowledgeItem[];
   pillars: BusinessPillarItem[];
+  siteConfig: SiteConfig | null;
+  specialProjects: SpecialProject[];
   initialEditPost: Post | null;
   openCreateImmediately?: boolean;
   onClearInitialEdit: () => void;
@@ -65,6 +69,7 @@ interface Props {
 }
 
 type SettingsSubTab =
+  | 'site_domain'
   | 'inbox'
   | 'channels'
   | 'knowledge'
@@ -79,6 +84,8 @@ export const AdminLayout: React.FC<Props> = ({
   workflows,
   knowledgeItems,
   pillars,
+  siteConfig,
+  specialProjects,
   initialEditPost,
   openCreateImmediately,
   onClearInitialEdit,
@@ -232,6 +239,11 @@ export const AdminLayout: React.FC<Props> = ({
 
   const settingsTabs: { id: SettingsSubTab; label: string; icon: React.ReactNode }[] = [
     {
+      id: 'site_domain',
+      label: 'เว็บไซต์ โครงการ และโดเมน',
+      icon: <Globe className="w-4 h-4" />,
+    },
+    {
       id: 'inbox',
       label: 'ข้อมูลติดต่อและสมาชิก',
       icon: <MessageSquare className="w-4 h-4" />,
@@ -287,7 +299,7 @@ export const AdminLayout: React.FC<Props> = ({
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col justify-between transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } ${desktopMenuCollapsed ? 'lg:hidden' : 'lg:static lg:translate-x-0 lg:shrink-0'}`}
+        } ${desktopMenuCollapsed ? 'lg:hidden' : 'lg:sticky lg:top-0 lg:bottom-auto lg:h-screen lg:self-start lg:translate-x-0 lg:shrink-0'}`}
       >
         <div className="flex-1 overflow-y-auto">
           {/* Organization Header */}
@@ -776,6 +788,14 @@ export const AdminLayout: React.FC<Props> = ({
                   })}
                 </div>
               </div>
+
+              {settingsTab === 'site_domain' && (
+                <SiteAndDomainManager
+                  siteConfig={siteConfig}
+                  specialProjects={specialProjects}
+                  onRefreshAll={onRefreshAll}
+                />
+              )}
 
               {settingsTab === 'inbox' && (
                 <AudienceAndSettingsHub

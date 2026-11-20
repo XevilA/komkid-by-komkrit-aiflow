@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Sparkles,
+  PenLine,
   Bot,
   Search,
   Lightbulb,
@@ -890,7 +890,7 @@ export const AiCommandCenter: React.FC<Props> = ({
               disabled={running}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0a101d] px-6 py-3 text-sm font-semibold text-amber-300 hover:bg-slate-800 transition cursor-pointer disabled:opacity-60 shrink-0 shadow-xs"
             >
-              <Sparkles className="w-4 h-4" />
+              <PenLine className="w-4 h-4" />
               {running ? 'ทีม Agent กำลังทำงาน...' : 'สั่งงาน AGENT CEO'}
             </button>
           </div>
@@ -1437,10 +1437,17 @@ export const AiCommandCenter: React.FC<Props> = ({
                         />
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                      <div
+                        className={
+                          selectedCoverUrl || selectedVideoUrl || selectedAudioUrl
+                            ? 'grid grid-cols-1 lg:grid-cols-12 gap-6'
+                            : 'block'
+                        }
+                      >
+                        {(selectedCoverUrl || selectedVideoUrl || selectedAudioUrl) && (
                         <div className="lg:col-span-5 space-y-3">
                           <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                            สื่อหลักที่แนบกับ Content นี้
+                            สื่อที่แนบกับเนื้อหานี้
                           </div>
                           {selectedCoverUrl && (
                             <div className="space-y-1.5">
@@ -1528,12 +1535,19 @@ export const AiCommandCenter: React.FC<Props> = ({
                             </div>
                           )}
                         </div>
+                        )}
 
-                        <div className="lg:col-span-7 space-y-2">
+                        <div
+                          className={
+                            selectedCoverUrl || selectedVideoUrl || selectedAudioUrl
+                              ? 'lg:col-span-7 space-y-2'
+                              : 'space-y-2'
+                          }
+                        >
                           <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                            ตัวอย่างเนื้อหาจริงที่จะแสดงบนเว็บไซต์ (รวมภาพและวิดีโอแทรกในบทความ)
+                            ตัวอย่างบทความที่จะแสดงบนเว็บไซต์
                           </div>
-                          <div className="max-h-[520px] overflow-y-auto pr-2 rounded-xl border border-slate-100 bg-slate-50/40 p-4">
+                          <div className="max-h-[560px] overflow-y-auto rounded-xl border border-slate-100 bg-slate-50/40 p-4 sm:p-6">
                             {renderRichMarkdown(editArticle)}
                           </div>
                         </div>
@@ -1744,7 +1758,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                         {mediaBusy === 'image' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Sparkles className="w-3.5 h-3.5" />
+                          <PenLine className="w-3.5 h-3.5" />
                         )}
                         {mediaBusy === 'image'
                           ? 'กำลังวาดภาพจริง...'

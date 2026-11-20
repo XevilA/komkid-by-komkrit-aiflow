@@ -453,6 +453,28 @@ function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS site_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      config_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS special_projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      badge_label TEXT NOT NULL DEFAULT '\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E1E\u0E34\u0E40\u0E28\u0E29',
+      title TEXT NOT NULL,
+      subtitle TEXT DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      highlights_json TEXT NOT NULL DEFAULT '[]',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      cta_label TEXT NOT NULL DEFAULT '\u0E14\u0E39\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14',
+      cta_url TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      sort_order INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, is_featured DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category, content_type);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, created_at DESC);
@@ -495,7 +517,77 @@ function initDatabase() {
   }
   seedIfEmpty();
   seedOmnichannelIfEmpty();
+  seedSiteContentIfEmpty();
   upgradePlaintextSecretsToAes256Gcm();
+}
+var DEFAULT_SITE_CONFIG = {
+  brandTitle: "\u0E04\u0E21\u0E04\u0E34\u0E14",
+  brandSub: "by KOMKRIT",
+  slogan: "\u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C",
+  heroSubtitle: "\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 \u2022 \u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 \u2022 \u0E44\u0E2D\u0E40\u0E14\u0E35\u0E22 \u2022 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E01\u0E32\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E04\u0E19\u0E41\u0E25\u0E30\u0E2A\u0E31\u0E07\u0E04\u0E21",
+  heroQuote: "\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32 \u0E04\u0E37\u0E2D\u0E23\u0E32\u0E01\u0E10\u0E32\u0E19\u0E02\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E04\u0E19 \u0E41\u0E25\u0E30\u0E01\u0E32\u0E23\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2D\u0E19\u0E32\u0E04\u0E15\u0E17\u0E35\u0E48\u0E14\u0E35\u0E01\u0E27\u0E48\u0E32",
+  heroSignature: "Komkrit",
+  heroImageUrl: "/images/hero-komkrit.jpg",
+  authorName: "\u0E04\u0E21\u0E01\u0E24\u0E0A (Komkrit)",
+  authorRole: "\u0E1C\u0E39\u0E49\u0E01\u0E48\u0E2D\u0E15\u0E31\u0E49\u0E07 \u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT",
+  authorBio: "\u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E01\u0E32\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E04\u0E19 \u0E2A\u0E31\u0E07\u0E04\u0E21 \u0E41\u0E25\u0E30\u0E2D\u0E19\u0E32\u0E04\u0E15\u0E17\u0E35\u0E48\u0E14\u0E35\u0E01\u0E27\u0E48\u0E32",
+  authorQuote: "\u0E17\u0E38\u0E01\u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E17\u0E35\u0E48\u0E41\u0E15\u0E01\u0E15\u0E48\u0E32\u0E07 \u0E04\u0E37\u0E2D\u0E08\u0E38\u0E14\u0E40\u0E23\u0E34\u0E48\u0E21\u0E15\u0E49\u0E19\u0E02\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E40\u0E1B\u0E25\u0E35\u0E48\u0E22\u0E19\u0E41\u0E1B\u0E25\u0E07 \u0E41\u0E25\u0E30\u0E01\u0E32\u0E23\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E34\u0E48\u0E07\u0E17\u0E35\u0E48\u0E14\u0E35\u0E01\u0E27\u0E48\u0E32",
+  authorImageUrl: "/images/author-komkrit.jpg",
+  aboutVision: "\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32\u0E17\u0E35\u0E48\u0E14\u0E35 \u0E2A\u0E23\u0E49\u0E32\u0E07\u0E04\u0E19\u0E17\u0E35\u0E48\u0E14\u0E35 \u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E31\u0E07\u0E04\u0E21\u0E17\u0E35\u0E48\u0E14\u0E35\u0E44\u0E14\u0E49",
+  aboutStory: "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT \u0E04\u0E37\u0E2D\u0E1E\u0E37\u0E49\u0E19\u0E17\u0E35\u0E48\u0E41\u0E2B\u0E48\u0E07\u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14 \u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 \u0E41\u0E25\u0E30\u0E19\u0E27\u0E31\u0E15\u0E01\u0E23\u0E23\u0E21\u0E17\u0E35\u0E48\u0E21\u0E38\u0E48\u0E07\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E42\u0E22\u0E07\u0E42\u0E25\u0E01\u0E02\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32 \u0E40\u0E17\u0E04\u0E42\u0E19\u0E42\u0E25\u0E22\u0E35 AI \u0E01\u0E32\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E2D\u0E32\u0E0A\u0E35\u0E1E \u0E41\u0E25\u0E30\u0E04\u0E27\u0E32\u0E21\u0E23\u0E48\u0E27\u0E21\u0E21\u0E37\u0E2D\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E19\u0E32\u0E19\u0E32\u0E0A\u0E32\u0E15\u0E34\u0E40\u0E02\u0E49\u0E32\u0E14\u0E49\u0E27\u0E22\u0E01\u0E31\u0E19 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E42\u0E2D\u0E01\u0E32\u0E2A\u0E17\u0E35\u0E48\u0E08\u0E31\u0E1A\u0E15\u0E49\u0E2D\u0E07\u0E44\u0E14\u0E49\u0E08\u0E23\u0E34\u0E07\u0E43\u0E2B\u0E49\u0E01\u0E31\u0E1A\u0E1C\u0E39\u0E49\u0E40\u0E23\u0E35\u0E22\u0E19 \u0E04\u0E23\u0E39 \u0E42\u0E23\u0E07\u0E40\u0E23\u0E35\u0E22\u0E19 \u0E41\u0E25\u0E30\u0E2A\u0E31\u0E07\u0E04\u0E21\u0E44\u0E17\u0E22",
+  featuredVideoUrl: "https://www.youtube.com/watch?v=VxQwQ9vQkkc",
+  featuredVideoTitle: "\u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C: \u0E21\u0E38\u0E21\u0E21\u0E2D\u0E07\u0E43\u0E2B\u0E21\u0E48\u0E14\u0E49\u0E32\u0E19\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32 \u0E40\u0E17\u0E04\u0E42\u0E19\u0E42\u0E25\u0E22\u0E35 \u0E41\u0E25\u0E30\u0E01\u0E32\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E2A\u0E31\u0E07\u0E04\u0E21\u0E44\u0E17\u0E22",
+  featuredVideoDesc: "\u0E40\u0E08\u0E32\u0E30\u0E25\u0E36\u0E01\u0E41\u0E19\u0E27\u0E04\u0E34\u0E14\u0E01\u0E32\u0E23\u0E19\u0E33\u0E40\u0E17\u0E04\u0E42\u0E19\u0E42\u0E25\u0E22\u0E35\u0E41\u0E25\u0E30 AI \u0E21\u0E32\u0E0A\u0E48\u0E27\u0E22\u0E22\u0E01\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E01\u0E32\u0E23\u0E40\u0E23\u0E35\u0E22\u0E19\u0E23\u0E39\u0E49\u0E02\u0E2D\u0E07\u0E04\u0E23\u0E39 \u0E19\u0E31\u0E01\u0E40\u0E23\u0E35\u0E22\u0E19 \u0E41\u0E25\u0E30\u0E1C\u0E39\u0E49\u0E40\u0E23\u0E35\u0E22\u0E19\u0E17\u0E38\u0E01\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E22 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E42\u0E2D\u0E01\u0E32\u0E2A\u0E17\u0E32\u0E07\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32\u0E17\u0E35\u0E48\u0E40\u0E02\u0E49\u0E32\u0E16\u0E36\u0E07\u0E44\u0E14\u0E49\u0E08\u0E23\u0E34\u0E07",
+  contactEmail: "contact@komkid.in.th",
+  contactLocation: "\u0E08\u0E31\u0E07\u0E2B\u0E27\u0E31\u0E14\u0E20\u0E39\u0E40\u0E01\u0E47\u0E15 \u0E1B\u0E23\u0E30\u0E40\u0E17\u0E28\u0E44\u0E17\u0E22",
+  socialX: "",
+  socialYoutube: "https://www.youtube.com/watch?v=VxQwQ9vQkkc",
+  socialFacebook: "",
+  socialInstagram: "",
+  socialLineOa: "",
+  primaryDomain: "komkid.in.th",
+  domains: [
+    "komkid.in.th",
+    "www.komkid.in.th",
+    "api.komkid.in.th",
+    "aiflow-wheat.vercel.app"
+  ],
+  seoTitle: "\u0E04\u0E21\u0E04\u0E34\u0E14 by KOMKRIT \u2014 \u0E04\u0E34\u0E14\u0E15\u0E48\u0E32\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E2A\u0E23\u0E23\u0E04\u0E4C \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32\u0E41\u0E25\u0E30\u0E2A\u0E31\u0E07\u0E04\u0E21",
+  seoDescription: "\u0E41\u0E1E\u0E25\u0E15\u0E1F\u0E2D\u0E23\u0E4C\u0E21\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 \u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 \u0E19\u0E27\u0E31\u0E15\u0E01\u0E23\u0E23\u0E21\u0E01\u0E32\u0E23\u0E28\u0E36\u0E01\u0E29\u0E32 AI \u0E41\u0E25\u0E30\u0E2B\u0E25\u0E31\u0E01\u0E2A\u0E39\u0E15\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E17\u0E31\u0E01\u0E29\u0E30\u0E41\u0E2B\u0E48\u0E07\u0E2D\u0E19\u0E32\u0E04\u0E15 \u0E42\u0E14\u0E22 \u0E04\u0E21\u0E01\u0E24\u0E0A (Komkrit)"
+};
+function seedSiteContentIfEmpty() {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const cfgRow = db.prepare("SELECT id FROM site_config WHERE id = 1").get();
+  if (!cfgRow) {
+    db.prepare("INSERT INTO site_config (id, config_json, updated_at) VALUES (1, ?, ?)").run(
+      JSON.stringify(DEFAULT_SITE_CONFIG),
+      now
+    );
+  }
+  const projCount = db.prepare("SELECT COUNT(*) AS c FROM special_projects").get().c;
+  if (projCount === 0) {
+    db.prepare(
+      `INSERT INTO special_projects (
+        badge_label, title, subtitle, description, highlights_json, tags_json,
+        cta_label, cta_url, status, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`
+    ).run(
+      "\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E1E\u0E34\u0E40\u0E28\u0E29",
+      "\u0E42\u0E23\u0E07\u0E40\u0E23\u0E35\u0E22\u0E19\u0E20\u0E32\u0E29\u0E32\u0E41\u0E25\u0E30\u0E2D\u0E32\u0E0A\u0E35\u0E1E \u0E44\u0E17\u0E22-\u0E40\u0E21\u0E35\u0E22\u0E19\u0E21\u0E32",
+      "Thai-Myanmar Language and Vocational School",
+      "\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E04\u0E27\u0E32\u0E21\u0E23\u0E48\u0E27\u0E21\u0E21\u0E37\u0E2D\u0E14\u0E49\u0E32\u0E19\u0E01\u0E32\u0E23\u0E1E\u0E31\u0E12\u0E19\u0E32\u0E17\u0E31\u0E01\u0E29\u0E30\u0E20\u0E32\u0E29\u0E32\u0E41\u0E25\u0E30\u0E27\u0E34\u0E0A\u0E32\u0E0A\u0E35\u0E1E \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E22\u0E01\u0E23\u0E30\u0E14\u0E31\u0E1A\u0E21\u0E32\u0E15\u0E23\u0E10\u0E32\u0E19\u0E01\u0E33\u0E25\u0E31\u0E07\u0E04\u0E19\u0E2D\u0E32\u0E40\u0E0B\u0E35\u0E22\u0E19 \u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E42\u0E22\u0E07\u0E42\u0E2D\u0E01\u0E32\u0E2A\u0E01\u0E32\u0E23\u0E40\u0E23\u0E35\u0E22\u0E19\u0E23\u0E39\u0E49\u0E41\u0E25\u0E30\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E22\u0E31\u0E48\u0E07\u0E22\u0E37\u0E19\u0E23\u0E30\u0E2B\u0E27\u0E48\u0E32\u0E07\u0E44\u0E17\u0E22\u0E41\u0E25\u0E30\u0E40\u0E21\u0E35\u0E22\u0E19\u0E21\u0E32",
+      JSON.stringify([
+        "\u0E2B\u0E25\u0E31\u0E01\u0E2A\u0E39\u0E15\u0E23\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22-\u0E2D\u0E31\u0E07\u0E01\u0E24\u0E29-\u0E40\u0E21\u0E35\u0E22\u0E19\u0E21\u0E32 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19\u0E41\u0E25\u0E30\u0E1A\u0E23\u0E34\u0E01\u0E32\u0E23\u0E21\u0E32\u0E15\u0E23\u0E10\u0E32\u0E19\u0E2A\u0E32\u0E01\u0E25",
+        "\u0E2B\u0E25\u0E31\u0E01\u0E2A\u0E39\u0E15\u0E23\u0E27\u0E34\u0E0A\u0E32\u0E0A\u0E35\u0E1E\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E17\u0E32\u0E07\u0E17\u0E35\u0E48\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E42\u0E22\u0E07\u0E01\u0E31\u0E1A\u0E2A\u0E16\u0E32\u0E19\u0E1B\u0E23\u0E30\u0E01\u0E2D\u0E1A\u0E01\u0E32\u0E23\u0E08\u0E23\u0E34\u0E07",
+        "\u0E40\u0E04\u0E23\u0E37\u0E2D\u0E02\u0E48\u0E32\u0E22\u0E04\u0E27\u0E32\u0E21\u0E23\u0E48\u0E27\u0E21\u0E21\u0E37\u0E2D\u0E42\u0E23\u0E07\u0E40\u0E23\u0E35\u0E22\u0E19\u0E41\u0E25\u0E30\u0E20\u0E32\u0E04\u0E40\u0E2D\u0E01\u0E0A\u0E19\u0E44\u0E17\u0E22-\u0E40\u0E21\u0E35\u0E22\u0E19\u0E21\u0E32"
+      ]),
+      JSON.stringify(["\u0E2B\u0E25\u0E31\u0E01\u0E2A\u0E39\u0E15\u0E23\u0E20\u0E32\u0E29\u0E32\u0E41\u0E25\u0E30\u0E2D\u0E32\u0E0A\u0E35\u0E1E", "\u0E04\u0E27\u0E32\u0E21\u0E23\u0E48\u0E27\u0E21\u0E21\u0E37\u0E2D\u0E44\u0E17\u0E22-\u0E40\u0E21\u0E35\u0E22\u0E19\u0E21\u0E32"]),
+      "\u0E14\u0E39\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14",
+      "",
+      now,
+      now
+    );
+  }
 }
 function upgradePlaintextSecretsToAes256Gcm() {
   try {
@@ -5287,6 +5379,7 @@ app.use("/api", (req, res, next) => {
   if (m === "GET" && (p === "/posts" || /^\/posts\/\d+$/.test(p))) return next();
   if (m === "POST" && /^\/posts\/\d+\/comments$/.test(p)) return next();
   if (m === "GET" && p === "/pillars") return next();
+  if (m === "GET" && (p === "/site-config" || p === "/projects")) return next();
   if (m === "POST" && (p === "/subscribers" || p === "/contacts" || p === "/surveys")) {
     return next();
   }
@@ -7705,6 +7798,382 @@ app.post("/api/admin/import-json", (req, res) => {
     }
     res.status(500).json({ error: err.message });
   }
+});
+var SITE_TEXT_LIMITS = {
+  brandTitle: 80,
+  brandSub: 80,
+  slogan: 200,
+  heroSubtitle: 300,
+  heroQuote: 400,
+  heroSignature: 80,
+  authorName: 120,
+  authorRole: 200,
+  authorBio: 600,
+  authorQuote: 400,
+  aboutVision: 400,
+  aboutStory: 3e3,
+  featuredVideoTitle: 300,
+  featuredVideoDesc: 1e3,
+  contactLocation: 200,
+  seoTitle: 200,
+  seoDescription: 400
+};
+var SITE_URL_FIELDS = [
+  "featuredVideoUrl",
+  "socialX",
+  "socialYoutube",
+  "socialFacebook",
+  "socialInstagram",
+  "socialLineOa"
+];
+var SITE_IMAGE_FIELDS = ["heroImageUrl", "authorImageUrl"];
+var HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+function cleanHttpUrl(v, allowRelative = false) {
+  const raw = String(v ?? "").trim();
+  if (!raw) return "";
+  if (raw.length > 2e3) return null;
+  if (allowRelative && /^\/(?!\/)[^\s]*$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+function cleanHostname(v) {
+  return String(v ?? "").trim().replace(/^https?:\/\//i, "").replace(/[\/?#].*$/, "").replace(/\.$/, "").toLowerCase();
+}
+function readSiteConfigRecord() {
+  const row = db.prepare("SELECT config_json, updated_at FROM site_config WHERE id = 1").get();
+  let parsed = {};
+  try {
+    parsed = row?.config_json ? JSON.parse(row.config_json) : {};
+  } catch {
+    parsed = {};
+  }
+  const merged = { ...DEFAULT_SITE_CONFIG };
+  for (const k of Object.keys(DEFAULT_SITE_CONFIG)) {
+    if (parsed[k] !== void 0 && parsed[k] !== null) merged[k] = parsed[k];
+  }
+  if (!Array.isArray(merged.domains)) merged.domains = DEFAULT_SITE_CONFIG.domains;
+  return { ...merged, updatedAt: row?.updated_at || (/* @__PURE__ */ new Date()).toISOString() };
+}
+function sanitizeSiteConfigInput(incoming) {
+  const out = {};
+  for (const [k, max] of Object.entries(SITE_TEXT_LIMITS)) {
+    if (incoming[k] === void 0) continue;
+    const v = String(incoming[k] ?? "").trim();
+    if (v.length > max) return { ok: false, error: `\u0E1F\u0E34\u0E25\u0E14\u0E4C ${k} \u0E22\u0E32\u0E27\u0E40\u0E01\u0E34\u0E19 ${max} \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23` };
+    out[k] = v;
+  }
+  for (const k of SITE_URL_FIELDS) {
+    if (incoming[k] === void 0) continue;
+    const v = cleanHttpUrl(incoming[k]);
+    if (v === null) return { ok: false, error: `\u0E25\u0E34\u0E07\u0E01\u0E4C ${k} \u0E15\u0E49\u0E2D\u0E07\u0E02\u0E36\u0E49\u0E19\u0E15\u0E49\u0E19\u0E14\u0E49\u0E27\u0E22 http:// \u0E2B\u0E23\u0E37\u0E2D https://` };
+    out[k] = v;
+  }
+  for (const k of SITE_IMAGE_FIELDS) {
+    if (incoming[k] === void 0) continue;
+    const v = cleanHttpUrl(incoming[k], true);
+    if (v === null) return { ok: false, error: `\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48\u0E23\u0E39\u0E1B ${k} \u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07` };
+    out[k] = v;
+  }
+  if (incoming.contactEmail !== void 0) {
+    const e = String(incoming.contactEmail ?? "").trim();
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      return { ok: false, error: "\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E2D\u0E35\u0E40\u0E21\u0E25\u0E15\u0E34\u0E14\u0E15\u0E48\u0E2D\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" };
+    }
+    out.contactEmail = e;
+  }
+  if (incoming.primaryDomain !== void 0) {
+    const d = cleanHostname(incoming.primaryDomain);
+    if (!HOSTNAME_RE.test(d)) return { ok: false, error: "\u0E42\u0E14\u0E40\u0E21\u0E19\u0E2B\u0E25\u0E31\u0E01\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" };
+    out.primaryDomain = d;
+  }
+  if (incoming.domains !== void 0) {
+    if (!Array.isArray(incoming.domains)) return { ok: false, error: "domains \u0E15\u0E49\u0E2D\u0E07\u0E40\u0E1B\u0E47\u0E19\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23" };
+    const list = Array.from(new Set(incoming.domains.map(cleanHostname).filter(Boolean)));
+    if (list.length > 20) return { ok: false, error: "\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E42\u0E14\u0E40\u0E21\u0E19\u0E44\u0E14\u0E49\u0E44\u0E21\u0E48\u0E40\u0E01\u0E34\u0E19 20 \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23" };
+    const bad = list.find((d) => !HOSTNAME_RE.test(d));
+    if (bad) return { ok: false, error: `\u0E42\u0E14\u0E40\u0E21\u0E19 "${bad}" \u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07` };
+    out.domains = list;
+  }
+  return { ok: true, value: out };
+}
+function cleanStringList(v, maxItems, maxLen) {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x ?? "").trim().slice(0, maxLen)).filter(Boolean).slice(0, maxItems);
+}
+var PROJECT_STATUSES = ["active", "draft", "archived"];
+function mapSpecialProjectRow(r) {
+  let highlights = [];
+  let tags = [];
+  try {
+    highlights = JSON.parse(r.highlights_json || "[]");
+  } catch {
+    highlights = [];
+  }
+  try {
+    tags = JSON.parse(r.tags_json || "[]");
+  } catch {
+    tags = [];
+  }
+  return {
+    id: r.id,
+    badgeLabel: r.badge_label || "\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E1E\u0E34\u0E40\u0E28\u0E29",
+    title: r.title,
+    subtitle: r.subtitle || "",
+    description: r.description || "",
+    highlights: Array.isArray(highlights) ? highlights : [],
+    tags: Array.isArray(tags) ? tags : [],
+    ctaLabel: r.cta_label || "\u0E14\u0E39\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14",
+    ctaUrl: r.cta_url || "",
+    status: r.status || "active",
+    sortOrder: Number(r.sort_order || 1),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+function buildProjectInput(b, base) {
+  const pick = (k, d) => b[k] !== void 0 ? b[k] : base ? base[k] : d;
+  const title = String(pick("title", "")).trim();
+  if (!title) return { ok: false, error: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E30\u0E1A\u0E38\u0E0A\u0E37\u0E48\u0E2D\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23" };
+  if (title.length > 200) return { ok: false, error: "\u0E0A\u0E37\u0E48\u0E2D\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E22\u0E32\u0E27\u0E40\u0E01\u0E34\u0E19 200 \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23" };
+  const status = String(pick("status", "active")).trim() || "active";
+  if (!PROJECT_STATUSES.includes(status)) return { ok: false, error: "\u0E2A\u0E16\u0E32\u0E19\u0E30\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" };
+  const ctaUrl = cleanHttpUrl(pick("ctaUrl", ""));
+  if (ctaUrl === null) return { ok: false, error: "\u0E25\u0E34\u0E07\u0E01\u0E4C\u0E1B\u0E38\u0E48\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E02\u0E36\u0E49\u0E19\u0E15\u0E49\u0E19\u0E14\u0E49\u0E27\u0E22 http:// \u0E2B\u0E23\u0E37\u0E2D https://" };
+  const description = String(pick("description", "")).trim();
+  if (description.length > 5e3) return { ok: false, error: "\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14\u0E22\u0E32\u0E27\u0E40\u0E01\u0E34\u0E19 5000 \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23" };
+  return {
+    ok: true,
+    value: {
+      badgeLabel: (String(pick("badgeLabel", "")).trim() || "\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E1E\u0E34\u0E40\u0E28\u0E29").slice(0, 60),
+      title,
+      subtitle: String(pick("subtitle", "")).trim().slice(0, 300),
+      description,
+      highlights: cleanStringList(pick("highlights", []), 12, 300),
+      tags: cleanStringList(pick("tags", []), 12, 60),
+      ctaLabel: (String(pick("ctaLabel", "")).trim() || "\u0E14\u0E39\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14").slice(0, 60),
+      ctaUrl,
+      status,
+      sortOrder: Math.max(1, Math.min(9999, Math.floor(Number(pick("sortOrder", 1))) || 1))
+    }
+  };
+}
+app.get("/api/site-config", (_req, res) => {
+  res.json(readSiteConfigRecord());
+});
+app.put("/api/site-config", (req, res) => {
+  const checked = sanitizeSiteConfigInput(req.body || {});
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+  const { updatedAt: _ignored, ...current } = readSiteConfigRecord();
+  const next = { ...current, ...checked.value };
+  if (!next.domains.includes(next.primaryDomain)) {
+    next.domains = [next.primaryDomain, ...next.domains];
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  db.prepare(
+    "INSERT OR REPLACE INTO site_config (id, config_json, updated_at) VALUES (1, ?, ?)"
+  ).run(JSON.stringify(next), now);
+  res.json({ ...next, updatedAt: now });
+});
+app.get("/api/projects", (req, res) => {
+  const isAdmin = isRequestAdmin(req);
+  const rows = db.prepare(
+    isAdmin ? "SELECT * FROM special_projects ORDER BY sort_order ASC, id DESC" : "SELECT * FROM special_projects WHERE status = 'active' ORDER BY sort_order ASC, id DESC"
+  ).all();
+  res.json(rows.map(mapSpecialProjectRow));
+});
+app.post("/api/projects", (req, res) => {
+  const checked = buildProjectInput(req.body || {}, null);
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+  const v = checked.value;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const info = db.prepare(
+    `INSERT INTO special_projects (
+        badge_label, title, subtitle, description, highlights_json, tags_json,
+        cta_label, cta_url, status, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    v.badgeLabel,
+    v.title,
+    v.subtitle,
+    v.description,
+    JSON.stringify(v.highlights),
+    JSON.stringify(v.tags),
+    v.ctaLabel,
+    v.ctaUrl,
+    v.status,
+    v.sortOrder,
+    now,
+    now
+  );
+  const created = db.prepare("SELECT * FROM special_projects WHERE id = ?").get(Number(info.lastInsertRowid));
+  res.status(201).json(mapSpecialProjectRow(created));
+});
+app.put("/api/projects/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare("SELECT * FROM special_projects WHERE id = ?").get(id);
+  if (!existing) {
+    res.status(404).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E41\u0E01\u0E49\u0E44\u0E02" });
+    return;
+  }
+  const checked = buildProjectInput(req.body || {}, mapSpecialProjectRow(existing));
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+  const v = checked.value;
+  db.prepare(
+    `UPDATE special_projects SET
+      badge_label = ?, title = ?, subtitle = ?, description = ?,
+      highlights_json = ?, tags_json = ?, cta_label = ?, cta_url = ?,
+      status = ?, sort_order = ?, updated_at = ?
+     WHERE id = ?`
+  ).run(
+    v.badgeLabel,
+    v.title,
+    v.subtitle,
+    v.description,
+    JSON.stringify(v.highlights),
+    JSON.stringify(v.tags),
+    v.ctaLabel,
+    v.ctaUrl,
+    v.status,
+    v.sortOrder,
+    (/* @__PURE__ */ new Date()).toISOString(),
+    id
+  );
+  res.json(mapSpecialProjectRow(db.prepare("SELECT * FROM special_projects WHERE id = ?").get(id)));
+});
+app.delete("/api/projects/:id", (req, res) => {
+  const info = db.prepare("DELETE FROM special_projects WHERE id = ?").run(Number(req.params.id));
+  if (!info.changes) {
+    res.status(404).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E42\u0E04\u0E23\u0E07\u0E01\u0E32\u0E23\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E25\u0E1A" });
+    return;
+  }
+  res.json({ ok: true });
+});
+function isNonPublicIPv4(ip) {
+  const o = ip.split(".").map(Number);
+  if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = o;
+  return a === 0 || a === 10 || a === 127 || a >= 224 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 192 && b === 0;
+}
+function dnsTargets() {
+  return {
+    vpsIp: process.env.DNS_TARGET_VPS_IP || "5.183.33.183",
+    vercelIp: process.env.DNS_TARGET_VERCEL_IP || "76.76.21.21",
+    vercelCname: process.env.DNS_TARGET_VERCEL_CNAME || "cname.vercel-dns.com"
+  };
+}
+app.get("/api/domains/status", async (_req, res) => {
+  const dns = await import("node:dns/promises");
+  const cfg = readSiteConfigRecord();
+  const targets = dnsTargets();
+  const list = Array.from(
+    new Set([cfg.primaryDomain, ...cfg.domains || []].filter(Boolean))
+  ).slice(0, 20);
+  const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const results = await Promise.all(
+    list.map(async (domain) => {
+      const [ips, cn] = await Promise.all([
+        dns.resolve4(domain).catch(() => []),
+        dns.resolveCname(domain).catch(() => [])
+      ]);
+      const dnsConnected = ips.length > 0 || cn.length > 0;
+      const publicOnly = ips.length > 0 && ips.every((ip) => !isNonPublicIPv4(ip));
+      let target = "none";
+      if (dnsConnected) {
+        if (ips.includes(targets.vpsIp)) target = "vps";
+        else if (ips.includes(targets.vercelIp) || cn.some((c) => c.toLowerCase().includes("vercel")))
+          target = "vercel";
+        else target = "other";
+      }
+      let httpsReachable = false;
+      let httpStatus = null;
+      if (dnsConnected && (publicOnly || ips.length === 0 && cn.length > 0)) {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 4e3);
+        try {
+          let probe = await fetch(`https://${domain}/api/health`, {
+            method: "GET",
+            redirect: "manual",
+            signal: ac.signal
+          });
+          if (probe.status === 404 || probe.status === 405) {
+            probe = await fetch(`https://${domain}/`, {
+              method: "HEAD",
+              redirect: "manual",
+              signal: ac.signal
+            });
+          }
+          httpStatus = probe.status;
+          httpsReachable = probe.status >= 200 && probe.status < 400;
+        } catch {
+          httpsReachable = false;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      return {
+        domain,
+        isPrimary: domain === cfg.primaryDomain,
+        resolvedIps: ips,
+        cnames: cn,
+        dnsConnected,
+        target,
+        httpsReachable,
+        httpStatus,
+        checkedAt
+      };
+    })
+  );
+  res.json({
+    primaryDomain: cfg.primaryDomain,
+    checkedAt,
+    recommendedTargets: targets,
+    results
+  });
+});
+function xmlEscape(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+app.get("/robots.txt", (_req, res) => {
+  const cfg = readSiteConfigRecord();
+  const base = `https://${cfg.primaryDomain}`;
+  res.type("text/plain").send(
+    `User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Sitemap: ${base}/sitemap.xml
+`
+  );
+});
+app.get("/sitemap.xml", (_req, res) => {
+  const cfg = readSiteConfigRecord();
+  const base = `https://${cfg.primaryDomain}`;
+  const published = db.prepare("SELECT id, updated_at FROM posts WHERE status = 'published' ORDER BY created_at DESC").all();
+  const urls = [
+    `<url><loc>${xmlEscape(base)}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
+    ...published.map(
+      (p) => `<url><loc>${xmlEscape(`${base}/?post=${p.id}`)}</loc><lastmod>${(p.updated_at || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 10)}</lastmod><priority>0.8</priority></url>`
+    )
+  ].join("\n");
+  res.type("application/xml").send(
+    `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>`
+  );
 });
 async function startServer() {
   const port = Number(process.env.PORT || 3e3);

@@ -7,7 +7,7 @@ import {
   Eye,
   Star,
   Upload,
-  Sparkles,
+  PenLine,
   Image as ImageIcon,
   Film,
   CheckCircle2,
@@ -748,7 +748,7 @@ export const PostCrudManager: React.FC<Props> = ({
                       onClick={() => setShowAiWriterBox((v) => !v)}
                       className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <PenLine className="w-3.5 h-3.5 text-amber-600" />
                       ให้ AI ช่วยร่างเนื้อหา
                     </button>
                     <button
@@ -825,7 +825,7 @@ export const PostCrudManager: React.FC<Props> = ({
                           </>
                         ) : (
                           <>
-                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            <PenLine className="w-3.5 h-3.5 text-amber-400" />
                             สร้างร่างเนื้อหา
                           </>
                         )}
@@ -1157,7 +1157,7 @@ export const PostCrudManager: React.FC<Props> = ({
                   onClick={handleGenerateAiCover}
                   className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <PenLine className="w-3.5 h-3.5 text-amber-400" />
                   {generatingAiImage ? 'กำลังสร้างภาพปก...' : 'สั่ง AI วาดภาพหน้าปก'}
                 </button>
               </div>

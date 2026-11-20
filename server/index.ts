@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import multer from 'multer';
-import { db, initDatabase, IS_SERVERLESS } from './db.ts';
+import { db, initDatabase, IS_SERVERLESS, DEFAULT_SITE_CONFIG } from './db.ts';
 import {
   executeMultiAgentWorkflow,
   assistPostContent,
@@ -273,6 +273,7 @@ app.use('/api', (req, res, next) => {
   if (m === 'GET' && (p === '/posts' || /^\/posts\/\d+$/.test(p))) return next();
   if (m === 'POST' && /^\/posts\/\d+\/comments$/.test(p)) return next();
   if (m === 'GET' && p === '/pillars') return next();
+  if (m === 'GET' && (p === '/site-config' || p === '/projects')) return next();
   if (m === 'POST' && (p === '/subscribers' || p === '/contacts' || p === '/surveys')) {
     return next();
   }
@@ -3129,6 +3130,421 @@ app.post('/api/admin/import-json', (req, res) => {
     }
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+// ============================================================================
+// SITE CMS CONFIG, SPECIAL PROJECTS CRUD & LIVE DOMAIN/DNS VERIFICATION
+// ============================================================================
+const SITE_TEXT_LIMITS: Record<string, number> = {
+  brandTitle: 80, brandSub: 80, slogan: 200, heroSubtitle: 300, heroQuote: 400,
+  heroSignature: 80, authorName: 120, authorRole: 200, authorBio: 600,
+  authorQuote: 400, aboutVision: 400, aboutStory: 3000, featuredVideoTitle: 300,
+  featuredVideoDesc: 1000, contactLocation: 200, seoTitle: 200, seoDescription: 400,
+};
+// URL fields: absolute http(s) only (blocks javascript:/data: schemes).
+const SITE_URL_FIELDS = [
+  'featuredVideoUrl', 'socialX', 'socialYoutube', 'socialFacebook',
+  'socialInstagram', 'socialLineOa',
+];
+// Image fields: absolute http(s) or a same-site path.
+const SITE_IMAGE_FIELDS = ['heroImageUrl', 'authorImageUrl'];
+const HOSTNAME_RE =
+  /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+function cleanHttpUrl(v: unknown, allowRelative = false): string | null {
+  const raw = String(v ?? '').trim();
+  if (!raw) return '';
+  if (raw.length > 2000) return null;
+  if (allowRelative && /^\/(?!\/)[^\s]*$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanHostname(v: unknown): string {
+  return String(v ?? '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/[\/?#].*$/, '')
+    .replace(/\.$/, '')
+    .toLowerCase();
+}
+
+function readSiteConfigRecord() {
+  const row = db
+    .prepare('SELECT config_json, updated_at FROM site_config WHERE id = 1')
+    .get() as { config_json: string; updated_at: string } | undefined;
+  let parsed: Record<string, any> = {};
+  try {
+    parsed = row?.config_json ? JSON.parse(row.config_json) : {};
+  } catch {
+    parsed = {};
+  }
+  const merged: Record<string, any> = { ...DEFAULT_SITE_CONFIG };
+  for (const k of Object.keys(DEFAULT_SITE_CONFIG)) {
+    if (parsed[k] !== undefined && parsed[k] !== null) merged[k] = parsed[k];
+  }
+  if (!Array.isArray(merged.domains)) merged.domains = DEFAULT_SITE_CONFIG.domains;
+  return { ...merged, updatedAt: row?.updated_at || new Date().toISOString() } as typeof DEFAULT_SITE_CONFIG & {
+    updatedAt: string;
+  };
+}
+
+/** Validates an admin payload; returns the cleaned partial config or a Thai error message. */
+function sanitizeSiteConfigInput(
+  incoming: Record<string, any>
+): { ok: true; value: Record<string, any> } | { ok: false; error: string } {
+  const out: Record<string, any> = {};
+  for (const [k, max] of Object.entries(SITE_TEXT_LIMITS)) {
+    if (incoming[k] === undefined) continue;
+    const v = String(incoming[k] ?? '').trim();
+    if (v.length > max) return { ok: false, error: `ฟิลด์ ${k} ยาวเกิน ${max} ตัวอักษร` };
+    out[k] = v;
+  }
+  for (const k of SITE_URL_FIELDS) {
+    if (incoming[k] === undefined) continue;
+    const v = cleanHttpUrl(incoming[k]);
+    if (v === null) return { ok: false, error: `ลิงก์ ${k} ต้องขึ้นต้นด้วย http:// หรือ https://` };
+    out[k] = v;
+  }
+  for (const k of SITE_IMAGE_FIELDS) {
+    if (incoming[k] === undefined) continue;
+    const v = cleanHttpUrl(incoming[k], true);
+    if (v === null) return { ok: false, error: `ที่อยู่รูป ${k} ไม่ถูกต้อง` };
+    out[k] = v;
+  }
+  if (incoming.contactEmail !== undefined) {
+    const e = String(incoming.contactEmail ?? '').trim();
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      return { ok: false, error: 'รูปแบบอีเมลติดต่อไม่ถูกต้อง' };
+    }
+    out.contactEmail = e;
+  }
+  if (incoming.primaryDomain !== undefined) {
+    const d = cleanHostname(incoming.primaryDomain);
+    if (!HOSTNAME_RE.test(d)) return { ok: false, error: 'โดเมนหลักไม่ถูกต้อง' };
+    out.primaryDomain = d;
+  }
+  if (incoming.domains !== undefined) {
+    if (!Array.isArray(incoming.domains)) return { ok: false, error: 'domains ต้องเป็นรายการ' };
+    const list = Array.from(new Set(incoming.domains.map(cleanHostname).filter(Boolean)));
+    if (list.length > 20) return { ok: false, error: 'เพิ่มโดเมนได้ไม่เกิน 20 รายการ' };
+    const bad = list.find((d) => !HOSTNAME_RE.test(d));
+    if (bad) return { ok: false, error: `โดเมน "${bad}" ไม่ถูกต้อง` };
+    out.domains = list;
+  }
+  return { ok: true, value: out };
+}
+
+function cleanStringList(v: unknown, maxItems: number, maxLen: number): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x) => String(x ?? '').trim().slice(0, maxLen))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+const PROJECT_STATUSES = ['active', 'draft', 'archived'];
+
+function mapSpecialProjectRow(r: any) {
+  let highlights: string[] = [];
+  let tags: string[] = [];
+  try {
+    highlights = JSON.parse(r.highlights_json || '[]');
+  } catch {
+    highlights = [];
+  }
+  try {
+    tags = JSON.parse(r.tags_json || '[]');
+  } catch {
+    tags = [];
+  }
+  return {
+    id: r.id,
+    badgeLabel: r.badge_label || 'โครงการพิเศษ',
+    title: r.title,
+    subtitle: r.subtitle || '',
+    description: r.description || '',
+    highlights: Array.isArray(highlights) ? highlights : [],
+    tags: Array.isArray(tags) ? tags : [],
+    ctaLabel: r.cta_label || 'ดูรายละเอียด',
+    ctaUrl: r.cta_url || '',
+    status: r.status || 'active',
+    sortOrder: Number(r.sort_order || 1),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** Merges a request body over a base project and validates it. */
+function buildProjectInput(
+  b: Record<string, any>,
+  base: ReturnType<typeof mapSpecialProjectRow> | null
+): { ok: true; value: any } | { ok: false; error: string } {
+  const pick = (k: string, d: any) => (b[k] !== undefined ? b[k] : base ? (base as any)[k] : d);
+  const title = String(pick('title', '')).trim();
+  if (!title) return { ok: false, error: 'กรุณาระบุชื่อโครงการ' };
+  if (title.length > 200) return { ok: false, error: 'ชื่อโครงการยาวเกิน 200 ตัวอักษร' };
+  const status = String(pick('status', 'active')).trim() || 'active';
+  if (!PROJECT_STATUSES.includes(status)) return { ok: false, error: 'สถานะโครงการไม่ถูกต้อง' };
+  const ctaUrl = cleanHttpUrl(pick('ctaUrl', ''));
+  if (ctaUrl === null) return { ok: false, error: 'ลิงก์ปุ่มต้องขึ้นต้นด้วย http:// หรือ https://' };
+  const description = String(pick('description', '')).trim();
+  if (description.length > 5000) return { ok: false, error: 'รายละเอียดยาวเกิน 5000 ตัวอักษร' };
+  return {
+    ok: true,
+    value: {
+      badgeLabel: (String(pick('badgeLabel', '')).trim() || 'โครงการพิเศษ').slice(0, 60),
+      title,
+      subtitle: String(pick('subtitle', '')).trim().slice(0, 300),
+      description,
+      highlights: cleanStringList(pick('highlights', []), 12, 300),
+      tags: cleanStringList(pick('tags', []), 12, 60),
+      ctaLabel: (String(pick('ctaLabel', '')).trim() || 'ดูรายละเอียด').slice(0, 60),
+      ctaUrl,
+      status,
+      sortOrder: Math.max(1, Math.min(9999, Math.floor(Number(pick('sortOrder', 1))) || 1)),
+    },
+  };
+}
+
+app.get('/api/site-config', (_req, res) => {
+  res.json(readSiteConfigRecord());
+});
+
+app.put('/api/site-config', (req, res) => {
+  const checked = sanitizeSiteConfigInput(req.body || {});
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+  const { updatedAt: _ignored, ...current } = readSiteConfigRecord();
+  const next = { ...current, ...checked.value };
+  // Keep the primary domain inside the managed list so status checks always cover it.
+  if (!next.domains.includes(next.primaryDomain)) {
+    next.domains = [next.primaryDomain, ...next.domains];
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT OR REPLACE INTO site_config (id, config_json, updated_at) VALUES (1, ?, ?)'
+  ).run(JSON.stringify(next), now);
+  res.json({ ...next, updatedAt: now });
+});
+
+app.get('/api/projects', (req, res) => {
+  const isAdmin = isRequestAdmin(req);
+  const rows = db
+    .prepare(
+      isAdmin
+        ? 'SELECT * FROM special_projects ORDER BY sort_order ASC, id DESC'
+        : "SELECT * FROM special_projects WHERE status = 'active' ORDER BY sort_order ASC, id DESC"
+    )
+    .all();
+  res.json(rows.map(mapSpecialProjectRow));
+});
+
+app.post('/api/projects', (req, res) => {
+  const checked = buildProjectInput(req.body || {}, null);
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+  const v = checked.value;
+  const now = new Date().toISOString();
+  const info = db
+    .prepare(
+      `INSERT INTO special_projects (
+        badge_label, title, subtitle, description, highlights_json, tags_json,
+        cta_label, cta_url, status, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      v.badgeLabel, v.title, v.subtitle, v.description,
+      JSON.stringify(v.highlights), JSON.stringify(v.tags),
+      v.ctaLabel, v.ctaUrl, v.status, v.sortOrder, now, now
+    );
+  const created = db
+    .prepare('SELECT * FROM special_projects WHERE id = ?')
+    .get(Number(info.lastInsertRowid));
+  res.status(201).json(mapSpecialProjectRow(created));
+});
+
+app.put('/api/projects/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM special_projects WHERE id = ?').get(id) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'ไม่พบโครงการที่ต้องการแก้ไข' });
+    return;
+  }
+  const checked = buildProjectInput(req.body || {}, mapSpecialProjectRow(existing));
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.error });
+    return;
+  }
+  const v = checked.value;
+  db.prepare(
+    `UPDATE special_projects SET
+      badge_label = ?, title = ?, subtitle = ?, description = ?,
+      highlights_json = ?, tags_json = ?, cta_label = ?, cta_url = ?,
+      status = ?, sort_order = ?, updated_at = ?
+     WHERE id = ?`
+  ).run(
+    v.badgeLabel, v.title, v.subtitle, v.description,
+    JSON.stringify(v.highlights), JSON.stringify(v.tags),
+    v.ctaLabel, v.ctaUrl, v.status, v.sortOrder, new Date().toISOString(), id
+  );
+  res.json(mapSpecialProjectRow(db.prepare('SELECT * FROM special_projects WHERE id = ?').get(id)));
+});
+
+app.delete('/api/projects/:id', (req, res) => {
+  const info = db.prepare('DELETE FROM special_projects WHERE id = ?').run(Number(req.params.id));
+  if (!info.changes) {
+    res.status(404).json({ error: 'ไม่พบโครงการที่ต้องการลบ' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+/** True for loopback / private / link-local / reserved IPv4 ranges (SSRF guard). */
+function isNonPublicIPv4(ip: string): boolean {
+  const o = ip.split('.').map(Number);
+  if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = o;
+  return (
+    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0)
+  );
+}
+
+function dnsTargets() {
+  return {
+    vpsIp: process.env.DNS_TARGET_VPS_IP || '5.183.33.183',
+    vercelIp: process.env.DNS_TARGET_VERCEL_IP || '76.76.21.21',
+    vercelCname: process.env.DNS_TARGET_VERCEL_CNAME || 'cname.vercel-dns.com',
+  };
+}
+
+app.get('/api/domains/status', async (_req, res) => {
+  const dns = await import('node:dns/promises');
+  const cfg = readSiteConfigRecord();
+  const targets = dnsTargets();
+  const list = Array.from(
+    new Set([cfg.primaryDomain, ...(cfg.domains || [])].filter(Boolean))
+  ).slice(0, 20);
+  const checkedAt = new Date().toISOString();
+
+  const results = await Promise.all(
+    list.map(async (domain) => {
+      const [ips, cn] = await Promise.all([
+        dns.resolve4(domain).catch(() => [] as string[]),
+        dns.resolveCname(domain).catch(() => [] as string[]),
+      ]);
+      const dnsConnected = ips.length > 0 || cn.length > 0;
+      const publicOnly = ips.length > 0 && ips.every((ip) => !isNonPublicIPv4(ip));
+
+      let target: 'vps' | 'vercel' | 'other' | 'none' = 'none';
+      if (dnsConnected) {
+        if (ips.includes(targets.vpsIp)) target = 'vps';
+        else if (
+          ips.includes(targets.vercelIp) ||
+          cn.some((c) => c.toLowerCase().includes('vercel'))
+        )
+          target = 'vercel';
+        else target = 'other';
+      }
+
+      let httpsReachable = false;
+      let httpStatus: number | null = null;
+      // Only probe hosts that resolve exclusively to public addresses.
+      if (dnsConnected && (publicOnly || (ips.length === 0 && cn.length > 0))) {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 4000);
+        try {
+          let probe = await fetch(`https://${domain}/api/health`, {
+            method: 'GET',
+            redirect: 'manual',
+            signal: ac.signal,
+          });
+          if (probe.status === 404 || probe.status === 405) {
+            probe = await fetch(`https://${domain}/`, {
+              method: 'HEAD',
+              redirect: 'manual',
+              signal: ac.signal,
+            });
+          }
+          httpStatus = probe.status;
+          httpsReachable = probe.status >= 200 && probe.status < 400;
+        } catch {
+          httpsReachable = false;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      return {
+        domain,
+        isPrimary: domain === cfg.primaryDomain,
+        resolvedIps: ips,
+        cnames: cn,
+        dnsConnected,
+        target,
+        httpsReachable,
+        httpStatus,
+        checkedAt,
+      };
+    })
+  );
+
+  res.json({
+    primaryDomain: cfg.primaryDomain,
+    checkedAt,
+    recommendedTargets: targets,
+    results,
+  });
+});
+
+function xmlEscape(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+app.get('/robots.txt', (_req, res) => {
+  const cfg = readSiteConfigRecord();
+  const base = `https://${cfg.primaryDomain}`;
+  res.type('text/plain').send(
+    `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: ${base}/sitemap.xml\n`
+  );
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  const cfg = readSiteConfigRecord();
+  const base = `https://${cfg.primaryDomain}`;
+  const published = db
+    .prepare("SELECT id, updated_at FROM posts WHERE status = 'published' ORDER BY created_at DESC")
+    .all() as { id: number; updated_at: string }[];
+  const urls = [
+    `<url><loc>${xmlEscape(base)}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
+    ...published.map(
+      (p) =>
+        `<url><loc>${xmlEscape(`${base}/?post=${p.id}`)}</loc><lastmod>${(p.updated_at || new Date().toISOString()).slice(0, 10)}</lastmod><priority>0.8</priority></url>`
+    ),
+  ].join('\n');
+  res
+    .type('application/xml')
+    .send(
+      `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
+    );
 });
 
 // --- Serve Frontend via Vite (Dev) or Static Dist (Prod) ---

@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Image as ImageIcon,
   Film,
-  Sparkles,
-  Wand2,
+  PenLine,
+  ListChecks,
   CheckCircle2,
   Trash2,
   RefreshCw,
@@ -588,7 +588,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                       </>
                     ) : (
                       <>
-                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <PenLine className="w-3.5 h-3.5 text-amber-400" />
                         ให้ AI ร่างบทความพร้อมแนบสื่อนี้
                       </>
                     )}
@@ -684,7 +684,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                  <ListChecks className="w-3.5 h-3.5 text-amber-600" />
                   วิเคราะห์แนวคิดและสร้าง Full Prompt
                 </>
               )}
@@ -776,7 +776,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <PenLine className="w-4 h-4 text-amber-400" />
                   ดำเนินการสร้างภาพประกอบ
                 </>
               )}
@@ -827,7 +827,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                  <ListChecks className="w-3.5 h-3.5 text-amber-600" />
                   วิเคราะห์แนวคิดและสร้าง Video Prompt
                 </>
               )}
@@ -1106,7 +1106,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                             onClick={() => handleAiWriteNewsWithAsset(item)}
                             className="inline-flex items-center justify-center gap-1 rounded bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                           >
-                            <Sparkles className="w-3 h-3 text-amber-400" />
+                            <PenLine className="w-3 h-3 text-amber-400" />
                             {writingNewsForAssetId === item.id
                               ? 'กำลังร่าง...'
                               : 'AI ร่างบทความ'}

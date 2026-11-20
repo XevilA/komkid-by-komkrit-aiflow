@@ -751,6 +751,40 @@ export const api = {
     }),
   deleteSurvey: (id: number) =>
     request<{ ok: boolean }>(`/api/surveys/${id}`, { method: 'DELETE' }),
+
+  // Site Config & Domains (DB-Seeded Real-Time CMS)
+  getSiteConfig: () => request<import('./types').SiteConfig>('/api/site-config'),
+  updateSiteConfig: (payload: Partial<import('./types').SiteConfig>) =>
+    request<import('./types').SiteConfig>('/api/site-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  checkDomainsStatus: () =>
+    request<{
+      primaryDomain: string;
+      checkedAt: string;
+      recommendedTargets: {
+        vpsIp: string;
+        vercelIp: string;
+        vercelCname: string;
+      };
+      results: import('./types').DomainStatusItem[];
+    }>('/api/domains/status'),
+
+  // Special Projects Real-Time CRUD
+  getSpecialProjects: () => request<import('./types').SpecialProject[]>('/api/projects'),
+  createSpecialProject: (payload: Partial<import('./types').SpecialProject>) =>
+    request<import('./types').SpecialProject>('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateSpecialProject: (id: number, payload: Partial<import('./types').SpecialProject>) =>
+    request<import('./types').SpecialProject>(`/api/projects/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteSpecialProject: (id: number) =>
+    request<{ ok: boolean }>(`/api/projects/${id}`, { method: 'DELETE' }),
 };
 
 export function formatThaiDate(iso: string): string {

@@ -16,7 +16,6 @@ import {
   Calendar,
   Eye,
   MessageSquare,
-  Sparkles,
   LayoutDashboard,
   Play,
   PlusCircle,
@@ -31,6 +30,8 @@ import {
   CategoryId,
   CATEGORIES,
   BusinessPillarItem,
+  SiteConfig,
+  SpecialProject,
 } from '../types';
 import { api, formatThaiDate, formatViews } from '../api';
 
@@ -45,7 +46,16 @@ export type PublicTab =
 interface Props {
   posts: Post[];
   pillars: BusinessPillarItem[];
+  siteConfig: SiteConfig | null;
+  specialProjects: SpecialProject[];
   onOpenPost: (id: number) => void;
+}
+
+function extractYouTubeId(url: string): string {
+  const m = (url || '').match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/
+  );
+  return m ? m[1] : '';
 }
 
 const CATEGORY_ICONS: Record<CategoryId, React.ReactNode> = {
@@ -61,8 +71,43 @@ const CATEGORY_ICONS: Record<CategoryId, React.ReactNode> = {
 export const PublicWebsite: React.FC<Props> = ({
   posts,
   pillars,
+  siteConfig,
+  specialProjects,
   onOpenPost,
 }) => {
+  const cfg: SiteConfig = {
+    brandTitle: siteConfig?.brandTitle ?? 'คมคิด',
+    brandSub: siteConfig?.brandSub ?? 'by KOMKRIT',
+    slogan: siteConfig?.slogan ?? '',
+    heroSubtitle: siteConfig?.heroSubtitle ?? '',
+    heroQuote: siteConfig?.heroQuote ?? '',
+    heroSignature: siteConfig?.heroSignature ?? '',
+    heroImageUrl: siteConfig?.heroImageUrl ?? '/images/hero-komkrit.jpg',
+    authorName: siteConfig?.authorName ?? '',
+    authorRole: siteConfig?.authorRole ?? '',
+    authorBio: siteConfig?.authorBio ?? '',
+    authorQuote: siteConfig?.authorQuote ?? '',
+    authorImageUrl: siteConfig?.authorImageUrl ?? '/images/author-komkrit.jpg',
+    aboutVision: siteConfig?.aboutVision ?? '',
+    aboutStory: siteConfig?.aboutStory ?? '',
+    featuredVideoUrl: siteConfig?.featuredVideoUrl ?? '',
+    featuredVideoTitle: siteConfig?.featuredVideoTitle ?? '',
+    featuredVideoDesc: siteConfig?.featuredVideoDesc ?? '',
+    contactEmail: siteConfig?.contactEmail ?? '',
+    contactLocation: siteConfig?.contactLocation ?? '',
+    socialX: siteConfig?.socialX ?? '',
+    socialYoutube: siteConfig?.socialYoutube ?? '',
+    socialFacebook: siteConfig?.socialFacebook ?? '',
+    socialInstagram: siteConfig?.socialInstagram ?? '',
+    socialLineOa: siteConfig?.socialLineOa ?? '',
+    primaryDomain: siteConfig?.primaryDomain ?? '',
+    domains: siteConfig?.domains ?? [],
+    seoTitle: siteConfig?.seoTitle ?? '',
+    seoDescription: siteConfig?.seoDescription ?? '',
+  };
+  const activeProjects = specialProjects.filter((p) => p.status === 'active');
+  const featuredProject = activeProjects[0] || null;
+  const featuredVideoId = extractYouTubeId(cfg.featuredVideoUrl);
   const [activeTab, setActiveTab] = useState<PublicTab>('home');
   const [selectedCategory, setSelectedCategory] = useState<CategoryId | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -199,10 +244,10 @@ export const PublicWebsite: React.FC<Props> = ({
             />
             <div className="leading-none">
               <div className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#0d2546]">
-                คมคิด
+                {cfg.brandTitle}
               </div>
               <div className="text-[11px] sm:text-xs font-bold tracking-wide text-[#e88d14]">
-                by KOMKRIT
+                {cfg.brandSub}
               </div>
             </div>
           </button>
@@ -250,42 +295,25 @@ export const PublicWebsite: React.FC<Props> = ({
 
             {/* Social Icons */}
             <div className="hidden xl:flex items-center gap-1.5">
-              <a
-                href="https://x.com"
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white text-[11px] font-bold hover:opacity-85"
-                title="X (Twitter)"
-              >
-                𝕏
-              </a>
-              <a
-                href="https://www.youtube.com/watch?v=VxQwQ9vQkkc"
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-[#ef4444] text-white text-[10px] font-bold hover:opacity-85"
-                title="YouTube"
-              >
-                ▶
-              </a>
-              <a
-                href="https://facebook.com"
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1877f2] text-white text-xs font-bold hover:opacity-85"
-                title="Facebook"
-              >
-                f
-              </a>
-              <a
-                href="https://instagram.com"
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-white text-[10px] font-bold hover:opacity-85"
-                title="Instagram"
-              >
-                IG
-              </a>
+              {[
+                { href: cfg.socialX, label: 'X (Twitter)', text: '𝕏', cls: 'bg-slate-900 text-[11px]' },
+                { href: cfg.socialYoutube, label: 'YouTube', text: '▶', cls: 'bg-[#ef4444] text-[10px]' },
+                { href: cfg.socialFacebook, label: 'Facebook', text: 'f', cls: 'bg-[#1877f2] text-xs' },
+                { href: cfg.socialInstagram, label: 'Instagram', text: 'IG', cls: 'bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-[10px]' },
+              ]
+                .filter((s) => s.href)
+                .map((s) => (
+                  <a
+                    key={s.label}
+                    href={s.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-white font-bold hover:opacity-85 ${s.cls}`}
+                    title={s.label}
+                  >
+                    {s.text}
+                  </a>
+                ))}
             </div>
 
             <button
@@ -379,16 +407,16 @@ export const PublicWebsite: React.FC<Props> = ({
               {/* Left Brand & Slogan */}
               <div className="col-span-7 sm:col-span-6 lg:col-span-5 z-20 pl-4 sm:pl-8 lg:pl-10 py-6 sm:py-8">
                 <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-[#0c2649] drop-shadow-2xs leading-none">
-                  คมคิด
+                  {cfg.brandTitle}
                 </h1>
                 <div className="mt-1 text-lg sm:text-2xl lg:text-[26px] font-bold text-[#e68a15]">
-                  by KOMKRIT
+                  {cfg.brandSub}
                 </div>
                 <div className="mt-2 sm:mt-3 font-brush text-2xl sm:text-3xl lg:text-[38px] text-[#0c2649] -rotate-2 origin-left leading-tight">
-                  คิดต่างอย่างสร้างสรรค์
+                  {cfg.slogan}
                 </div>
                 <p className="hidden md:block mt-3 text-xs lg:text-sm font-medium text-[#1e3a5f]">
-                  บทความ &nbsp;•&nbsp; ความรู้ &nbsp;•&nbsp; ไอเดีย &nbsp;•&nbsp; เพื่อการพัฒนาคนและสังคม
+                  {cfg.heroSubtitle}
                 </p>
                 <div className="mt-3.5 sm:mt-4 flex flex-wrap items-center gap-2.5">
                   <button
@@ -413,7 +441,7 @@ export const PublicWebsite: React.FC<Props> = ({
               {/* Center-Right Komkrit Portrait & Phuket Bay */}
               <div className="col-span-5 sm:col-span-6 lg:col-span-4 relative h-full min-h-[215px] sm:min-h-[275px] lg:min-h-[305px] flex items-end justify-center overflow-hidden">
                 <img
-                  src="/images/hero-komkrit.jpg"
+                  src={cfg.heroImageUrl}
                   alt="Komkrit"
                   className="h-full w-full object-cover object-[62%_18%] sm:object-top"
                   style={{
@@ -429,14 +457,10 @@ export const PublicWebsite: React.FC<Props> = ({
               <div className="hidden lg:flex lg:col-span-3 z-20 pr-8 flex-col items-end text-right">
                 <div className="rounded-2xl bg-white/55 backdrop-blur-xs px-5 py-4 border border-white/70 shadow-xs">
                   <p className="text-base xl:text-lg font-semibold text-[#0d2546] leading-relaxed">
-                    “ การศึกษา คือรากฐาน
-                    <br />
-                    ของการพัฒนาคน
-                    <br />
-                    และการสร้างอนาคตที่ดีกว่า ”
+                    “ {cfg.heroQuote} ”
                   </p>
                   <div className="mt-1 font-signature text-2xl text-[#1e3a5f] -rotate-3">
-                    Komkrit
+                    {cfg.heroSignature}
                   </div>
                 </div>
               </div>
@@ -680,58 +704,70 @@ export const PublicWebsite: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* Special Project Banner (โครงการพิเศษ: โรงเรียนภาษาและอาชีพ ไทย-เมียนมา) */}
+                {/* Special Project Banner (DB-driven, managed in Admin) */}
+                {featuredProject && (
                 <div
-                  onClick={() => setSpecialProjectOpen(true)}
-                  className="group relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#e6f1fb] via-[#f4f8fc] to-[#e0eefb] border border-sky-200/80 p-4 sm:p-5 shadow-2xs cursor-pointer hover:shadow-sm transition"
+                  onClick={() => {
+                    if (featuredProject.ctaUrl) {
+                      if (/^https?:\/\//i.test(featuredProject.ctaUrl)) {
+                        window.open(featuredProject.ctaUrl, '_blank', 'noopener,noreferrer');
+                      }
+                    } else {
+                      setSpecialProjectOpen(true);
+                    }
+                  }}
+                  className="group relative overflow-hidden rounded-2xl bg-white border border-slate-200/80 p-4 sm:p-5 shadow-2xs cursor-pointer hover:shadow-sm transition"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <div className="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#d97706]">
-                        ★ โครงการพิเศษ
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-[#d97706]">
+                        {featuredProject.badgeLabel}
                       </div>
                       <h3 className="text-base sm:text-lg font-extrabold text-[#0d2546]">
-                        โรงเรียนภาษาและอาชีพ ไทย-เมียนมา
+                        {featuredProject.title}
                       </h3>
-                      <p className="text-[11px] text-slate-500">
-                        Thai-Myanmar Language and Vocational School
-                      </p>
+                      {featuredProject.subtitle && (
+                        <p className="text-[11px] text-slate-500">
+                          {featuredProject.subtitle}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0d2546] border border-slate-200/70">
-                        <BookOpen className="w-3.5 h-3.5 text-[#0284c7]" />
-                        หลักสูตรภาษาและอาชีพ
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0d2546] border border-slate-200/70">
-                        <Users className="w-3.5 h-3.5 text-[#0d9488]" />
-                        ความร่วมมือไทย-เมียนมา
-                      </span>
+                      {featuredProject.tags.slice(0, 2).map((t, i) => (
+                        <span
+                          key={i}
+                          className="inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-[#0d2546] border border-slate-200/70"
+                        >
+                          {t}
+                        </span>
+                      ))}
                       <span className="inline-flex items-center gap-1 rounded-full bg-[#0d2546] px-3 py-1.5 text-[11px] font-bold text-white group-hover:bg-[#193d6e] transition">
-                        ดูรายละเอียด <ArrowRight className="w-3 h-3" />
+                        {featuredProject.ctaLabel} <ArrowRight className="w-3 h-3" />
                       </span>
                     </div>
                   </div>
                 </div>
+                )}
               </div>
 
               {/* RIGHT COLUMN: Komkrit Profile & Quote Card */}
               <div className="lg:col-span-3 rounded-2xl bg-white border border-slate-200/80 p-5 shadow-xs space-y-4">
                 <div className="flex items-start gap-3.5">
                   <img
-                    src="/images/author-komkrit.jpg"
-                    alt="คมกฤช (Komkrit)"
+                    src={cfg.authorImageUrl}
+                    alt={cfg.authorName}
                     className="h-24 w-24 rounded-xl object-cover shrink-0 border border-slate-100 shadow-2xs"
                   />
                   <div>
                     <div className="text-xl font-extrabold text-[#0d2546] leading-none">
-                      คมคิด
+                      {cfg.brandTitle}
                     </div>
                     <div className="text-xs font-bold text-[#e88d14] mt-0.5">
-                      by KOMKRIT
+                      {cfg.brandSub}
                     </div>
                     <p className="mt-2 text-xs text-slate-600 leading-relaxed">
-                      คิดต่างอย่างสร้างสรรค์ เพื่อการพัฒนาคน สังคม และอนาคตที่ดีกว่า
+                      {cfg.authorBio}
                     </p>
                     <button
                       onClick={() => setActiveTab('about')}
@@ -746,7 +782,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 <div className="rounded-xl bg-[#f7f9fc] border border-slate-200/60 p-4 relative">
                   <span className="text-2xl font-serif text-slate-300 leading-none">“</span>
                   <p className="text-xs sm:text-[13px] font-semibold text-[#0d2546] leading-relaxed -mt-2 pl-3">
-                    ทุกความคิดที่แตกต่าง คือจุดเริ่มต้นของการเปลี่ยนแปลง และการสร้างสิ่งที่ดีกว่า
+                    {cfg.authorQuote}
                   </p>
                 </div>
 
@@ -757,38 +793,61 @@ export const PublicWebsite: React.FC<Props> = ({
                   </div>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-1.5">
-                      <a
-                        href="https://x.com"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white text-[11px] font-bold"
-                      >
-                        𝕏
-                      </a>
-                      <a
-                        href="https://www.youtube.com/watch?v=VxQwQ9vQkkc"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-600 text-white text-[10px] font-bold"
-                      >
-                        ▶
-                      </a>
-                      <a
-                        href="https://facebook.com"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1877f2] text-white text-xs font-bold"
-                      >
-                        f
-                      </a>
-                      <a
-                        href="https://instagram.com"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-white text-[10px] font-bold"
-                      >
-                        IG
-                      </a>
+                      {cfg.socialX && (
+                        <a
+                          href={cfg.socialX}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="X"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white text-[11px] font-bold"
+                        >
+                          𝕏
+                        </a>
+                      )}
+                      {cfg.socialYoutube && (
+                        <a
+                          href={cfg.socialYoutube}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="YouTube"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-600 text-white text-[10px] font-bold"
+                        >
+                          ▶
+                        </a>
+                      )}
+                      {cfg.socialFacebook && (
+                        <a
+                          href={cfg.socialFacebook}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="Facebook"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1877f2] text-white text-xs font-bold"
+                        >
+                          f
+                        </a>
+                      )}
+                      {cfg.socialInstagram && (
+                        <a
+                          href={cfg.socialInstagram}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="Instagram"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-white text-[10px] font-bold"
+                        >
+                          IG
+                        </a>
+                      )}
+                      {cfg.socialLineOa && (
+                        <a
+                          href={cfg.socialLineOa}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="LINE"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#06c755] text-white text-[9px] font-bold"
+                        >
+                          LINE
+                        </a>
+                      )}
                     </div>
 
                     <button
@@ -984,12 +1043,13 @@ export const PublicWebsite: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Featured YouTube Player */}
+            {/* Featured YouTube Player (DB-driven) */}
+            {featuredVideoId && (
             <div className="rounded-2xl bg-[#0b1f3a] text-white overflow-hidden shadow-lg grid grid-cols-1 lg:grid-cols-12">
               <div className="lg:col-span-7 aspect-video bg-black">
                 <iframe
-                  src="https://www.youtube.com/embed/VxQwQ9vQkkc"
-                  title="คมคิด by KOMKRIT Video"
+                  src={`https://www.youtube.com/embed/${featuredVideoId}`}
+                  title={cfg.featuredVideoTitle || 'วิดีโอแนะนำ'}
                   className="h-full w-full"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
@@ -997,17 +1057,17 @@ export const PublicWebsite: React.FC<Props> = ({
               </div>
               <div className="lg:col-span-5 p-6 sm:p-8 flex flex-col justify-center">
                 <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-rose-600 px-3 py-1 text-xs font-bold">
-                  ▶ YouTube Official Highlight
+                  YouTube
                 </span>
                 <h3 className="mt-3 text-xl sm:text-2xl font-extrabold leading-snug">
-                  คิดต่างอย่างสร้างสรรค์: มุมมองใหม่ด้านการศึกษา เทคโนโลยี และการพัฒนาสังคมไทย
+                  {cfg.featuredVideoTitle}
                 </h3>
                 <p className="mt-3 text-sm text-slate-300 leading-relaxed font-body">
-                  เจาะลึกแนวคิดการนำเทคโนโลยีและ AI มาช่วยยกระดับการเรียนรู้ของครู นักเรียน และผู้เรียนทุกช่วงวัย เพื่อสร้างโอกาสทางการศึกษาที่เข้าถึงได้จริง
+                  {cfg.featuredVideoDesc}
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2.5">
                   <a
-                    href="https://www.youtube.com/watch?v=VxQwQ9vQkkc"
+                    href={cfg.featuredVideoUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="rounded-full bg-[#f59e0b] px-5 py-2 text-xs font-extrabold text-[#0b1f3a] hover:brightness-105"
@@ -1017,6 +1077,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 </div>
               </div>
             </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {videoPosts.map((post) => (
@@ -1111,10 +1172,10 @@ export const PublicWebsite: React.FC<Props> = ({
                   className="h-44 w-44 object-contain drop-shadow-md"
                 />
                 <h2 className="mt-3 text-2xl font-extrabold text-[#0d2546]">
-                  คมกฤช (Komkrit)
+                  {cfg.authorName}
                 </h2>
                 <p className="text-sm font-bold text-[#e88d14]">
-                  ผู้ก่อตั้ง คมคิด by KOMKRIT
+                  {cfg.authorRole}
                 </p>
               </div>
               <div className="lg:col-span-8 space-y-4">
@@ -1122,10 +1183,10 @@ export const PublicWebsite: React.FC<Props> = ({
                   วิสัยทัศน์ & พันธกิจ
                 </span>
                 <h3 className="text-2xl sm:text-3xl font-extrabold text-[#0d2546]">
-                  “การศึกษาที่ดี สร้างคนที่ดี สร้างสังคมที่ดีได้”
+                  “{cfg.aboutVision}”
                 </h3>
                 <p className="text-slate-600 font-body text-base leading-relaxed">
-                  <strong>คมคิด by KOMKRIT</strong> คือพื้นที่แห่งความคิด ความรู้ และนวัตกรรมที่มุ่งเชื่อมโยงโลกของการศึกษา เทคโนโลยี AI การพัฒนาอาชีพ และความร่วมมือระดับนานาชาติเข้าด้วยกัน เพื่อสร้างโอกาสที่จับต้องได้จริงให้กับผู้เรียน ครู โรงเรียน และสังคมไทย
+                  {cfg.aboutStory}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                   <div className="rounded-xl bg-[#f8fafd] p-3.5 border border-slate-100">
@@ -1421,27 +1482,27 @@ export const PublicWebsite: React.FC<Props> = ({
         </div>
       )}
 
-      {/* SPECIAL PROJECT MODAL (โรงเรียนภาษาและอาชีพ ไทย-เมียนมา) */}
-      {specialProjectOpen && (
+      {/* SPECIAL PROJECT MODAL (DB-driven) */}
+      {specialProjectOpen && featuredProject && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4"
           onClick={() => setSpecialProjectOpen(false)}
         >
           <div
-            className="w-full max-w-xl rounded-2xl bg-white p-6 sm:p-7 shadow-2xl"
+            className="w-full max-w-xl rounded-2xl bg-white p-6 sm:p-7 shadow-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-2">
               <div>
                 <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
-                  ★ โครงการพิเศษ (Special Initiative)
+                  {featuredProject.badgeLabel}
                 </span>
                 <h3 className="mt-2 text-xl font-extrabold text-[#0d2546]">
-                  โรงเรียนภาษาและอาชีพ ไทย-เมียนมา
+                  {featuredProject.title}
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Thai-Myanmar Language and Vocational School
-                </p>
+                {featuredProject.subtitle && (
+                  <p className="text-xs text-slate-500">{featuredProject.subtitle}</p>
+                )}
               </div>
               <button
                 onClick={() => setSpecialProjectOpen(false)}
@@ -1452,23 +1513,19 @@ export const PublicWebsite: React.FC<Props> = ({
             </div>
 
             <div className="mt-4 space-y-3 text-sm text-slate-700 font-body leading-relaxed">
-              <p>
-                โครงการต้นแบบด้านการจัดการศึกษาเชิงทักษะอาชีพและภาษาข้ามพรมแดน มุ่งยกระดับสมรรถนะการสื่อสาร (ไทย - เมียนมา - อังกฤษ) ควบคู่กับทักษะวิชาชีพสมัยใหม่ที่ตอบโจทย์ภาคบริการ อุตสาหกรรม และเศรษฐกิจดิจิทัล
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
-                <div className="rounded-xl bg-sky-50 p-3">
-                  <div className="font-bold text-xs text-[#0d2546]">1. หลักสูตรภาษา & อาชีพ</div>
-                  <div className="text-[11px] text-slate-600 mt-0.5">เน้นปฏิบัติจริง พร้อมทำงานได้ทันที</div>
-                </div>
-                <div className="rounded-xl bg-teal-50 p-3">
-                  <div className="font-bold text-xs text-[#0d2546]">2. ความร่วมมือไทย-เมียนมา</div>
-                  <div className="text-[11px] text-slate-600 mt-0.5">เชื่อมเครือข่ายสถานประกอบการมาตรฐาน</div>
-                </div>
-                <div className="rounded-xl bg-amber-50 p-3">
-                  <div className="font-bold text-xs text-[#0d2546]">3. โอกาสสู่ระดับสากล</div>
-                  <div className="text-[11px] text-slate-600 mt-0.5">ต่อยอดการเรียนรู้ตลอดชีวิต</div>
-                </div>
-              </div>
+              {featuredProject.description && <p>{featuredProject.description}</p>}
+              {featuredProject.highlights.length > 0 && (
+                <ul className="space-y-2 pt-1">
+                  {featuredProject.highlights.map((h, i) => (
+                    <li
+                      key={i}
+                      className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 text-[13px] text-slate-700"
+                    >
+                      {h}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
@@ -1479,7 +1536,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 }}
                 className="rounded-full bg-[#0d2546] px-5 py-2 text-xs font-bold text-white cursor-pointer"
               >
-                สอบถามความร่วมมือโครงการ →
+                สอบถามความร่วมมือโครงการ
               </button>
             </div>
           </div>

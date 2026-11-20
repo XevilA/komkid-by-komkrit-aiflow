@@ -259,6 +259,28 @@ export function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS site_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      config_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS special_projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      badge_label TEXT NOT NULL DEFAULT 'โครงการพิเศษ',
+      title TEXT NOT NULL,
+      subtitle TEXT DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      highlights_json TEXT NOT NULL DEFAULT '[]',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      cta_label TEXT NOT NULL DEFAULT 'ดูรายละเอียด',
+      cta_url TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      sort_order INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, is_featured DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category, content_type);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, created_at DESC);
@@ -315,7 +337,85 @@ export function initDatabase() {
 
   seedIfEmpty();
   seedOmnichannelIfEmpty();
+  seedSiteContentIfEmpty();
   upgradePlaintextSecretsToAes256Gcm();
+}
+
+export const DEFAULT_SITE_CONFIG = {
+  brandTitle: 'คมคิด',
+  brandSub: 'by KOMKRIT',
+  slogan: 'คิดต่างอย่างสร้างสรรค์',
+  heroSubtitle: 'บทความ • ความรู้ • ไอเดีย • เพื่อการพัฒนาคนและสังคม',
+  heroQuote: 'การศึกษา คือรากฐานของการพัฒนาคน และการสร้างอนาคตที่ดีกว่า',
+  heroSignature: 'Komkrit',
+  heroImageUrl: '/images/hero-komkrit.jpg',
+  authorName: 'คมกฤช (Komkrit)',
+  authorRole: 'ผู้ก่อตั้ง คมคิด by KOMKRIT',
+  authorBio: 'คิดต่างอย่างสร้างสรรค์ เพื่อการพัฒนาคน สังคม และอนาคตที่ดีกว่า',
+  authorQuote: 'ทุกความคิดที่แตกต่าง คือจุดเริ่มต้นของการเปลี่ยนแปลง และการสร้างสิ่งที่ดีกว่า',
+  authorImageUrl: '/images/author-komkrit.jpg',
+  aboutVision: 'การศึกษาที่ดี สร้างคนที่ดี สร้างสังคมที่ดีได้',
+  aboutStory:
+    'คมคิด by KOMKRIT คือพื้นที่แห่งความคิด ความรู้ และนวัตกรรมที่มุ่งเชื่อมโยงโลกของการศึกษา เทคโนโลยี AI การพัฒนาอาชีพ และความร่วมมือระดับนานาชาติเข้าด้วยกัน เพื่อสร้างโอกาสที่จับต้องได้จริงให้กับผู้เรียน ครู โรงเรียน และสังคมไทย',
+  featuredVideoUrl: 'https://www.youtube.com/watch?v=VxQwQ9vQkkc',
+  featuredVideoTitle: 'คิดต่างอย่างสร้างสรรค์: มุมมองใหม่ด้านการศึกษา เทคโนโลยี และการพัฒนาสังคมไทย',
+  featuredVideoDesc:
+    'เจาะลึกแนวคิดการนำเทคโนโลยีและ AI มาช่วยยกระดับการเรียนรู้ของครู นักเรียน และผู้เรียนทุกช่วงวัย เพื่อสร้างโอกาสทางการศึกษาที่เข้าถึงได้จริง',
+  contactEmail: 'contact@komkid.in.th',
+  contactLocation: 'จังหวัดภูเก็ต ประเทศไทย',
+  socialX: '',
+  socialYoutube: 'https://www.youtube.com/watch?v=VxQwQ9vQkkc',
+  socialFacebook: '',
+  socialInstagram: '',
+  socialLineOa: '',
+  primaryDomain: 'komkid.in.th',
+  domains: [
+    'komkid.in.th',
+    'www.komkid.in.th',
+    'api.komkid.in.th',
+    'aiflow-wheat.vercel.app',
+  ],
+  seoTitle: 'คมคิด by KOMKRIT — คิดต่างอย่างสร้างสรรค์ เพื่อการศึกษาและสังคม',
+  seoDescription:
+    'แพลตฟอร์มบทความ ความรู้ นวัตกรรมการศึกษา AI และหลักสูตรพัฒนาทักษะแห่งอนาคต โดย คมกฤช (Komkrit)',
+};
+
+function seedSiteContentIfEmpty() {
+  const now = new Date().toISOString();
+  const cfgRow = db.prepare('SELECT id FROM site_config WHERE id = 1').get();
+  if (!cfgRow) {
+    db.prepare('INSERT INTO site_config (id, config_json, updated_at) VALUES (1, ?, ?)').run(
+      JSON.stringify(DEFAULT_SITE_CONFIG),
+      now
+    );
+  }
+
+  const projCount = (
+    db.prepare('SELECT COUNT(*) AS c FROM special_projects').get() as { c: number }
+  ).c;
+  if (projCount === 0) {
+    db.prepare(
+      `INSERT INTO special_projects (
+        badge_label, title, subtitle, description, highlights_json, tags_json,
+        cta_label, cta_url, status, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`
+    ).run(
+      'โครงการพิเศษ',
+      'โรงเรียนภาษาและอาชีพ ไทย-เมียนมา',
+      'Thai-Myanmar Language and Vocational School',
+      'โครงการความร่วมมือด้านการพัฒนาทักษะภาษาและวิชาชีพ เพื่อยกระดับมาตรฐานกำลังคนอาเซียน เชื่อมโยงโอกาสการเรียนรู้และการทำงานอย่างยั่งยืนระหว่างไทยและเมียนมา',
+      JSON.stringify([
+        'หลักสูตรภาษาไทย-อังกฤษ-เมียนมา เพื่อการทำงานและบริการมาตรฐานสากล',
+        'หลักสูตรวิชาชีพเฉพาะทางที่เชื่อมโยงกับสถานประกอบการจริง',
+        'เครือข่ายความร่วมมือโรงเรียนและภาคเอกชนไทย-เมียนมา',
+      ]),
+      JSON.stringify(['หลักสูตรภาษาและอาชีพ', 'ความร่วมมือไทย-เมียนมา']),
+      'ดูรายละเอียด',
+      '',
+      now,
+      now
+    );
+  }
 }
 
 function upgradePlaintextSecretsToAes256Gcm() {

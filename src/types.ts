@@ -577,3 +577,63 @@ export interface AudienceSurvey {
   feedbackDetail: string;
   createdAt: string;
 }
+
+export interface SiteConfig {
+  brandTitle: string;
+  brandSub: string;
+  slogan: string;
+  heroSubtitle: string;
+  heroQuote: string;
+  heroSignature: string;
+  heroImageUrl: string;
+  authorName: string;
+  authorRole: string;
+  authorBio: string;
+  authorQuote: string;
+  authorImageUrl: string;
+  aboutVision: string;
+  aboutStory: string;
+  featuredVideoUrl: string;
+  featuredVideoTitle: string;
+  featuredVideoDesc: string;
+  contactEmail: string;
+  contactLocation: string;
+  socialX: string;
+  socialYoutube: string;
+  socialFacebook: string;
+  socialInstagram: string;
+  socialLineOa: string;
+  primaryDomain: string;
+  domains: string[];
+  seoTitle: string;
+  seoDescription: string;
+  updatedAt?: string;
+}
+
+export interface SpecialProject {
+  id: number;
+  badgeLabel: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  highlights: string[];
+  tags: string[];
+  ctaLabel: string;
+  ctaUrl: string;
+  status: 'active' | 'draft' | 'archived';
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DomainStatusItem {
+  domain: string;
+  isPrimary: boolean;
+  resolvedIps: string[];
+  cnames: string[];
+  dnsConnected: boolean;
+  target: 'vps' | 'vercel' | 'other' | 'none';
+  httpsReachable: boolean;
+  httpStatus: number | null;
+  checkedAt: string;
+}

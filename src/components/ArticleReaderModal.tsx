@@ -300,7 +300,7 @@ export const ArticleReaderModal: React.FC<Props> = ({
             </span>
             {post?.aiWorkflowId && (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
-                ✨ สร้างร่วมกับทีม AI Multi-Agent
+                สร้างร่วมกับทีม AI Multi-Agent
               </span>
             )}
           </div>

@@ -7,7 +7,7 @@ import {
   CheckCircle2,
   ExternalLink,
   Trash2,
-  Sparkles,
+  PenLine,
   MessageSquareHeart,
   X,
   Webhook,
@@ -836,7 +836,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                     onClick={() => handleAiProduceFromSurvey(sv)}
                     className="inline-flex items-center gap-1 rounded bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                   >
-                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <PenLine className="w-3 h-3 text-amber-400" />
                     {triggeringTopic === sv.requestedTopic
                       ? 'กำลังส่ง...'
                       : 'สั่ง AI ผลิต'}

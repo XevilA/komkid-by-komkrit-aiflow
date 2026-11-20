@@ -10,6 +10,8 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/uploads/(.*)", "destination": "/api/index" },
-    { "source": "/((?!api/|uploads/|assets/|images/|favicon).*)", "destination": "/index.html" }
+    { "source": "/robots.txt", "destination": "/api/index" },
+    { "source": "/sitemap.xml", "destination": "/api/index" },
+    { "source": "/((?!api/|uploads/|assets/|images/|favicon|robots\\.txt|sitemap\\.xml).*)", "destination": "/index.html" }
   ]
 }

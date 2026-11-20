@@ -3,7 +3,7 @@ import {
   Bot,
   Plus,
   Trash2,
-  Sparkles,
+  PenLine,
   Image as ImageIcon,
   Film,
   Newspaper,
@@ -16,7 +16,7 @@ import {
   Copy,
   Eye,
   Edit3,
-  Wand2,
+  ListChecks,
   X,
   PanelLeftClose,
   PanelLeftOpen,
@@ -1499,7 +1499,7 @@ export const AiChatStudio: React.FC<Props> = ({
                     : 'bg-[#0d2546] text-amber-300'
                 }`}
               >
-                <Sparkles className="w-4 h-4" />
+                <PenLine className="w-4 h-4" />
               </div>
               <span className="font-extrabold text-base tracking-tight truncate">
                 คมคิด AI Studio
@@ -2372,7 +2372,7 @@ export const AiChatStudio: React.FC<Props> = ({
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3.5">
                         <div className="space-y-1">
                           <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                            <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                            <ListChecks className="w-3.5 h-3.5 text-amber-600" />
                             ผลการวิเคราะห์คำสั่งสร้างสื่อ ({evaluatedPrompt.engineUsed})
                           </span>
                           <h3 className="text-sm sm:text-base font-bold text-slate-900">
@@ -2469,7 +2469,7 @@ export const AiChatStudio: React.FC<Props> = ({
                             </>
                           ) : (
                             <>
-                              <Sparkles className="w-4 h-4 text-amber-400" />
+                              <PenLine className="w-4 h-4 text-amber-400" />
                               {evaluatedPrompt.target === 'image'
                                 ? draftPost
                                   ? 'สร้างรูปภาพและแทรกลงเนื้อหา'
@@ -2758,7 +2758,7 @@ export const AiChatStudio: React.FC<Props> = ({
                               </>
                             ) : (
                               <>
-                                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                <PenLine className="w-3.5 h-3.5 text-amber-600" />
                                 สร้างภาพแทรกในเนื้อหา
                               </>
                             )}

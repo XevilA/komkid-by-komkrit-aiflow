@@ -5,7 +5,7 @@ import {
   Image as ImageIcon,
   Mic,
   Send,
-  Sparkles,
+  PenLine,
   Trash2,
   RefreshCw,
   Download,
@@ -15,7 +15,7 @@ import {
   Layers,
   CheckCircle2,
   Upload,
-  Wand2,
+  ListChecks,
   BrainCircuit,
   AlertTriangle,
 } from 'lucide-react';
@@ -698,7 +698,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <PenLine className="w-3.5 h-3.5 text-amber-400" />
                     สร้างสตอรีบอร์ด
                   </>
                 )}
@@ -1491,7 +1491,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   onClick={handleRun4ModelArena}
                   className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                 >
-                  <Wand2 className="w-3.5 h-3.5 text-amber-600" />
+                  <ListChecks className="w-3.5 h-3.5 text-amber-600" />
                   {arenaRunning ? 'กำลังเปรียบเทียบ...' : 'เปรียบเทียบ 4 โมเดล'}
                 </button>
                 <button
