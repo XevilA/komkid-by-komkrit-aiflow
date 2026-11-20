@@ -860,6 +860,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  approveWorkspaceArticle: (id: number, revoke = false) =>
+    request<import('./types').WsSnapshot>(`/api/workspaces/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ gate: 'article', revoke }),
+    }),
   confirmWorkspaceAction: (id: number, eventId: number) =>
     request<import('./types').WsSnapshot & { ok: boolean; message: string }>(
       `/api/workspaces/${id}/confirm`,

@@ -767,17 +767,27 @@ export interface Workspace {
   postId: number | null;
   workflowId: number | null;
   draft: WsDraft;
-  media: { cover?: WsMediaItem; video?: WsMediaItem; audio?: WsMediaItem; inline: WsMediaItem[] };
+  media: { cover?: WsMediaItem; video?: WsMediaItem; audio?: WsMediaItem; subtitles?: WsMediaItem; clips?: WsMediaItem[]; inline: WsMediaItem[] };
   research: {
     query?: string;
     summary?: string;
     facts?: string[];
     angles?: string[];
     sources?: { title: string; uri: string }[];
+    subQueries?: string[];
     knowledgeUsed?: string[];
     relatedPosts?: { id: number; title: string; slug: string }[];
   };
   qa: WsQa;
+  factCheck: {
+    claims?: { text: string; verdict: 'supported' | 'unsupported' | 'unverifiable'; evidence: string }[];
+    neutrality?: { score: number; notes: string };
+    verdict?: 'pass' | 'revise' | 'block';
+    summary?: string;
+  };
+  videoPlan: { clips: { title: string; durationSec: number; narration: string; visualPrompt: string; subtitle: string }[] };
+  learning: { summary?: string; whatWorked?: string[]; toImprove?: string[]; nextTopics?: string[]; metrics?: Record<string, unknown> };
+  approvals: { article?: { hash: string; at: string }; release?: { at: string } };
   channels: { results?: Record<string, { status: string; url: string; note: string; at: string }> };
   createdAt: string;
   updatedAt: string;
@@ -794,8 +804,17 @@ export interface WsEvent {
   data: any;
 }
 
+export interface WsFlowStep {
+  n: number;
+  id: string;
+  label: string;
+  status: 'done' | 'current' | 'todo' | 'optional';
+  detail: string;
+}
+
 export interface WsSnapshot {
   project: Workspace;
+  flow: WsFlowStep[];
   events: WsEvent[];
   running: boolean;
 }

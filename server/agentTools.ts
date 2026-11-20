@@ -3,6 +3,8 @@
 // Each tool reads and writes the shared workspace, so research feeds the draft,
 // the draft feeds the visuals, and everything made is what actually gets published.
 // ============================================================================
+import fs from 'node:fs';
+import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 import { db, IS_SERVERLESS } from './db.ts';
 import {
@@ -11,13 +13,24 @@ import {
   configuredProviderSet,
   type LlmProviderId,
 } from './aiEngine.ts';
-import { generateRealImage, generateRealVideo, generateRealAudio, getSettingValue } from './mediaEngine.ts';
+import {
+  generateRealImage,
+  generateRealVideo,
+  generateRealAudio,
+  getSettingValue,
+  stitchFlowScenesWithFfmpeg,
+  UPLOADS_ROOT,
+} from './mediaEngine.ts';
 import { resolveLatestModel } from './modelRegistry.ts';
 import { searchKnowledge } from './knowledge.ts';
 import { dispatchSingleChannelReal } from './publishEngine.ts';
 import { validateSlug, uniqueSlug, isSlugTaken, setPostSlug, slugify } from './slug.ts';
 import {
   CATEGORY_IDS,
+  articleApproved,
+  articleHash,
+  recentLearnings,
+  saveLearning,
   contentHash,
   createProjectFromPost,
   createProjectFromWorkflow,
@@ -85,7 +98,7 @@ export interface ToolResult {
 
 export interface ToolDef {
   name: string;
-  agent: 'research' | 'writer' | 'visual' | 'video' | 'audio' | 'qa' | 'publisher' | 'ceo';
+  agent: 'research' | 'writer' | 'visual' | 'video' | 'audio' | 'qa' | 'factcheck' | 'script' | 'analytics' | 'publisher' | 'ceo';
   description: string;
   args: string;
   run: (ctx: ToolContext, args: Record<string, any>) => Promise<ToolResult>;
@@ -188,6 +201,14 @@ function requireDraft(ctx: ToolContext): Draft | null {
   return d.title && d.content ? d : null;
 }
 
+function vttTime(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}.000`;
+}
+
 // --- upsert the real post from the workspace ----------------------------------
 export function upsertPostFromProject(
   project: ProjectRecord,
@@ -253,7 +274,33 @@ export const TOOLS: ToolDef[] = [
           "SELECT id, title, slug FROM posts WHERE status = 'published' AND (title LIKE ? OR tags_json LIKE ?) ORDER BY created_at DESC LIMIT 5"
         )
         .all(like, like) as { id: number; title: string; slug: string }[];
-      const web = ctx.caps.webSearch ? await groundedSearch(q) : null;
+      // Deep research: split the topic into distinct sub-questions and search each one
+      let queries = [q];
+      let web: { text: string; sources: { title: string; uri: string }[] } | null = null;
+      if (ctx.caps.webSearch) {
+        try {
+          const plan = await llmJson(
+            ctx,
+            `คุณคือ Research Agent วางแผนการค้นคว้าเชิงลึก แตกหัวข้อเป็นคำถามย่อย 2-3 ข้อที่ต่างมุมกัน (ข้อมูล/สถิติล่าสุด, ตัวอย่างจริง, ข้อโต้แย้งหรือข้อจำกัด)
+ตอบ JSON: {"queries":["คำถามย่อย"]}`,
+            `หัวข้อ: ${q}`,
+            undefined,
+            'economy'
+          );
+          queries = [q, ...(Array.isArray(plan.data.queries) ? plan.data.queries.map((x: unknown) => str(x, 200)).filter(Boolean).slice(0, 3) : [])];
+        } catch {
+          queries = [q];
+        }
+        const found = await Promise.all(queries.map((x) => groundedSearch(x)));
+        const hits = found.map((f, i) => (f ? { q: queries[i], f } : null)).filter(Boolean) as { q: string; f: { text: string; sources: { title: string; uri: string }[] } }[];
+        if (hits.length) {
+          const seen = new Set<string>();
+          web = {
+            text: hits.map((h) => `ผลค้นหาคำถาม "${h.q}":\n${h.f.text}`).join('\n\n'),
+            sources: hits.flatMap((h) => h.f.sources).filter((x) => (seen.has(x.uri) ? false : (seen.add(x.uri), true))),
+          };
+        }
+      }
 
       const material = [
         kb.length ? `ฐานความรู้:\n${kb.map((k, i) => `[KB-${i + 1}] ${k.title}: ${k.summary}\n${k.content.slice(0, 800)}`).join('\n\n')}` : '',
@@ -277,10 +324,11 @@ ${BRAND_RULES}
       );
       ctx.project.research = {
         query: q,
+        subQueries: queries.length > 1 ? queries : undefined,
         summary: str(data.summary, 1500),
         facts: (Array.isArray(data.facts) ? data.facts : []).map((f: unknown) => str(f, 300)).slice(0, 10),
         angles: (Array.isArray(data.angles) ? data.angles : []).map((f: unknown) => str(f, 300)).slice(0, 6),
-        sources: web?.sources.slice(0, 8) || [],
+        sources: web?.sources.slice(0, 12) || [],
         knowledgeUsed: kb.map((k) => k.title),
         relatedPosts: related,
         updatedAt: new Date().toISOString(),
@@ -459,6 +507,9 @@ ${BRAND_RULES}
       if (!/วิดีโอ|วีดีโอ|vdo|video|คลิป/i.test(ctx.userMessage)) {
         return { ok: false, summary: 'ข้ามการสร้างวิดีโอ เพราะผู้ใช้ยังไม่ได้ขอวิดีโอ (ค่าใช้จ่ายสูง) หากต้องการให้บอกได้เลย' };
       }
+      if (!articleApproved(ctx.project)) {
+        return { ok: false, summary: 'รอเจ้าของช่องอนุมัติบทความก่อน จึงจะผลิตวิดีโอได้ (กดปุ่ม "อนุมัติบทความ" ในแท็บตรวจสอบ)' };
+      }
       if (!ctx.caps.video) {
         return {
           ok: false,
@@ -497,6 +548,9 @@ ${BRAND_RULES}
     run: async (ctx, args) => {
       if (!/เสียง|พากย์|บรรยาย|audio|voice|tts/i.test(ctx.userMessage)) {
         return { ok: false, summary: 'ข้ามการสร้างเสียง เพราะผู้ใช้ยังไม่ได้ขอเสียงบรรยาย' };
+      }
+      if (!articleApproved(ctx.project)) {
+        return { ok: false, summary: 'รอเจ้าของช่องอนุมัติบทความก่อน จึงจะผลิตเสียงบรรยายได้ (กดปุ่ม "อนุมัติบทความ" ในแท็บตรวจสอบ)' };
       }
       if (!ctx.caps.audio) return { ok: false, summary: 'ยังไม่ได้ตั้งค่าคีย์สำหรับสร้างเสียง' };
       const d = requireDraft(ctx);
@@ -707,6 +761,247 @@ ${BRAND_RULES}
         summary: `โพสต์ลงช่องทางสำเร็จ ${ok}/${targets.length}${ok < targets.length ? ' (ดูรายละเอียดที่ผลลัพธ์แต่ละช่อง)' : ''}`,
         data: results,
       };
+    },
+  },
+
+  {
+    name: 'fact_check',
+    agent: 'factcheck',
+    description:
+      'Fact-check Agent: แยกข้ออ้างที่ตรวจสอบได้ในบทความ (ตัวเลข ชื่อ วันที่ งานวิจัย) แล้วตรวจทีละข้อกับผลค้นคว้า แหล่งอ้างอิง และฐานความรู้ พร้อมประเมินความเป็นกลาง ข้อที่ไม่มีหลักฐานจะถูกระบุว่า "ตรวจสอบไม่ได้" ไม่ใช่ "ถูกต้อง"',
+    args: '{}',
+    run: async (ctx) => {
+      const d = requireDraft(ctx);
+      if (!d) return { ok: false, summary: 'ยังไม่มีฉบับร่างให้ตรวจข้อเท็จจริง' };
+      const r = ctx.project.research;
+      const evidence = [
+        (r.facts || []).length ? `ข้อเท็จจริงจากผลค้นคว้า:\n${(r.facts || []).map((f) => `- ${f}`).join('\n')}` : '',
+        r.summary ? `สรุปผลค้นคว้า: ${r.summary}` : '',
+        (r.sources || []).length ? `แหล่งอ้างอิง:\n${(r.sources || []).map((s) => `- ${s.title} ${s.uri}`).join('\n')}` : '',
+        brandContext(d.title),
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      const { data } = await llmJson(
+        ctx,
+        `คุณคือ Fact-check Agent ตรวจข้อเท็จจริงอย่างเข้มงวดและเป็นกลาง
+1) แยกเฉพาะ "ข้ออ้างที่ตรวจสอบได้" ในบทความ (ตัวเลข สถิติ ชื่อบุคคล/หน่วยงาน วันที่ ผลงานวิจัย ข้ออ้างเชิงเหตุและผล) ไม่เกิน 12 ข้อ
+2) ตัดสินแต่ละข้อจากหลักฐานที่ให้เท่านั้น:
+   supported = มีหลักฐานในข้อมูลที่ให้สนับสนุนโดยตรง (ระบุหลักฐานสั้นๆ)
+   unverifiable = ไม่มีหลักฐานทั้งสนับสนุนและขัดแย้ง (ห้ามเดาว่าถูก)
+   unsupported = ขัดแย้งกับหลักฐาน หรืออ้างตัวเลข/แหล่งที่ไม่ปรากฏเลยและดูเป็นการแต่งขึ้น
+3) ประเมินความเป็นกลาง 0-100 (ไม่ชี้นำ ไม่โฆษณาเกินจริง ไม่มีอคติ) พร้อมหมายเหตุ
+ตอบ JSON: {"claims":[{"text":"","verdict":"supported|unverifiable|unsupported","evidence":""}],"neutrality":{"score":0,"notes":""},"summary":""}`,
+        `บทความ:\n${JSON.stringify({ title: d.title, content: d.content })}\n\nหลักฐานที่มี:\n${evidence}`,
+        (o) => {
+          if (!Array.isArray(o.claims) || !o.neutrality) throw new Error('ผลลัพธ์ไม่ครบ: ไม่มีรายการข้ออ้าง');
+        },
+        'economy'
+      );
+      const claims = (data.claims as any[])
+        .map((c) => ({
+          text: str(c?.text, 300),
+          verdict: (['supported', 'unverifiable', 'unsupported'].includes(c?.verdict) ? c.verdict : 'unverifiable') as 'supported' | 'unverifiable' | 'unsupported',
+          evidence: str(c?.evidence, 300),
+        }))
+        .filter((c) => c.text)
+        .slice(0, 12);
+      const neutrality = { score: Math.max(0, Math.min(100, Math.round(Number(data.neutrality?.score) || 0))), notes: str(data.neutrality?.notes, 300) };
+      const unsupported = claims.filter((c) => c.verdict === 'unsupported').length;
+      const verdict: 'pass' | 'revise' | 'block' = unsupported >= 3 || neutrality.score < 50 ? 'block' : unsupported >= 1 || neutrality.score < 70 ? 'revise' : 'pass';
+      ctx.project.factCheck = { claims, neutrality, verdict, summary: str(data.summary, 400), contentHash: articleHash(ctx.project), checkedAt: new Date().toISOString() };
+      saveProject(ctx.project);
+      const counts = (v: string) => claims.filter((c) => c.verdict === v).length;
+      return {
+        ok: true,
+        summary: `${verdict === 'pass' ? 'ผ่าน' : verdict === 'revise' ? 'ควรแก้ไข' : 'ไม่ควรเผยแพร่'} (ข้ออ้าง ${claims.length}: ยืนยันได้ ${counts('supported')}, ตรวจสอบไม่ได้ ${counts('unverifiable')}, ขัดแย้ง ${unsupported}; ความเป็นกลาง ${neutrality.score}/100)`,
+        data: ctx.project.factCheck,
+      };
+    },
+  },
+
+  {
+    name: 'video_script',
+    agent: 'script',
+    description: 'Video Script Agent: แปลงบทความที่อนุมัติแล้วเป็นสคริปต์วิดีโอสั้น 2-3 คลิป (บทพูด คำบรรยายบนจอ และ prompt ภาพ) เพื่อนำไปผลิตต่อ',
+    args: '{}',
+    run: async (ctx) => {
+      const d = requireDraft(ctx);
+      if (!d) return { ok: false, summary: 'ยังไม่มีบทความให้แปลงเป็นสคริปต์' };
+      const { data } = await llmJson(
+        ctx,
+        `คุณคือ Video Script Agent แปลงบทความเป็นสคริปต์วิดีโอสั้น 2-3 คลิป เล่าต่อเนื่องกัน (เปิดประเด็น, สาระหลัก, ข้อสรุปและชวนอ่านต่อ)
+${BRAND_RULES}
+แต่ละคลิป: title, durationSec (6-10), narration (บทพูดภาษาไทย ไม่เกิน 260 ตัวอักษร ใช้เฉพาะสิ่งที่มีในบทความ), subtitle (คำบรรยายบนจอ 1-2 บรรทัดสั้น), visualPrompt (English: ผู้นำเสนอหรือฉากประกอบที่สื่อความหมาย ไม่มีตัวอักษรในภาพ)
+ตอบ JSON: {"clips":[{"title":"","durationSec":8,"narration":"","subtitle":"","visualPrompt":""}]}`,
+        `บทความ:\n${JSON.stringify({ title: d.title, excerpt: d.excerpt, content: d.content.slice(0, 6000) })}`,
+        (o) => {
+          if (!Array.isArray(o.clips) || o.clips.length < 1) throw new Error('ผลลัพธ์ไม่ครบ: ไม่มีคลิป');
+        }
+      );
+      const clips = (data.clips as any[]).slice(0, 3).map((c, i) => ({
+        title: str(c?.title, 120) || `คลิป ${i + 1}`,
+        durationSec: Math.max(4, Math.min(10, Math.round(Number(c?.durationSec) || 8))),
+        narration: str(c?.narration, 300),
+        subtitle: str(c?.subtitle, 200) || str(c?.narration, 120),
+        visualPrompt: str(c?.visualPrompt, 600),
+      }));
+      ctx.project.videoPlan = { clips, updatedAt: new Date().toISOString() };
+      saveProject(ctx.project);
+      return { ok: true, summary: `เขียนสคริปต์วิดีโอ ${clips.length} คลิป (รวม ${clips.reduce((a, c) => a + c.durationSec, 0)} วินาที)`, data: clips };
+    },
+  },
+
+  {
+    name: 'produce_clips',
+    agent: 'video',
+    description:
+      'Avatar Production: ผลิตคลิปตามสคริปต์ (วิดีโอ AI ต่อคลิป + เสียงบรรยายไทย + ไฟล์คำบรรยาย .vtt) แล้วตัดต่อรวมเป็นวิดีโอเดียวแนบกับบทความ ใช้เมื่อผู้ใช้ขอชัดเจน ต้องอนุมัติบทความแล้ว และต้องมีสคริปต์ (video_script) ก่อน',
+    args: '{}',
+    run: async (ctx) => {
+      if (!/วิดีโอ|วีดีโอ|vdo|video|คลิป|ผลิต/i.test(ctx.userMessage)) {
+        return { ok: false, summary: 'ข้ามการผลิตคลิป เพราะผู้ใช้ยังไม่ได้ขอ (ค่าใช้จ่ายสูง)' };
+      }
+      if (!articleApproved(ctx.project)) {
+        return { ok: false, summary: 'รอเจ้าของช่องอนุมัติบทความก่อน จึงจะผลิตคลิปได้ (กดปุ่ม "อนุมัติบทความ" ในแท็บตรวจสอบ)' };
+      }
+      const clips = ctx.project.videoPlan.clips;
+      if (clips.length === 0) return { ok: false, summary: 'ยังไม่มีสคริปต์วิดีโอ ให้ video_script ก่อน' };
+      if (!ctx.caps.video) {
+        return {
+          ok: false,
+          summary: ctx.caps.serverless
+            ? 'ผลิตวิดีโอไม่ได้บนโฮสต์แบบ Serverless (จำกัดเวลา 60 วินาที) กรุณาใช้เซิร์ฟเวอร์ VPS'
+            : 'ยังไม่ได้ตั้งค่าคีย์สำหรับสร้างวิดีโอ (ต้องมี Gemini API Key หรือ Vertex)',
+        };
+      }
+      const made: { url: string; assetId: number | null; caption: string }[] = [];
+      for (let i = 0; i < clips.length; i++) {
+        const c = clips[i];
+        ctx.log(`ผลิตคลิป ${i + 1}/${clips.length}`);
+        const asset: any = await generateRealVideo({
+          prompt: `${c.visualPrompt}. Professional presenter-style educational explainer, natural light, no on-screen text.`,
+          aspectRatio: '16:9',
+          durationSec: c.durationSec,
+          resolution: '720p',
+          workflowId: ctx.project.workflowId,
+          thaiSummary: c.title,
+          reviewStatus: 'approved',
+        });
+        made.push({ url: asset.fileUrl, assetId: asset.id, caption: c.title });
+      }
+      let voiceUrl = '';
+      let voiceNote = '';
+      if (ctx.caps.audio) {
+        try {
+          const voice: any = await generateRealAudio({ text: clips.map((c) => c.narration).join(' '), workflowId: ctx.project.workflowId });
+          voiceUrl = voice.fileUrl;
+          ctx.project.media.audio = { url: voice.fileUrl, assetId: voice.id };
+        } catch (e) {
+          voiceNote = ` (สร้างเสียงบรรยายไม่สำเร็จ: ${(e as Error).message.slice(0, 80)})`;
+        }
+      } else voiceNote = ' (ยังไม่ได้ตั้งค่าคีย์สร้างเสียง จึงไม่มีเสียงบรรยาย)';
+
+      let master = made[0].url;
+      let stitchNote = '';
+      if (made.length > 1) {
+        try {
+          const st = await stitchFlowScenesWithFfmpeg({
+            sceneVideoUrls: made.map((m) => m.url),
+            aspectRatio: '16:9',
+            voiceoverAudioUrl: voiceUrl || undefined,
+            projectTitle: ctx.project.draft.title,
+          });
+          master = st.masterVideoUrl;
+        } catch (e) {
+          stitchNote = ` (ตัดต่อรวมไม่สำเร็จ ใช้คลิปแรกเป็นวิดีโอหลัก: ${(e as Error).message.slice(0, 80)})`;
+        }
+      }
+
+      // subtitles (WebVTT): each clip's subtitle text spread across its duration
+      let t = 0;
+      const cues = clips
+        .map((c, i) => {
+          const start = t;
+          t += c.durationSec;
+          return `${i + 1}\n${vttTime(start)} --> ${vttTime(t)}\n${c.subtitle || c.narration}\n`;
+        })
+        .join('\n');
+      const dir = path.join(UPLOADS_ROOT, 'subtitles');
+      fs.mkdirSync(dir, { recursive: true });
+      const fname = `ws${ctx.project.id}-${Date.now()}.vtt`;
+      fs.writeFileSync(path.join(dir, fname), `WEBVTT\n\n${cues}`, 'utf8');
+
+      ctx.project.media.clips = made.map((m) => ({ url: m.url, assetId: m.assetId, caption: m.caption }));
+      ctx.project.media.video = { url: master, prompt: 'produce_clips' };
+      ctx.project.media.subtitles = { url: `/uploads/subtitles/${fname}` };
+      ctx.project.draft.contentType = 'video';
+      ctx.project.qa = {};
+      saveProject(ctx.project);
+      return { ok: true, summary: `ผลิต ${made.length} คลิปเรียบร้อย แนบวิดีโอหลัก คำบรรยาย${voiceUrl ? ' และเสียงบรรยาย' : ''}${voiceNote}${stitchNote}`, data: { master } };
+    },
+  },
+
+  {
+    name: 'analyze_performance',
+    agent: 'analytics',
+    description:
+      'Analytics & Learning Agent: วิเคราะห์ผลงานจากข้อมูลจริงในระบบ (ยอดเข้าชม ความคิดเห็นและคะแนน ผลโพสต์แต่ละช่องทาง เทียบกับบทความอื่น) สรุปบทเรียนและแนวทางครั้งต่อไป และส่งกลับให้ CEO ใช้วางแผนงานถัดไป ใช้ได้เมื่อเผยแพร่แล้ว',
+    args: '{}',
+    run: async (ctx) => {
+      const p = ctx.project;
+      if (!p.postId) return { ok: false, summary: 'บทความนี้ยังไม่ได้เผยแพร่ จึงยังไม่มีข้อมูลผลลัพธ์ให้วิเคราะห์' };
+      const post = db.prepare('SELECT id, title, views, created_at, category FROM posts WHERE id = ?').get(p.postId) as any;
+      if (!post) return { ok: false, summary: 'ไม่พบบทความที่เผยแพร่' };
+      const cm = db
+        .prepare('SELECT COUNT(*) AS n, AVG(rating) AS avg FROM comments WHERE post_id = ?')
+        .get(p.postId) as { n: number; avg: number | null };
+      const comments = db
+        .prepare('SELECT message, rating FROM comments WHERE post_id = ? ORDER BY id DESC LIMIT 10')
+        .all(p.postId) as { message: string; rating: number }[];
+      const top = db
+        .prepare("SELECT title, views, category FROM posts WHERE status = 'published' ORDER BY views DESC LIMIT 5")
+        .all();
+      const peer = db
+        .prepare("SELECT AVG(views) AS avgViews, COUNT(*) AS n FROM posts WHERE status = 'published' AND category = ? AND id != ?")
+        .get(post.category, p.postId) as { avgViews: number | null; n: number };
+      const channelResults = p.channels.results || {};
+      const metrics = {
+        views: Number(post.views || 0),
+        daysOnline: Math.max(1, Math.round((Date.now() - new Date(post.created_at).getTime()) / 86400000)),
+        comments: Number(cm.n || 0),
+        avgRating: cm.avg ? Math.round(cm.avg * 10) / 10 : null,
+        sameCategoryAvgViews: peer.avgViews ? Math.round(peer.avgViews) : null,
+        sameCategoryPosts: peer.n,
+        channels: Object.fromEntries(Object.entries(channelResults).map(([k, v]) => [k, v.status])),
+      };
+      if (metrics.views === 0 && metrics.comments === 0 && Object.keys(metrics.channels).length === 0) {
+        return { ok: false, summary: 'ยังมีข้อมูลผลลัพธ์ไม่พอให้วิเคราะห์ (ยังไม่มียอดเข้าชม ความคิดเห็น หรือผลโพสต์ช่องทาง) ลองใหม่เมื่อบทความออนไลน์มาสักระยะ' };
+      }
+      const { data } = await llmJson(
+        ctx,
+        `คุณคือ Analytics & Learning Agent สรุปบทเรียนจากผลงานจริงเพื่อส่งกลับไปให้ CEO วางแผนงานถัดไป
+ใช้เฉพาะตัวเลขและความคิดเห็นที่ให้ ห้ามแต่งตัวเลขหรือสาเหตุที่ไม่มีหลักฐาน ถ้าข้อมูลน้อยให้บอกว่ายังสรุปไม่ได้ชัด
+${BRAND_RULES}
+ตอบ JSON: {"summary":"สรุป 2-3 ประโยค","whatWorked":["..."],"toImprove":["..."],"nextTopics":["หัวข้อที่ควรทำต่อ พร้อมเหตุผลสั้นๆ"]}`,
+        `บทความ: ${post.title}\nตัวชี้วัด: ${JSON.stringify(metrics)}\nบทความยอดนิยมของเว็บ: ${JSON.stringify(top)}\nความคิดเห็นล่าสุด:\n${comments.map((c) => `- (${c.rating}/5) ${c.message.slice(0, 200)}`).join('\n') || '-'}`,
+        (o) => {
+          if (typeof o.summary !== 'string' || !o.summary.trim()) throw new Error('ผลลัพธ์ไม่ครบ: ไม่มีสรุป');
+        },
+        'economy'
+      );
+      const list = (v: unknown) => (Array.isArray(v) ? v.map((x) => str(x, 240)).filter(Boolean).slice(0, 5) : []);
+      p.learning = {
+        summary: str(data.summary, 600),
+        whatWorked: list(data.whatWorked),
+        toImprove: list(data.toImprove),
+        nextTopics: list(data.nextTopics),
+        metrics,
+        at: new Date().toISOString(),
+      };
+      saveProject(p);
+      saveLearning(p.id, p.learning.summary || '', [...(p.learning.toImprove || []), ...(p.learning.nextTopics || [])]);
+      return { ok: true, summary: `วิเคราะห์ผลงานแล้ว (เข้าชม ${metrics.views}, ความคิดเห็น ${metrics.comments}) และส่งบทเรียนกลับให้ CEO`, data: p.learning };
     },
   },
 

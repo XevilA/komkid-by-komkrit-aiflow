@@ -6,6 +6,7 @@ import {
   CategoryId,
   WsCapabilities,
   WsEvent,
+  WsFlowStep,
   WsListItem,
   WsSnapshot,
   Workspace,
@@ -24,10 +25,13 @@ interface Props {
 
 const AGENT_LABEL: Record<string, string> = {
   ceo: 'CEO',
-  research: 'ค้นคว้า',
+  research: 'Deep Research',
+  factcheck: 'Fact-check',
+  script: 'Video Script',
+  analytics: 'Analytics',
   writer: 'นักเขียน',
   visual: 'ภาพ',
-  video: 'วิดีโอ',
+  video: 'Production',
   audio: 'เสียง',
   qa: 'ตรวจคุณภาพ',
   publisher: 'เผยแพร่',
@@ -43,6 +47,10 @@ const TOOL_LABEL: Record<string, string> = {
   generate_voice: 'สร้างเสียงบรรยาย',
   attach_media: 'แนบสื่อจากคลัง',
   qa_check: 'ตรวจคุณภาพ',
+  fact_check: 'ตรวจข้อเท็จจริง',
+  video_script: 'เขียนสคริปต์วิดีโอ',
+  produce_clips: 'ผลิตคลิป เสียง และคำบรรยาย',
+  analyze_performance: 'วิเคราะห์ผลงาน',
   optimize_seo: 'เตรียมข้อมูลค้นหา',
   save_post: 'บันทึกบทความ',
   publish_channels: 'โพสต์ลงช่องทาง',
@@ -84,6 +92,8 @@ export const AgentWorkspace: React.FC<Props> = ({
   const [caps, setCaps] = useState<WsCapabilities | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [project, setProject] = useState<Workspace | null>(null);
+  const [flow, setFlow] = useState<WsFlowStep[]>([]);
+  const [flowOpen, setFlowOpen] = useState(false);
   const [events, setEvents] = useState<WsEvent[]>([]);
   const [running, setRunning] = useState(false);
   const [input, setInput] = useState('');
@@ -128,6 +138,7 @@ export const AgentWorkspace: React.FC<Props> = ({
 
   const applySnapshot = useCallback((snap: WsSnapshot, replaceEvents = false) => {
     setProject(snap.project);
+    if (snap.flow) setFlow(snap.flow);
     setRunning(snap.running);
     setEvents((prev) => (replaceEvents ? snap.events : mergeEvents(prev, snap.events)));
     const max = snap.events.reduce((m, e) => Math.max(m, e.id), replaceEvents ? 0 : lastEventId.current);
@@ -319,6 +330,22 @@ export const AgentWorkspace: React.FC<Props> = ({
       const out = await api.confirmWorkspaceAction(activeId, eventId);
       applySnapshot(out);
       onRefreshAll();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const approveArticle = async (revoke = false) => {
+    if (activeId === null) return;
+    setError('');
+    try {
+      if (dirtyRef.current) {
+        await api.updateWorkspace(activeId, {
+          draft: { ...form, tags: form.tags.split(',').map((x) => x.trim()).filter(Boolean) },
+        });
+        dirtyRef.current = false;
+      }
+      applySnapshot(await api.approveWorkspaceArticle(activeId, revoke));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -609,6 +636,43 @@ export const AgentWorkspace: React.FC<Props> = ({
                 </div>
               </div>
 
+              {flow.length > 0 && (
+                <div className="border-b border-slate-200 px-4 py-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setFlowOpen((v) => !v)}
+                    className="flex w-full items-center justify-between text-left text-xs text-slate-600 cursor-pointer"
+                  >
+                    <span>
+                      ขั้นตอนงาน {flow.filter((f) => f.status === 'done').length}/{flow.length}
+                      {(() => {
+                        const cur = flow.find((f) => f.status === 'current');
+                        return cur ? ` — ขั้นถัดไป: ${cur.label}` : ' — ครบทุกขั้น';
+                      })()}
+                    </span>
+                    <span className="text-slate-400">{flowOpen ? 'ซ่อน' : 'ดูทั้งหมด'}</span>
+                  </button>
+                  {flowOpen && (
+                    <ol className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+                      {flow.map((f) => (
+                        <li key={f.id} className="flex items-baseline gap-2 text-xs">
+                          <span
+                            className={`w-4 shrink-0 text-right tabular-nums ${f.status === 'done' ? 'text-emerald-700' : f.status === 'current' ? 'font-semibold text-slate-900' : 'text-slate-400'}`}
+                          >
+                            {f.n}
+                          </span>
+                          <span className={f.status === 'done' ? 'text-slate-700' : f.status === 'current' ? 'font-semibold text-slate-900' : 'text-slate-400'}>
+                            {f.label}
+                            {f.status === 'done' && f.detail ? ` · ${f.detail}` : ''}
+                            {f.status === 'optional' ? ' (ถ้าต้องการ)' : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              )}
+
               <div className="px-4 pt-3">
                 <Tabs
                   value={tab}
@@ -792,6 +856,140 @@ export const AgentWorkspace: React.FC<Props> = ({
 
                     <div>
                       <div className="mb-2 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-900">Fact-check รายข้ออ้าง</h3>
+                        <Button size="sm" disabled={!hasDraft || running} onClick={() => send('ตรวจข้อเท็จจริงบทความนี้ให้หน่อย')}>
+                          ให้ CEO ตรวจข้อเท็จจริง
+                        </Button>
+                      </div>
+                      {project.factCheck.verdict ? (
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <div className="flex flex-wrap gap-x-6 gap-y-1">
+                            <span>
+                              ผล: <strong>{project.factCheck.verdict === 'pass' ? 'ผ่าน' : project.factCheck.verdict === 'revise' ? 'ควรแก้ไข' : 'ไม่ควรเผยแพร่'}</strong>
+                            </span>
+                            {project.factCheck.neutrality && <span>ความเป็นกลาง {project.factCheck.neutrality.score}/100</span>}
+                          </div>
+                          {project.factCheck.summary && <p className="text-slate-600">{project.factCheck.summary}</p>}
+                          <ul className="space-y-1.5">
+                            {(project.factCheck.claims || []).map((c, i) => (
+                              <li key={i} className="border-l-2 border-slate-200 pl-3">
+                                <span
+                                  className={`mr-2 text-xs font-medium ${c.verdict === 'supported' ? 'text-emerald-700' : c.verdict === 'unsupported' ? 'text-rose-700' : 'text-amber-700'}`}
+                                >
+                                  {c.verdict === 'supported' ? 'ยืนยันได้' : c.verdict === 'unsupported' ? 'ขัดแย้ง/ไม่มีหลักฐาน' : 'ตรวจสอบไม่ได้'}
+                                </span>
+                                {c.text}
+                                {c.evidence && <div className="text-xs text-slate-500">หลักฐาน: {c.evidence}</div>}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">ยังไม่ได้ตรวจข้อเท็จจริง (หรือเนื้อหาถูกแก้หลังตรวจครั้งล่าสุด) ระบบจะตรวจให้อัตโนมัติตอนเผยแพร่</p>
+                      )}
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 p-4">
+                      <h3 className="text-sm font-semibold text-slate-900">จุดอนุมัติบทความโดยเจ้าของช่อง</h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        การผลิตวิดีโอและเสียงมีค่าใช้จ่ายสูง ทีมจะเริ่มได้ต่อเมื่อคุณอนุมัติบทความฉบับนี้ หากแก้ไขเนื้อหาภายหลัง การอนุมัติจะหมดอายุและต้องอนุมัติใหม่
+                      </p>
+                      <div className="mt-3 flex items-center gap-3">
+                        {project.approvals.article && flow.find((f) => f.id === 'approve_article')?.status === 'done' ? (
+                          <>
+                            <span className="text-sm text-emerald-700">อนุมัติแล้ว</span>
+                            <Button size="sm" onClick={() => approveArticle(true)} disabled={running}>
+                              ยกเลิกการอนุมัติ
+                            </Button>
+                          </>
+                        ) : (
+                          <Button size="sm" variant="primary" disabled={!hasDraft || running} onClick={() => approveArticle(false)}>
+                            อนุมัติบทความนี้
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-900">สคริปต์วิดีโอ</h3>
+                        <div className="flex gap-1.5">
+                          <Button size="sm" disabled={!hasDraft || running} onClick={() => send('ช่วยเขียนสคริปต์วิดีโอจากบทความนี้')}>
+                            ให้ CEO เขียนสคริปต์
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={!caps?.video || running || project.videoPlan.clips.length === 0 || flow.find((f) => f.id === 'approve_article')?.status !== 'done'}
+                            title={caps?.video ? '' : 'ต้องมี Gemini API Key และใช้บนเซิร์ฟเวอร์ VPS'}
+                            onClick={() => send('ผลิตคลิปวิดีโอพร้อมเสียงและคำบรรยายตามสคริปต์')}
+                          >
+                            ผลิตคลิป
+                          </Button>
+                        </div>
+                      </div>
+                      {project.videoPlan.clips.length > 0 ? (
+                        <ol className="space-y-2 text-sm text-slate-700">
+                          {project.videoPlan.clips.map((c, i) => (
+                            <li key={i} className="rounded-md border border-slate-200 p-3">
+                              <div className="font-medium text-slate-900">
+                                คลิป {i + 1}: {c.title} <span className="font-normal text-slate-500">({c.durationSec} วินาที)</span>
+                              </div>
+                              <div className="mt-1">บทพูด: {c.narration}</div>
+                              <div className="text-xs text-slate-500">คำบรรยายบนจอ: {c.subtitle}</div>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="text-sm text-slate-500">ยังไม่มีสคริปต์</p>
+                      )}
+                      {project.media.subtitles && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          ไฟล์คำบรรยาย:{' '}
+                          <a href={project.media.subtitles.url} target="_blank" rel="noopener noreferrer" className="underline">
+                            ดาวน์โหลด .vtt
+                          </a>
+                        </p>
+                      )}
+                      {!caps?.video && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          การผลิตวิดีโอยังใช้ไม่ได้ในระบบนี้: {caps?.serverless ? 'โฮสต์แบบ Serverless จำกัดเวลา' : 'ยังไม่ได้ตั้งค่าคีย์ Gemini'}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-900">ผลงานและบทเรียน (Analytics)</h3>
+                        <Button size="sm" disabled={running || !project.postId} onClick={() => send('วิเคราะห์ผลงานของบทความนี้')}>
+                          ให้ CEO วิเคราะห์ผล
+                        </Button>
+                      </div>
+                      {project.learning.summary ? (
+                        <div className="space-y-2 text-sm text-slate-700">
+                          <p>{project.learning.summary}</p>
+                          {(['whatWorked', 'toImprove', 'nextTopics'] as const).map((k) =>
+                            project.learning[k] && project.learning[k]!.length > 0 ? (
+                              <div key={k}>
+                                <div className="text-xs font-medium text-slate-500">{k === 'whatWorked' ? 'ที่ได้ผล' : k === 'toImprove' ? 'ควรปรับปรุง' : 'หัวข้อที่ควรทำต่อ'}</div>
+                                <ul className="list-disc pl-5">
+                                  {project.learning[k]!.map((x, i) => (
+                                    <li key={i}>{x}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null
+                          )}
+                          <p className="text-xs text-slate-500">บทเรียนนี้ถูกส่งกลับให้ CEO ใช้วางแผนงานถัดไปแล้ว</p>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">
+                          {project.postId ? 'ยังไม่ได้วิเคราะห์ ใช้ข้อมูลจริงเท่านั้น (ยอดเข้าชม ความคิดเห็น ผลโพสต์ช่องทาง) ต้องรอให้มีผู้อ่านบ้าง' : 'วิเคราะห์ได้หลังเผยแพร่แล้ว'}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
                         <h3 className="text-sm font-semibold text-slate-900">ผลค้นคว้า</h3>
                         <Button size="sm" disabled={running || !(project.brief || form.title)} onClick={() => send(`ค้นคว้าข้อมูลเพิ่มเติมเกี่ยวกับ ${form.title || project.brief}`)}>
                           ให้ CEO ค้นคว้าเพิ่ม
@@ -806,6 +1004,9 @@ export const AgentWorkspace: React.FC<Props> = ({
                                 <li key={i}>{f}</li>
                               ))}
                             </ul>
+                          )}
+                          {project.research.subQueries && project.research.subQueries.length > 1 && (
+                            <div className="text-xs text-slate-500">คำถามที่ค้นคว้า: {project.research.subQueries.join(' / ')}</div>
                           )}
                           {project.research.sources && project.research.sources.length > 0 && (
                             <div className="text-xs text-slate-500">
@@ -900,7 +1101,7 @@ export const AgentWorkspace: React.FC<Props> = ({
           <p>CEO จะดำเนินการตามลำดับนี้ให้ครบในครั้งเดียว</p>
           <ol className="list-decimal space-y-1 pl-5">
             <li>ตรวจสื่อ: ถ้ายังไม่มีรูปปกจะสร้างให้ (เมื่อระบบรองรับ)</li>
-            <li>ตรวจคุณภาพ 4 ด้าน และแก้ไขอัตโนมัติถ้าพบประเด็น</li>
+            <li>Fact-check ทีละข้ออ้าง และตรวจคุณภาพ 4 ด้าน แก้ไขอัตโนมัติถ้าพบประเด็น</li>
             <li>เตรียม slug คำโปรย และแท็กถ้ายังไม่ครบ</li>
             <li>
               บันทึกขึ้นเว็บไซต์ พร้อมแนบ{[project?.media.cover && 'รูปปก', project?.media.video && 'วิดีโอ', project?.media.audio && 'เสียงบรรยาย'].filter(Boolean).join(' ') || 'สื่อทั้งหมดที่ทำไว้'}
@@ -924,10 +1125,10 @@ export const AgentWorkspace: React.FC<Props> = ({
               ))}
             </div>
           )}
-          {qa?.verdict === 'block' && (
+          {(qa?.verdict === 'block' || project?.factCheck.verdict === 'block') && (
             <label className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-800">
               <input type="checkbox" className="mt-0.5 accent-slate-900" checked={forcePublish} onChange={(e) => setForcePublish(e.target.checked)} />
-              <span>QA ประเมินว่ามีความเสี่ยงสูง ฉันตรวจสอบแล้วและยืนยันให้เผยแพร่ต่อ</span>
+              <span>ผลตรวจ (QA หรือ Fact-check) ประเมินว่ามีความเสี่ยงสูง ฉันตรวจสอบแล้วและยืนยันให้เผยแพร่ต่อ</span>
             </label>
           )}
         </div>

@@ -1,7 +1,7 @@
 // server/index.ts
 import express from "express";
-import path6 from "node:path";
-import fs6 from "node:fs";
+import path7 from "node:path";
+import fs7 from "node:fs";
 import multer from "multer";
 
 // server/db.ts
@@ -716,6 +716,20 @@ function initDatabase() {
     add("last_verified_at", "last_verified_at TEXT DEFAULT ''");
   } catch {
   }
+  try {
+    const cols = db.prepare("PRAGMA table_info('content_projects')").all();
+    if (!cols.some((c) => c.name === "extra_json")) {
+      db.exec("ALTER TABLE content_projects ADD COLUMN extra_json TEXT NOT NULL DEFAULT '{}'");
+    }
+  } catch {
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS ai_learnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    created_at TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    actions_json TEXT NOT NULL DEFAULT '[]'
+  )`);
   db.exec(`CREATE TABLE IF NOT EXISTS oauth_pending (
     nonce TEXT PRIMARY KEY,
     channel_key TEXT NOT NULL,
@@ -5075,6 +5089,12 @@ function parse(raw, fallback) {
 function mapProject(r) {
   const media = parse(r.media_json, { inline: [] });
   if (!Array.isArray(media.inline)) media.inline = [];
+  let extra = {};
+  try {
+    extra = JSON.parse(r.extra_json || "{}");
+  } catch {
+    extra = {};
+  }
   return {
     id: r.id,
     title: r.title || "",
@@ -5087,6 +5107,10 @@ function mapProject(r) {
     research: parse(r.research_json, {}),
     qa: parse(r.qa_json, {}),
     channels: parse(r.channels_json, {}),
+    factCheck: extra.factCheck && typeof extra.factCheck === "object" ? extra.factCheck : {},
+    videoPlan: { clips: Array.isArray(extra.videoPlan?.clips) ? extra.videoPlan.clips : [], updatedAt: extra.videoPlan?.updatedAt },
+    learning: extra.learning && typeof extra.learning === "object" ? extra.learning : {},
+    approvals: extra.approvals && typeof extra.approvals === "object" ? extra.approvals : {},
     createdAt: r.created_at,
     updatedAt: r.updated_at
   };
@@ -5114,7 +5138,7 @@ function saveProject(p) {
   db.prepare(
     `UPDATE content_projects SET
        title = ?, brief = ?, status = ?, post_id = ?, workflow_id = ?,
-       draft_json = ?, media_json = ?, research_json = ?, qa_json = ?, channels_json = ?, updated_at = ?
+       draft_json = ?, media_json = ?, research_json = ?, qa_json = ?, channels_json = ?, extra_json = ?, updated_at = ?
      WHERE id = ?`
   ).run(
     p.title,
@@ -5127,6 +5151,7 @@ function saveProject(p) {
     JSON.stringify(p.research),
     JSON.stringify(p.qa),
     JSON.stringify(p.channels),
+    JSON.stringify({ factCheck: p.factCheck, videoPlan: p.videoPlan, learning: p.learning, approvals: p.approvals }),
     now,
     p.id
   );
@@ -5270,8 +5295,66 @@ function createProjectFromWorkflow(workflowId) {
   };
   return saveProject(p);
 }
+function articleHash(p) {
+  return crypto4.createHash("sha1").update(JSON.stringify([p.draft.title, p.draft.subtitle, p.draft.content])).digest("hex").slice(0, 16);
+}
+function articleApproved(p) {
+  return Boolean(p.approvals.article && p.approvals.article.hash === articleHash(p) && p.draft.content);
+}
+function computeFlow(p) {
+  const hasDraft = Boolean(p.draft.title && p.draft.content);
+  const fcFresh = Boolean(p.factCheck.verdict && p.factCheck.contentHash === articleHash(p));
+  const approved = articleApproved(p);
+  const produced = Boolean(p.media.video || p.media.audio);
+  const published = p.status === "published";
+  const defs = [
+    { id: "owner", label: "\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2A\u0E31\u0E48\u0E07\u0E07\u0E32\u0E19", done: Boolean(p.brief || hasDraft), detail: p.brief ? p.brief.slice(0, 60) : "" },
+    { id: "ceo", label: "CEO \u0E27\u0E32\u0E07\u0E41\u0E1C\u0E19\u0E41\u0E25\u0E30\u0E41\u0E08\u0E01\u0E07\u0E32\u0E19", done: Boolean(p.brief || hasDraft), detail: "" },
+    { id: "research", label: "Deep Research", done: Boolean(p.research.summary), detail: p.research.sources?.length ? `\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07 ${p.research.sources.length}` : "" },
+    { id: "writer", label: "Content Writer", done: hasDraft, detail: hasDraft ? `${p.draft.content.replace(/\s+/g, "").length.toLocaleString()} \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23` : "" },
+    { id: "factcheck", label: "Fact-check", done: fcFresh, detail: fcFresh ? p.factCheck.verdict === "pass" ? "\u0E1C\u0E48\u0E32\u0E19" : p.factCheck.verdict === "revise" ? "\u0E04\u0E27\u0E23\u0E41\u0E01\u0E49" : "\u0E44\u0E21\u0E48\u0E04\u0E27\u0E23\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48" : "" },
+    { id: "approve_article", label: "\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21", done: approved, detail: approved ? "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E41\u0E25\u0E49\u0E27" : "\u0E23\u0E2D\u0E01\u0E32\u0E23\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34" },
+    { id: "video_script", label: "Video Script (2-3 \u0E04\u0E25\u0E34\u0E1B)", done: p.videoPlan.clips.length > 0, detail: p.videoPlan.clips.length ? `${p.videoPlan.clips.length} \u0E04\u0E25\u0E34\u0E1B` : "", optional: true },
+    { id: "production", label: "Avatar Production (\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D \u0E40\u0E2A\u0E35\u0E22\u0E07 \u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22)", done: produced, detail: [p.media.video && "\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D", p.media.audio && "\u0E40\u0E2A\u0E35\u0E22\u0E07", p.media.subtitles && "\u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22"].filter(Boolean).join(" "), optional: true },
+    { id: "approve_release", label: "\u0E15\u0E23\u0E27\u0E08\u0E41\u0E25\u0E30\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E01\u0E48\u0E2D\u0E19\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48", done: published || Boolean(p.approvals.release), detail: "" },
+    { id: "publish", label: "Publishing", done: published, detail: published && p.draft.slug ? `/articles/${p.draft.slug}` : "" },
+    { id: "analytics", label: "Analytics & Learning", done: Boolean(p.learning.summary), detail: p.learning.at ? "\u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C\u0E41\u0E25\u0E49\u0E27" : "" }
+  ];
+  let currentSet = false;
+  return defs.map((d, i) => {
+    let status;
+    if (d.done) status = "done";
+    else if (!currentSet && !d.optional) {
+      status = "current";
+      currentSet = true;
+    } else status = d.optional ? "optional" : "todo";
+    return { n: i + 1, id: d.id, label: d.label, status, detail: d.detail };
+  });
+}
+function recentLearnings(limit = 5) {
+  const rows = db.prepare("SELECT summary, actions_json, created_at FROM ai_learnings ORDER BY id DESC LIMIT ?").all(limit);
+  return rows.map((r) => {
+    let actions = [];
+    try {
+      actions = JSON.parse(r.actions_json || "[]");
+    } catch {
+      actions = [];
+    }
+    return { summary: r.summary, actions, createdAt: r.created_at };
+  });
+}
+function saveLearning(projectId, summary, actions) {
+  db.prepare("INSERT INTO ai_learnings (project_id, created_at, summary, actions_json) VALUES (?, ?, ?, ?)").run(
+    projectId,
+    (/* @__PURE__ */ new Date()).toISOString(),
+    summary,
+    JSON.stringify(actions)
+  );
+}
 
 // server/agentTools.ts
+import fs5 from "node:fs";
+import path5 from "node:path";
 import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
 
 // server/publishEngine.ts
@@ -6340,6 +6423,13 @@ function requireDraft(ctx) {
   const d = ctx.project.draft;
   return d.title && d.content ? d : null;
 }
+function vttTime(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor(sec % 3600 / 60);
+  const s = Math.floor(sec % 60);
+  const pad = (n, w = 2) => String(n).padStart(w, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}.000`;
+}
 function upsertPostFromProject(project, status) {
   const d = project.draft;
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -6387,7 +6477,33 @@ var TOOLS = [
       const related = db.prepare(
         "SELECT id, title, slug FROM posts WHERE status = 'published' AND (title LIKE ? OR tags_json LIKE ?) ORDER BY created_at DESC LIMIT 5"
       ).all(like, like);
-      const web = ctx.caps.webSearch ? await groundedSearch(q) : null;
+      let queries = [q];
+      let web = null;
+      if (ctx.caps.webSearch) {
+        try {
+          const plan = await llmJson(
+            ctx,
+            `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D Research Agent \u0E27\u0E32\u0E07\u0E41\u0E1C\u0E19\u0E01\u0E32\u0E23\u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32\u0E40\u0E0A\u0E34\u0E07\u0E25\u0E36\u0E01 \u0E41\u0E15\u0E01\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E40\u0E1B\u0E47\u0E19\u0E04\u0E33\u0E16\u0E32\u0E21\u0E22\u0E48\u0E2D\u0E22 2-3 \u0E02\u0E49\u0E2D\u0E17\u0E35\u0E48\u0E15\u0E48\u0E32\u0E07\u0E21\u0E38\u0E21\u0E01\u0E31\u0E19 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25/\u0E2A\u0E16\u0E34\u0E15\u0E34\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14, \u0E15\u0E31\u0E27\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E08\u0E23\u0E34\u0E07, \u0E02\u0E49\u0E2D\u0E42\u0E15\u0E49\u0E41\u0E22\u0E49\u0E07\u0E2B\u0E23\u0E37\u0E2D\u0E02\u0E49\u0E2D\u0E08\u0E33\u0E01\u0E31\u0E14)
+\u0E15\u0E2D\u0E1A JSON: {"queries":["\u0E04\u0E33\u0E16\u0E32\u0E21\u0E22\u0E48\u0E2D\u0E22"]}`,
+            `\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D: ${q}`,
+            void 0,
+            "economy"
+          );
+          queries = [q, ...Array.isArray(plan.data.queries) ? plan.data.queries.map((x) => str(x, 200)).filter(Boolean).slice(0, 3) : []];
+        } catch {
+          queries = [q];
+        }
+        const found = await Promise.all(queries.map((x) => groundedSearch(x)));
+        const hits = found.map((f, i) => f ? { q: queries[i], f } : null).filter(Boolean);
+        if (hits.length) {
+          const seen = /* @__PURE__ */ new Set();
+          web = {
+            text: hits.map((h) => `\u0E1C\u0E25\u0E04\u0E49\u0E19\u0E2B\u0E32\u0E04\u0E33\u0E16\u0E32\u0E21 "${h.q}":
+${h.f.text}`).join("\n\n"),
+            sources: hits.flatMap((h) => h.f.sources).filter((x) => seen.has(x.uri) ? false : (seen.add(x.uri), true))
+          };
+        }
+      }
       const material = [
         kb.length ? `\u0E10\u0E32\u0E19\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49:
 ${kb.map((k, i) => `[KB-${i + 1}] ${k.title}: ${k.summary}
@@ -6414,10 +6530,11 @@ ${material || "(\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E
       );
       ctx.project.research = {
         query: q,
+        subQueries: queries.length > 1 ? queries : void 0,
         summary: str(data.summary, 1500),
         facts: (Array.isArray(data.facts) ? data.facts : []).map((f) => str(f, 300)).slice(0, 10),
         angles: (Array.isArray(data.angles) ? data.angles : []).map((f) => str(f, 300)).slice(0, 6),
-        sources: web?.sources.slice(0, 8) || [],
+        sources: web?.sources.slice(0, 12) || [],
         knowledgeUsed: kb.map((k) => k.title),
         relatedPosts: related,
         updatedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -6588,6 +6705,9 @@ ${line}`;
       if (!/วิดีโอ|วีดีโอ|vdo|video|คลิป/i.test(ctx.userMessage)) {
         return { ok: false, summary: "\u0E02\u0E49\u0E32\u0E21\u0E01\u0E32\u0E23\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D \u0E40\u0E1E\u0E23\u0E32\u0E30\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E02\u0E2D\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D (\u0E04\u0E48\u0E32\u0E43\u0E0A\u0E49\u0E08\u0E48\u0E32\u0E22\u0E2A\u0E39\u0E07) \u0E2B\u0E32\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E43\u0E2B\u0E49\u0E1A\u0E2D\u0E01\u0E44\u0E14\u0E49\u0E40\u0E25\u0E22" };
       }
+      if (!articleApproved(ctx.project)) {
+        return { ok: false, summary: '\u0E23\u0E2D\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E01\u0E48\u0E2D\u0E19 \u0E08\u0E36\u0E07\u0E08\u0E30\u0E1C\u0E25\u0E34\u0E15\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E44\u0E14\u0E49 (\u0E01\u0E14\u0E1B\u0E38\u0E48\u0E21 "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" \u0E43\u0E19\u0E41\u0E17\u0E47\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A)' };
+      }
       if (!ctx.caps.video) {
         return {
           ok: false,
@@ -6620,6 +6740,9 @@ ${line}`;
     run: async (ctx, args) => {
       if (!/เสียง|พากย์|บรรยาย|audio|voice|tts/i.test(ctx.userMessage)) {
         return { ok: false, summary: "\u0E02\u0E49\u0E32\u0E21\u0E01\u0E32\u0E23\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07 \u0E40\u0E1E\u0E23\u0E32\u0E30\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E02\u0E2D\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22" };
+      }
+      if (!articleApproved(ctx.project)) {
+        return { ok: false, summary: '\u0E23\u0E2D\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E01\u0E48\u0E2D\u0E19 \u0E08\u0E36\u0E07\u0E08\u0E30\u0E1C\u0E25\u0E34\u0E15\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22\u0E44\u0E14\u0E49 (\u0E01\u0E14\u0E1B\u0E38\u0E48\u0E21 "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" \u0E43\u0E19\u0E41\u0E17\u0E47\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A)' };
       }
       if (!ctx.caps.audio) return { ok: false, summary: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07" };
       const d = requireDraft(ctx);
@@ -6829,6 +6952,235 @@ ${BRAND_RULES}
     }
   },
   {
+    name: "fact_check",
+    agent: "factcheck",
+    description: 'Fact-check Agent: \u0E41\u0E22\u0E01\u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E17\u0E35\u0E48\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E44\u0E14\u0E49\u0E43\u0E19\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 (\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02 \u0E0A\u0E37\u0E48\u0E2D \u0E27\u0E31\u0E19\u0E17\u0E35\u0E48 \u0E07\u0E32\u0E19\u0E27\u0E34\u0E08\u0E31\u0E22) \u0E41\u0E25\u0E49\u0E27\u0E15\u0E23\u0E27\u0E08\u0E17\u0E35\u0E25\u0E30\u0E02\u0E49\u0E2D\u0E01\u0E31\u0E1A\u0E1C\u0E25\u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32 \u0E41\u0E2B\u0E25\u0E48\u0E07\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07 \u0E41\u0E25\u0E30\u0E10\u0E32\u0E19\u0E04\u0E27\u0E32\u0E21\u0E23\u0E39\u0E49 \u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E04\u0E27\u0E32\u0E21\u0E40\u0E1B\u0E47\u0E19\u0E01\u0E25\u0E32\u0E07 \u0E02\u0E49\u0E2D\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E08\u0E30\u0E16\u0E39\u0E01\u0E23\u0E30\u0E1A\u0E38\u0E27\u0E48\u0E32 "\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49" \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48 "\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07"',
+    args: "{}",
+    run: async (ctx) => {
+      const d = requireDraft(ctx);
+      if (!d) return { ok: false, summary: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E09\u0E1A\u0E31\u0E1A\u0E23\u0E48\u0E32\u0E07\u0E43\u0E2B\u0E49\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07" };
+      const r = ctx.project.research;
+      const evidence = [
+        (r.facts || []).length ? `\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07\u0E08\u0E32\u0E01\u0E1C\u0E25\u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32:
+${(r.facts || []).map((f) => `- ${f}`).join("\n")}` : "",
+        r.summary ? `\u0E2A\u0E23\u0E38\u0E1B\u0E1C\u0E25\u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32: ${r.summary}` : "",
+        (r.sources || []).length ? `\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07:
+${(r.sources || []).map((s) => `- ${s.title} ${s.uri}`).join("\n")}` : "",
+        brandContext(d.title)
+      ].filter(Boolean).join("\n\n");
+      const { data } = await llmJson(
+        ctx,
+        `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D Fact-check Agent \u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E02\u0E49\u0E21\u0E07\u0E27\u0E14\u0E41\u0E25\u0E30\u0E40\u0E1B\u0E47\u0E19\u0E01\u0E25\u0E32\u0E07
+1) \u0E41\u0E22\u0E01\u0E40\u0E09\u0E1E\u0E32\u0E30 "\u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E17\u0E35\u0E48\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E44\u0E14\u0E49" \u0E43\u0E19\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 (\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02 \u0E2A\u0E16\u0E34\u0E15\u0E34 \u0E0A\u0E37\u0E48\u0E2D\u0E1A\u0E38\u0E04\u0E04\u0E25/\u0E2B\u0E19\u0E48\u0E27\u0E22\u0E07\u0E32\u0E19 \u0E27\u0E31\u0E19\u0E17\u0E35\u0E48 \u0E1C\u0E25\u0E07\u0E32\u0E19\u0E27\u0E34\u0E08\u0E31\u0E22 \u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E40\u0E0A\u0E34\u0E07\u0E40\u0E2B\u0E15\u0E38\u0E41\u0E25\u0E30\u0E1C\u0E25) \u0E44\u0E21\u0E48\u0E40\u0E01\u0E34\u0E19 12 \u0E02\u0E49\u0E2D
+2) \u0E15\u0E31\u0E14\u0E2A\u0E34\u0E19\u0E41\u0E15\u0E48\u0E25\u0E30\u0E02\u0E49\u0E2D\u0E08\u0E32\u0E01\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E17\u0E35\u0E48\u0E43\u0E2B\u0E49\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19:
+   supported = \u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E43\u0E19\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E43\u0E2B\u0E49\u0E2A\u0E19\u0E31\u0E1A\u0E2A\u0E19\u0E38\u0E19\u0E42\u0E14\u0E22\u0E15\u0E23\u0E07 (\u0E23\u0E30\u0E1A\u0E38\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E2A\u0E31\u0E49\u0E19\u0E46)
+   unverifiable = \u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E17\u0E31\u0E49\u0E07\u0E2A\u0E19\u0E31\u0E1A\u0E2A\u0E19\u0E38\u0E19\u0E41\u0E25\u0E30\u0E02\u0E31\u0E14\u0E41\u0E22\u0E49\u0E07 (\u0E2B\u0E49\u0E32\u0E21\u0E40\u0E14\u0E32\u0E27\u0E48\u0E32\u0E16\u0E39\u0E01)
+   unsupported = \u0E02\u0E31\u0E14\u0E41\u0E22\u0E49\u0E07\u0E01\u0E31\u0E1A\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19 \u0E2B\u0E23\u0E37\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02/\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E1B\u0E23\u0E32\u0E01\u0E0F\u0E40\u0E25\u0E22\u0E41\u0E25\u0E30\u0E14\u0E39\u0E40\u0E1B\u0E47\u0E19\u0E01\u0E32\u0E23\u0E41\u0E15\u0E48\u0E07\u0E02\u0E36\u0E49\u0E19
+3) \u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E04\u0E27\u0E32\u0E21\u0E40\u0E1B\u0E47\u0E19\u0E01\u0E25\u0E32\u0E07 0-100 (\u0E44\u0E21\u0E48\u0E0A\u0E35\u0E49\u0E19\u0E33 \u0E44\u0E21\u0E48\u0E42\u0E06\u0E29\u0E13\u0E32\u0E40\u0E01\u0E34\u0E19\u0E08\u0E23\u0E34\u0E07 \u0E44\u0E21\u0E48\u0E21\u0E35\u0E2D\u0E04\u0E15\u0E34) \u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E2B\u0E21\u0E32\u0E22\u0E40\u0E2B\u0E15\u0E38
+\u0E15\u0E2D\u0E1A JSON: {"claims":[{"text":"","verdict":"supported|unverifiable|unsupported","evidence":""}],"neutrality":{"score":0,"notes":""},"summary":""}`,
+        `\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21:
+${JSON.stringify({ title: d.title, content: d.content })}
+
+\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E17\u0E35\u0E48\u0E21\u0E35:
+${evidence}`,
+        (o) => {
+          if (!Array.isArray(o.claims) || !o.neutrality) throw new Error("\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E44\u0E21\u0E48\u0E04\u0E23\u0E1A: \u0E44\u0E21\u0E48\u0E21\u0E35\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07");
+        },
+        "economy"
+      );
+      const claims = data.claims.map((c) => ({
+        text: str(c?.text, 300),
+        verdict: ["supported", "unverifiable", "unsupported"].includes(c?.verdict) ? c.verdict : "unverifiable",
+        evidence: str(c?.evidence, 300)
+      })).filter((c) => c.text).slice(0, 12);
+      const neutrality = { score: Math.max(0, Math.min(100, Math.round(Number(data.neutrality?.score) || 0))), notes: str(data.neutrality?.notes, 300) };
+      const unsupported = claims.filter((c) => c.verdict === "unsupported").length;
+      const verdict = unsupported >= 3 || neutrality.score < 50 ? "block" : unsupported >= 1 || neutrality.score < 70 ? "revise" : "pass";
+      ctx.project.factCheck = { claims, neutrality, verdict, summary: str(data.summary, 400), contentHash: articleHash(ctx.project), checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      saveProject(ctx.project);
+      const counts = (v) => claims.filter((c) => c.verdict === v).length;
+      return {
+        ok: true,
+        summary: `${verdict === "pass" ? "\u0E1C\u0E48\u0E32\u0E19" : verdict === "revise" ? "\u0E04\u0E27\u0E23\u0E41\u0E01\u0E49\u0E44\u0E02" : "\u0E44\u0E21\u0E48\u0E04\u0E27\u0E23\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48"} (\u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07 ${claims.length}: \u0E22\u0E37\u0E19\u0E22\u0E31\u0E19\u0E44\u0E14\u0E49 ${counts("supported")}, \u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49 ${counts("unverifiable")}, \u0E02\u0E31\u0E14\u0E41\u0E22\u0E49\u0E07 ${unsupported}; \u0E04\u0E27\u0E32\u0E21\u0E40\u0E1B\u0E47\u0E19\u0E01\u0E25\u0E32\u0E07 ${neutrality.score}/100)`,
+        data: ctx.project.factCheck
+      };
+    }
+  },
+  {
+    name: "video_script",
+    agent: "script",
+    description: "Video Script Agent: \u0E41\u0E1B\u0E25\u0E07\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E17\u0E35\u0E48\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E41\u0E25\u0E49\u0E27\u0E40\u0E1B\u0E47\u0E19\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E2A\u0E31\u0E49\u0E19 2-3 \u0E04\u0E25\u0E34\u0E1B (\u0E1A\u0E17\u0E1E\u0E39\u0E14 \u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22\u0E1A\u0E19\u0E08\u0E2D \u0E41\u0E25\u0E30 prompt \u0E20\u0E32\u0E1E) \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E19\u0E33\u0E44\u0E1B\u0E1C\u0E25\u0E34\u0E15\u0E15\u0E48\u0E2D",
+    args: "{}",
+    run: async (ctx) => {
+      const d = requireDraft(ctx);
+      if (!d) return { ok: false, summary: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E43\u0E2B\u0E49\u0E41\u0E1B\u0E25\u0E07\u0E40\u0E1B\u0E47\u0E19\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C" };
+      const { data } = await llmJson(
+        ctx,
+        `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D Video Script Agent \u0E41\u0E1B\u0E25\u0E07\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E40\u0E1B\u0E47\u0E19\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E2A\u0E31\u0E49\u0E19 2-3 \u0E04\u0E25\u0E34\u0E1B \u0E40\u0E25\u0E48\u0E32\u0E15\u0E48\u0E2D\u0E40\u0E19\u0E37\u0E48\u0E2D\u0E07\u0E01\u0E31\u0E19 (\u0E40\u0E1B\u0E34\u0E14\u0E1B\u0E23\u0E30\u0E40\u0E14\u0E47\u0E19, \u0E2A\u0E32\u0E23\u0E30\u0E2B\u0E25\u0E31\u0E01, \u0E02\u0E49\u0E2D\u0E2A\u0E23\u0E38\u0E1B\u0E41\u0E25\u0E30\u0E0A\u0E27\u0E19\u0E2D\u0E48\u0E32\u0E19\u0E15\u0E48\u0E2D)
+${BRAND_RULES}
+\u0E41\u0E15\u0E48\u0E25\u0E30\u0E04\u0E25\u0E34\u0E1B: title, durationSec (6-10), narration (\u0E1A\u0E17\u0E1E\u0E39\u0E14\u0E20\u0E32\u0E29\u0E32\u0E44\u0E17\u0E22 \u0E44\u0E21\u0E48\u0E40\u0E01\u0E34\u0E19 260 \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23 \u0E43\u0E0A\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E2A\u0E34\u0E48\u0E07\u0E17\u0E35\u0E48\u0E21\u0E35\u0E43\u0E19\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21), subtitle (\u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22\u0E1A\u0E19\u0E08\u0E2D 1-2 \u0E1A\u0E23\u0E23\u0E17\u0E31\u0E14\u0E2A\u0E31\u0E49\u0E19), visualPrompt (English: \u0E1C\u0E39\u0E49\u0E19\u0E33\u0E40\u0E2A\u0E19\u0E2D\u0E2B\u0E23\u0E37\u0E2D\u0E09\u0E32\u0E01\u0E1B\u0E23\u0E30\u0E01\u0E2D\u0E1A\u0E17\u0E35\u0E48\u0E2A\u0E37\u0E48\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E2B\u0E21\u0E32\u0E22 \u0E44\u0E21\u0E48\u0E21\u0E35\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23\u0E43\u0E19\u0E20\u0E32\u0E1E)
+\u0E15\u0E2D\u0E1A JSON: {"clips":[{"title":"","durationSec":8,"narration":"","subtitle":"","visualPrompt":""}]}`,
+        `\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21:
+${JSON.stringify({ title: d.title, excerpt: d.excerpt, content: d.content.slice(0, 6e3) })}`,
+        (o) => {
+          if (!Array.isArray(o.clips) || o.clips.length < 1) throw new Error("\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E44\u0E21\u0E48\u0E04\u0E23\u0E1A: \u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E25\u0E34\u0E1B");
+        }
+      );
+      const clips = data.clips.slice(0, 3).map((c, i) => ({
+        title: str(c?.title, 120) || `\u0E04\u0E25\u0E34\u0E1B ${i + 1}`,
+        durationSec: Math.max(4, Math.min(10, Math.round(Number(c?.durationSec) || 8))),
+        narration: str(c?.narration, 300),
+        subtitle: str(c?.subtitle, 200) || str(c?.narration, 120),
+        visualPrompt: str(c?.visualPrompt, 600)
+      }));
+      ctx.project.videoPlan = { clips, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      saveProject(ctx.project);
+      return { ok: true, summary: `\u0E40\u0E02\u0E35\u0E22\u0E19\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D ${clips.length} \u0E04\u0E25\u0E34\u0E1B (\u0E23\u0E27\u0E21 ${clips.reduce((a, c) => a + c.durationSec, 0)} \u0E27\u0E34\u0E19\u0E32\u0E17\u0E35)`, data: clips };
+    }
+  },
+  {
+    name: "produce_clips",
+    agent: "video",
+    description: "Avatar Production: \u0E1C\u0E25\u0E34\u0E15\u0E04\u0E25\u0E34\u0E1B\u0E15\u0E32\u0E21\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C (\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D AI \u0E15\u0E48\u0E2D\u0E04\u0E25\u0E34\u0E1B + \u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22\u0E44\u0E17\u0E22 + \u0E44\u0E1F\u0E25\u0E4C\u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22 .vtt) \u0E41\u0E25\u0E49\u0E27\u0E15\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E23\u0E27\u0E21\u0E40\u0E1B\u0E47\u0E19\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E40\u0E14\u0E35\u0E22\u0E27\u0E41\u0E19\u0E1A\u0E01\u0E31\u0E1A\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21 \u0E43\u0E0A\u0E49\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E02\u0E2D\u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19 \u0E15\u0E49\u0E2D\u0E07\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E41\u0E25\u0E49\u0E27 \u0E41\u0E25\u0E30\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C (video_script) \u0E01\u0E48\u0E2D\u0E19",
+    args: "{}",
+    run: async (ctx) => {
+      if (!/วิดีโอ|วีดีโอ|vdo|video|คลิป|ผลิต/i.test(ctx.userMessage)) {
+        return { ok: false, summary: "\u0E02\u0E49\u0E32\u0E21\u0E01\u0E32\u0E23\u0E1C\u0E25\u0E34\u0E15\u0E04\u0E25\u0E34\u0E1B \u0E40\u0E1E\u0E23\u0E32\u0E30\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E02\u0E2D (\u0E04\u0E48\u0E32\u0E43\u0E0A\u0E49\u0E08\u0E48\u0E32\u0E22\u0E2A\u0E39\u0E07)" };
+      }
+      if (!articleApproved(ctx.project)) {
+        return { ok: false, summary: '\u0E23\u0E2D\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E01\u0E48\u0E2D\u0E19 \u0E08\u0E36\u0E07\u0E08\u0E30\u0E1C\u0E25\u0E34\u0E15\u0E04\u0E25\u0E34\u0E1B\u0E44\u0E14\u0E49 (\u0E01\u0E14\u0E1B\u0E38\u0E48\u0E21 "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" \u0E43\u0E19\u0E41\u0E17\u0E47\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A)' };
+      }
+      const clips = ctx.project.videoPlan.clips;
+      if (clips.length === 0) return { ok: false, summary: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D \u0E43\u0E2B\u0E49 video_script \u0E01\u0E48\u0E2D\u0E19" };
+      if (!ctx.caps.video) {
+        return {
+          ok: false,
+          summary: ctx.caps.serverless ? "\u0E1C\u0E25\u0E34\u0E15\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E1A\u0E19\u0E42\u0E2E\u0E2A\u0E15\u0E4C\u0E41\u0E1A\u0E1A Serverless (\u0E08\u0E33\u0E01\u0E31\u0E14\u0E40\u0E27\u0E25\u0E32 60 \u0E27\u0E34\u0E19\u0E32\u0E17\u0E35) \u0E01\u0E23\u0E38\u0E13\u0E32\u0E43\u0E0A\u0E49\u0E40\u0E0B\u0E34\u0E23\u0E4C\u0E1F\u0E40\u0E27\u0E2D\u0E23\u0E4C VPS" : "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D (\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35 Gemini API Key \u0E2B\u0E23\u0E37\u0E2D Vertex)"
+        };
+      }
+      const made = [];
+      for (let i = 0; i < clips.length; i++) {
+        const c = clips[i];
+        ctx.log(`\u0E1C\u0E25\u0E34\u0E15\u0E04\u0E25\u0E34\u0E1B ${i + 1}/${clips.length}`);
+        const asset = await generateRealVideo({
+          prompt: `${c.visualPrompt}. Professional presenter-style educational explainer, natural light, no on-screen text.`,
+          aspectRatio: "16:9",
+          durationSec: c.durationSec,
+          resolution: "720p",
+          workflowId: ctx.project.workflowId,
+          thaiSummary: c.title,
+          reviewStatus: "approved"
+        });
+        made.push({ url: asset.fileUrl, assetId: asset.id, caption: c.title });
+      }
+      let voiceUrl = "";
+      let voiceNote = "";
+      if (ctx.caps.audio) {
+        try {
+          const voice = await generateRealAudio({ text: clips.map((c) => c.narration).join(" "), workflowId: ctx.project.workflowId });
+          voiceUrl = voice.fileUrl;
+          ctx.project.media.audio = { url: voice.fileUrl, assetId: voice.id };
+        } catch (e) {
+          voiceNote = ` (\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08: ${e.message.slice(0, 80)})`;
+        }
+      } else voiceNote = " (\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E35\u0E22\u0E07 \u0E08\u0E36\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22)";
+      let master = made[0].url;
+      let stitchNote = "";
+      if (made.length > 1) {
+        try {
+          const st = await stitchFlowScenesWithFfmpeg({
+            sceneVideoUrls: made.map((m) => m.url),
+            aspectRatio: "16:9",
+            voiceoverAudioUrl: voiceUrl || void 0,
+            projectTitle: ctx.project.draft.title
+          });
+          master = st.masterVideoUrl;
+        } catch (e) {
+          stitchNote = ` (\u0E15\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E23\u0E27\u0E21\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 \u0E43\u0E0A\u0E49\u0E04\u0E25\u0E34\u0E1B\u0E41\u0E23\u0E01\u0E40\u0E1B\u0E47\u0E19\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E2B\u0E25\u0E31\u0E01: ${e.message.slice(0, 80)})`;
+        }
+      }
+      let t = 0;
+      const cues = clips.map((c, i) => {
+        const start = t;
+        t += c.durationSec;
+        return `${i + 1}
+${vttTime(start)} --> ${vttTime(t)}
+${c.subtitle || c.narration}
+`;
+      }).join("\n");
+      const dir = path5.join(UPLOADS_ROOT, "subtitles");
+      fs5.mkdirSync(dir, { recursive: true });
+      const fname = `ws${ctx.project.id}-${Date.now()}.vtt`;
+      fs5.writeFileSync(path5.join(dir, fname), `WEBVTT
+
+${cues}`, "utf8");
+      ctx.project.media.clips = made.map((m) => ({ url: m.url, assetId: m.assetId, caption: m.caption }));
+      ctx.project.media.video = { url: master, prompt: "produce_clips" };
+      ctx.project.media.subtitles = { url: `/uploads/subtitles/${fname}` };
+      ctx.project.draft.contentType = "video";
+      ctx.project.qa = {};
+      saveProject(ctx.project);
+      return { ok: true, summary: `\u0E1C\u0E25\u0E34\u0E15 ${made.length} \u0E04\u0E25\u0E34\u0E1B\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E23\u0E49\u0E2D\u0E22 \u0E41\u0E19\u0E1A\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E2B\u0E25\u0E31\u0E01 \u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22${voiceUrl ? " \u0E41\u0E25\u0E30\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22" : ""}${voiceNote}${stitchNote}`, data: { master } };
+    }
+  },
+  {
+    name: "analyze_performance",
+    agent: "analytics",
+    description: "Analytics & Learning Agent: \u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C\u0E1C\u0E25\u0E07\u0E32\u0E19\u0E08\u0E32\u0E01\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E23\u0E34\u0E07\u0E43\u0E19\u0E23\u0E30\u0E1A\u0E1A (\u0E22\u0E2D\u0E14\u0E40\u0E02\u0E49\u0E32\u0E0A\u0E21 \u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19\u0E41\u0E25\u0E30\u0E04\u0E30\u0E41\u0E19\u0E19 \u0E1C\u0E25\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E41\u0E15\u0E48\u0E25\u0E30\u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07 \u0E40\u0E17\u0E35\u0E22\u0E1A\u0E01\u0E31\u0E1A\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E2D\u0E37\u0E48\u0E19) \u0E2A\u0E23\u0E38\u0E1B\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E41\u0E25\u0E30\u0E41\u0E19\u0E27\u0E17\u0E32\u0E07\u0E04\u0E23\u0E31\u0E49\u0E07\u0E15\u0E48\u0E2D\u0E44\u0E1B \u0E41\u0E25\u0E30\u0E2A\u0E48\u0E07\u0E01\u0E25\u0E31\u0E1A\u0E43\u0E2B\u0E49 CEO \u0E43\u0E0A\u0E49\u0E27\u0E32\u0E07\u0E41\u0E1C\u0E19\u0E07\u0E32\u0E19\u0E16\u0E31\u0E14\u0E44\u0E1B \u0E43\u0E0A\u0E49\u0E44\u0E14\u0E49\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48\u0E41\u0E25\u0E49\u0E27",
+    args: "{}",
+    run: async (ctx) => {
+      const p = ctx.project;
+      if (!p.postId) return { ok: false, summary: "\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E19\u0E35\u0E49\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48 \u0E08\u0E36\u0E07\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E43\u0E2B\u0E49\u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C" };
+      const post = db.prepare("SELECT id, title, views, created_at, category FROM posts WHERE id = ?").get(p.postId);
+      if (!post) return { ok: false, summary: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E17\u0E35\u0E48\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48" };
+      const cm = db.prepare("SELECT COUNT(*) AS n, AVG(rating) AS avg FROM comments WHERE post_id = ?").get(p.postId);
+      const comments = db.prepare("SELECT message, rating FROM comments WHERE post_id = ? ORDER BY id DESC LIMIT 10").all(p.postId);
+      const top = db.prepare("SELECT title, views, category FROM posts WHERE status = 'published' ORDER BY views DESC LIMIT 5").all();
+      const peer = db.prepare("SELECT AVG(views) AS avgViews, COUNT(*) AS n FROM posts WHERE status = 'published' AND category = ? AND id != ?").get(post.category, p.postId);
+      const channelResults = p.channels.results || {};
+      const metrics = {
+        views: Number(post.views || 0),
+        daysOnline: Math.max(1, Math.round((Date.now() - new Date(post.created_at).getTime()) / 864e5)),
+        comments: Number(cm.n || 0),
+        avgRating: cm.avg ? Math.round(cm.avg * 10) / 10 : null,
+        sameCategoryAvgViews: peer.avgViews ? Math.round(peer.avgViews) : null,
+        sameCategoryPosts: peer.n,
+        channels: Object.fromEntries(Object.entries(channelResults).map(([k, v]) => [k, v.status]))
+      };
+      if (metrics.views === 0 && metrics.comments === 0 && Object.keys(metrics.channels).length === 0) {
+        return { ok: false, summary: "\u0E22\u0E31\u0E07\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E44\u0E21\u0E48\u0E1E\u0E2D\u0E43\u0E2B\u0E49\u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C (\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E22\u0E2D\u0E14\u0E40\u0E02\u0E49\u0E32\u0E0A\u0E21 \u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19 \u0E2B\u0E23\u0E37\u0E2D\u0E1C\u0E25\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07) \u0E25\u0E2D\u0E07\u0E43\u0E2B\u0E21\u0E48\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E2D\u0E2D\u0E19\u0E44\u0E25\u0E19\u0E4C\u0E21\u0E32\u0E2A\u0E31\u0E01\u0E23\u0E30\u0E22\u0E30" };
+      }
+      const { data } = await llmJson(
+        ctx,
+        `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D Analytics & Learning Agent \u0E2A\u0E23\u0E38\u0E1B\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E08\u0E32\u0E01\u0E1C\u0E25\u0E07\u0E32\u0E19\u0E08\u0E23\u0E34\u0E07\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E2A\u0E48\u0E07\u0E01\u0E25\u0E31\u0E1A\u0E44\u0E1B\u0E43\u0E2B\u0E49 CEO \u0E27\u0E32\u0E07\u0E41\u0E1C\u0E19\u0E07\u0E32\u0E19\u0E16\u0E31\u0E14\u0E44\u0E1B
+\u0E43\u0E0A\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02\u0E41\u0E25\u0E30\u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19\u0E17\u0E35\u0E48\u0E43\u0E2B\u0E49 \u0E2B\u0E49\u0E32\u0E21\u0E41\u0E15\u0E48\u0E07\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02\u0E2B\u0E23\u0E37\u0E2D\u0E2A\u0E32\u0E40\u0E2B\u0E15\u0E38\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19 \u0E16\u0E49\u0E32\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E19\u0E49\u0E2D\u0E22\u0E43\u0E2B\u0E49\u0E1A\u0E2D\u0E01\u0E27\u0E48\u0E32\u0E22\u0E31\u0E07\u0E2A\u0E23\u0E38\u0E1B\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E0A\u0E31\u0E14
+${BRAND_RULES}
+\u0E15\u0E2D\u0E1A JSON: {"summary":"\u0E2A\u0E23\u0E38\u0E1B 2-3 \u0E1B\u0E23\u0E30\u0E42\u0E22\u0E04","whatWorked":["..."],"toImprove":["..."],"nextTopics":["\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D\u0E17\u0E35\u0E48\u0E04\u0E27\u0E23\u0E17\u0E33\u0E15\u0E48\u0E2D \u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E40\u0E2B\u0E15\u0E38\u0E1C\u0E25\u0E2A\u0E31\u0E49\u0E19\u0E46"]}`,
+        `\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21: ${post.title}
+\u0E15\u0E31\u0E27\u0E0A\u0E35\u0E49\u0E27\u0E31\u0E14: ${JSON.stringify(metrics)}
+\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E22\u0E2D\u0E14\u0E19\u0E34\u0E22\u0E21\u0E02\u0E2D\u0E07\u0E40\u0E27\u0E47\u0E1A: ${JSON.stringify(top)}
+\u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14:
+${comments.map((c) => `- (${c.rating}/5) ${c.message.slice(0, 200)}`).join("\n") || "-"}`,
+        (o) => {
+          if (typeof o.summary !== "string" || !o.summary.trim()) throw new Error("\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E44\u0E21\u0E48\u0E04\u0E23\u0E1A: \u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E23\u0E38\u0E1B");
+        },
+        "economy"
+      );
+      const list = (v) => Array.isArray(v) ? v.map((x) => str(x, 240)).filter(Boolean).slice(0, 5) : [];
+      p.learning = {
+        summary: str(data.summary, 600),
+        whatWorked: list(data.whatWorked),
+        toImprove: list(data.toImprove),
+        nextTopics: list(data.nextTopics),
+        metrics,
+        at: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      saveProject(p);
+      saveLearning(p.id, p.learning.summary || "", [...p.learning.toImprove || [], ...p.learning.nextTopics || []]);
+      return { ok: true, summary: `\u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C\u0E1C\u0E25\u0E07\u0E32\u0E19\u0E41\u0E25\u0E49\u0E27 (\u0E40\u0E02\u0E49\u0E32\u0E0A\u0E21 ${metrics.views}, \u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19 ${metrics.comments}) \u0E41\u0E25\u0E30\u0E2A\u0E48\u0E07\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E01\u0E25\u0E31\u0E1A\u0E43\u0E2B\u0E49 CEO`, data: p.learning };
+    }
+  },
+  {
     name: "find_posts",
     agent: "ceo",
     description: "\u0E04\u0E49\u0E19\u0E2B\u0E32\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E17\u0E35\u0E48\u0E21\u0E35\u0E2D\u0E22\u0E39\u0E48\u0E41\u0E25\u0E49\u0E27\u0E43\u0E19\u0E23\u0E30\u0E1A\u0E1A\u0E08\u0E32\u0E01\u0E0A\u0E37\u0E48\u0E2D/\u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32 \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E19\u0E33\u0E21\u0E32\u0E41\u0E01\u0E49\u0E44\u0E02\u0E2B\u0E23\u0E37\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07",
@@ -6941,12 +7293,16 @@ var CEO_SYSTEM = `\u0E04\u0E38\u0E13\u0E04\u0E37\u0E2D CEO Agent \u0E1C\u0E39\u0
 \u0E2B\u0E25\u0E31\u0E01\u0E01\u0E32\u0E23\u0E17\u0E33\u0E07\u0E32\u0E19
 1. \u0E15\u0E48\u0E2D\u0E40\u0E19\u0E37\u0E48\u0E2D\u0E07\u0E41\u0E25\u0E30\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E42\u0E22\u0E07: \u0E43\u0E0A\u0E49 "\u0E2A\u0E16\u0E32\u0E19\u0E30\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C" \u0E40\u0E1B\u0E47\u0E19\u0E04\u0E27\u0E32\u0E21\u0E08\u0E23\u0E34\u0E07\u0E40\u0E14\u0E35\u0E22\u0E27 \u0E2B\u0E49\u0E32\u0E21\u0E40\u0E23\u0E34\u0E48\u0E21\u0E43\u0E2B\u0E21\u0E48\u0E16\u0E49\u0E32\u0E21\u0E35\u0E07\u0E32\u0E19\u0E40\u0E14\u0E34\u0E21\u0E2D\u0E22\u0E39\u0E48 \u0E2B\u0E49\u0E32\u0E21\u0E17\u0E33\u0E43\u0E2B\u0E49\u0E2A\u0E34\u0E48\u0E07\u0E17\u0E35\u0E48\u0E17\u0E33\u0E44\u0E27\u0E49\u0E41\u0E25\u0E49\u0E27\u0E2B\u0E32\u0E22
    \u0E16\u0E49\u0E32\u0E21\u0E35\u0E09\u0E1A\u0E31\u0E1A\u0E23\u0E48\u0E32\u0E07 \u0E23\u0E39\u0E1B \u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D \u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E2D\u0E22\u0E39\u0E48\u0E41\u0E25\u0E49\u0E27 \u0E43\u0E2B\u0E49\u0E43\u0E0A\u0E49\u0E15\u0E48\u0E2D \u0E40\u0E21\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E2A\u0E31\u0E48\u0E07\u0E41\u0E01\u0E49 \u0E43\u0E2B\u0E49 revise_draft \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48 write_draft \u0E43\u0E2B\u0E21\u0E48
-2. \u0E25\u0E33\u0E14\u0E31\u0E1A\u0E07\u0E32\u0E19\u0E15\u0E32\u0E21\u0E18\u0E23\u0E23\u0E21\u0E0A\u0E32\u0E15\u0E34: \u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32 (research) -> \u0E40\u0E02\u0E35\u0E22\u0E19 (write_draft) -> \u0E2A\u0E37\u0E48\u0E2D (cover/inline/video/voice) -> \u0E15\u0E23\u0E27\u0E08 (qa_check) -> \u0E40\u0E15\u0E23\u0E35\u0E22\u0E21 (optimize_seo) -> \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01/\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48 (save_post)
-   \u0E02\u0E49\u0E32\u0E21\u0E02\u0E31\u0E49\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E08\u0E33\u0E40\u0E1B\u0E47\u0E19 \u0E02\u0E2D\u0E2A\u0E31\u0E49\u0E19\u0E46 \u0E01\u0E47\u0E17\u0E33\u0E2A\u0E31\u0E49\u0E19\u0E46 \u0E44\u0E21\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E17\u0E33\u0E04\u0E23\u0E1A\u0E17\u0E38\u0E01\u0E02\u0E31\u0E49\u0E19\u0E40\u0E2A\u0E21\u0E2D\u0E44\u0E1B
+2. \u0E25\u0E33\u0E14\u0E31\u0E1A\u0E07\u0E32\u0E19\u0E15\u0E32\u0E21 Content AI Workflow: \u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2A\u0E31\u0E48\u0E07 -> \u0E04\u0E38\u0E13\u0E27\u0E32\u0E07\u0E41\u0E1C\u0E19 -> \u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32 (research) -> \u0E40\u0E02\u0E35\u0E22\u0E19 (write_draft) -> \u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07 (fact_check)
+   -> [\u0E08\u0E38\u0E14\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E42\u0E14\u0E22\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07: \u0E04\u0E38\u0E13\u0E17\u0E33\u0E40\u0E2D\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49 \u0E15\u0E49\u0E2D\u0E07\u0E23\u0E2D\u0E43\u0E2B\u0E49\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E01\u0E14\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34] -> \u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D (video_script) -> \u0E1C\u0E25\u0E34\u0E15\u0E04\u0E25\u0E34\u0E1B\u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E41\u0E25\u0E30\u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22 (produce_clips)
+   -> [\u0E15\u0E23\u0E27\u0E08\u0E41\u0E25\u0E30\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E01\u0E48\u0E2D\u0E19\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48] -> \u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48 (save_post / publish_channels) -> \u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C\u0E1C\u0E25 (analyze_performance) \u0E41\u0E25\u0E49\u0E27\u0E19\u0E33\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E44\u0E1B\u0E43\u0E0A\u0E49\u0E01\u0E31\u0E1A\u0E07\u0E32\u0E19\u0E16\u0E31\u0E14\u0E44\u0E1B
+   \u0E02\u0E49\u0E32\u0E21\u0E02\u0E31\u0E49\u0E19\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E08\u0E33\u0E40\u0E1B\u0E47\u0E19 \u0E02\u0E2D\u0E2A\u0E31\u0E49\u0E19\u0E46 \u0E01\u0E47\u0E17\u0E33\u0E2A\u0E31\u0E49\u0E19\u0E46 (\u0E40\u0E0A\u0E48\u0E19 \u0E02\u0E48\u0E32\u0E27\u0E2A\u0E31\u0E49\u0E19\u0E44\u0E21\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D) \u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E (generate_cover/inline) \u0E41\u0E25\u0E30 qa_check \u0E43\u0E0A\u0E49\u0E44\u0E14\u0E49\u0E17\u0E38\u0E01\u0E40\u0E21\u0E37\u0E48\u0E2D
+   \u0E16\u0E49\u0E32\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E02\u0E2D\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D/\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E41\u0E15\u0E48\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E23\u0E31\u0E1A\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34 \u0E43\u0E2B\u0E49\u0E17\u0E33\u0E02\u0E31\u0E49\u0E19\u0E01\u0E48\u0E2D\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E49\u0E04\u0E23\u0E1A (\u0E40\u0E02\u0E35\u0E22\u0E19 \u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07) \u0E41\u0E25\u0E49\u0E27\u0E41\u0E08\u0E49\u0E07\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E43\u0E2B\u0E49\u0E01\u0E14\u0E1B\u0E38\u0E48\u0E21 "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" \u0E08\u0E32\u0E01\u0E19\u0E31\u0E49\u0E19\u0E04\u0E48\u0E2D\u0E22\u0E1C\u0E25\u0E34\u0E15\u0E15\u0E48\u0E2D
 3. \u0E40\u0E21\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E02\u0E2D "\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48/\u0E42\u0E1E\u0E2A\u0E15\u0E4C/\u0E25\u0E07\u0E40\u0E27\u0E47\u0E1A": \u0E15\u0E23\u0E27\u0E08\u0E04\u0E27\u0E32\u0E21\u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E01\u0E48\u0E2D\u0E19 (\u0E21\u0E35\u0E09\u0E1A\u0E31\u0E1A\u0E23\u0E48\u0E32\u0E07 \u0E21\u0E35\u0E23\u0E39\u0E1B\u0E1B\u0E01 QA \u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E1A\u0E25\u0E47\u0E2D\u0E01) \u0E17\u0E33\u0E2A\u0E48\u0E27\u0E19\u0E17\u0E35\u0E48\u0E02\u0E32\u0E14\u0E43\u0E2B\u0E49\u0E04\u0E23\u0E1A \u0E41\u0E25\u0E49\u0E27\u0E40\u0E23\u0E35\u0E22\u0E01 save_post status=published
    \u0E2A\u0E37\u0E48\u0E2D\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14\u0E17\u0E35\u0E48\u0E17\u0E35\u0E21\u0E17\u0E33\u0E44\u0E27\u0E49\u0E43\u0E19\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C\u0E08\u0E30\u0E16\u0E39\u0E01\u0E41\u0E19\u0E1A\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34 \u0E2B\u0E49\u0E32\u0E21\u0E1A\u0E2D\u0E01\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E43\u0E2B\u0E49\u0E44\u0E1B\u0E41\u0E19\u0E1A\u0E40\u0E2D\u0E07
 4. \u0E16\u0E49\u0E32\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E2A\u0E31\u0E48\u0E07\u0E43\u0E2B\u0E49\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48 \u0E43\u0E2B\u0E49\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E40\u0E1B\u0E47\u0E19 draft \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19 \u0E41\u0E25\u0E30\u0E1A\u0E2D\u0E01\u0E27\u0E48\u0E32\u0E1E\u0E23\u0E49\u0E2D\u0E21\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E2A\u0E31\u0E48\u0E07
-5. \u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E41\u0E25\u0E30\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E21\u0E35\u0E04\u0E48\u0E32\u0E43\u0E0A\u0E49\u0E08\u0E48\u0E32\u0E22 \u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E02\u0E2D\u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19
+5. \u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E41\u0E25\u0E30\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E21\u0E35\u0E04\u0E48\u0E32\u0E43\u0E0A\u0E49\u0E08\u0E48\u0E32\u0E22 \u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E02\u0E2D\u0E0A\u0E31\u0E14\u0E40\u0E08\u0E19\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19 \u0E41\u0E25\u0E30\u0E15\u0E49\u0E2D\u0E07\u0E1C\u0E48\u0E32\u0E19\u0E08\u0E38\u0E14\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E01\u0E48\u0E2D\u0E19\u0E40\u0E2A\u0E21\u0E2D
+   \u0E19\u0E33 "\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E08\u0E32\u0E01\u0E07\u0E32\u0E19\u0E01\u0E48\u0E2D\u0E19\u0E2B\u0E19\u0E49\u0E32" (\u0E16\u0E49\u0E32\u0E21\u0E35) \u0E21\u0E32\u0E43\u0E0A\u0E49\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E21\u0E38\u0E21\u0E40\u0E02\u0E35\u0E22\u0E19\u0E41\u0E25\u0E30\u0E2B\u0E31\u0E27\u0E02\u0E49\u0E2D \u0E42\u0E14\u0E22\u0E44\u0E21\u0E48\u0E2D\u0E49\u0E32\u0E07\u0E40\u0E01\u0E34\u0E19\u0E01\u0E27\u0E48\u0E32\u0E17\u0E35\u0E48\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E23\u0E30\u0E1A\u0E38
 6. \u0E2B\u0E49\u0E32\u0E21\u0E41\u0E15\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07 \u0E15\u0E31\u0E27\u0E40\u0E25\u0E02 \u0E0A\u0E37\u0E48\u0E2D \u0E2B\u0E23\u0E37\u0E2D\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07 \u0E16\u0E49\u0E32\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E1E\u0E2D\u0E43\u0E2B\u0E49 research \u0E01\u0E48\u0E2D\u0E19 \u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E02\u0E35\u0E22\u0E19\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E23\u0E30\u0E27\u0E31\u0E07
 7. \u0E16\u0E32\u0E21\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49 (ask_user) \u0E40\u0E09\u0E1E\u0E32\u0E30\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E02\u0E32\u0E14\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E2A\u0E33\u0E04\u0E31\u0E0D\u0E08\u0E23\u0E34\u0E07\u0E46 \u0E16\u0E32\u0E21\u0E02\u0E49\u0E2D\u0E40\u0E14\u0E35\u0E22\u0E27 \u0E19\u0E2D\u0E01\u0E19\u0E31\u0E49\u0E19\u0E15\u0E31\u0E14\u0E2A\u0E34\u0E19\u0E43\u0E08\u0E40\u0E2D\u0E07\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E2A\u0E21\u0E40\u0E2B\u0E15\u0E38\u0E2A\u0E21\u0E1C\u0E25\u0E41\u0E25\u0E49\u0E27\u0E1A\u0E2D\u0E01\u0E27\u0E48\u0E32\u0E15\u0E31\u0E14\u0E2A\u0E34\u0E19\u0E43\u0E08\u0E2D\u0E30\u0E44\u0E23\u0E44\u0E1B
 8. \u0E25\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E33\u0E44\u0E14\u0E49\u0E1C\u0E48\u0E32\u0E19 delete_post \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19 \u0E41\u0E25\u0E30\u0E15\u0E49\u0E2D\u0E07\u0E43\u0E2B\u0E49\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E22\u0E37\u0E19\u0E22\u0E31\u0E19\u0E40\u0E2A\u0E21\u0E2D
@@ -6985,6 +7341,16 @@ function summarizeState(p) {
         audio: Boolean(p.media.audio),
         inlineImages: p.media.inline.length
       },
+      factCheck: p.factCheck.verdict ? {
+        verdict: p.factCheck.verdict,
+        claims: (p.factCheck.claims || []).length,
+        unsupported: (p.factCheck.claims || []).filter((c) => c.verdict === "unsupported").map((c) => c.text),
+        neutrality: p.factCheck.neutrality?.score,
+        outdated: p.factCheck.contentHash !== articleHash(p)
+      } : null,
+      articleApprovedByOwner: articleApproved(p),
+      videoScriptClips: p.videoPlan.clips.length,
+      learningFromThisPiece: p.learning.summary || null,
       research: p.research.summary ? { summary: p.research.summary, facts: (p.research.facts || []).length, webSources: (p.research.sources || []).length } : null,
       qa: p.qa.verdict ? { verdict: p.qa.verdict, overall: p.qa.scores?.overall, issues: p.qa.issues, outdated: Boolean(stale) } : null,
       channels: p.channels.results ? Object.fromEntries(Object.entries(p.channels.results).map(([k, v]) => [k, v.status])) : null
@@ -7088,6 +7454,9 @@ async function runCeo(opts) {
 \u0E2A\u0E16\u0E32\u0E19\u0E30\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C (\u0E04\u0E27\u0E32\u0E21\u0E08\u0E23\u0E34\u0E07\u0E1B\u0E31\u0E08\u0E08\u0E38\u0E1A\u0E31\u0E19):
 ${summarizeState(ctx.project)}
 
+\u0E1A\u0E17\u0E40\u0E23\u0E35\u0E22\u0E19\u0E08\u0E32\u0E01\u0E07\u0E32\u0E19\u0E01\u0E48\u0E2D\u0E19\u0E2B\u0E19\u0E49\u0E32 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E23\u0E34\u0E07\u0E08\u0E32\u0E01\u0E1C\u0E25\u0E07\u0E32\u0E19\u0E17\u0E35\u0E48\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48\u0E41\u0E25\u0E49\u0E27):
+${recentLearnings(4).map((l) => `- ${l.summary}${l.actions.length ? ` | \u0E04\u0E27\u0E23\u0E17\u0E33: ${l.actions.slice(0, 3).join("; ")}` : ""}`).join("\n") || "(\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35)"}
+
 \u0E1A\u0E17\u0E2A\u0E19\u0E17\u0E19\u0E32\u0E41\u0E25\u0E30\u0E1C\u0E25\u0E07\u0E32\u0E19\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14:
 ${transcript(events) || "(\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35)"}
 ${observations.length ? `
@@ -7187,6 +7556,26 @@ async function publishProject(opts) {
       if (!r.ok) warnings.push(`\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E23\u0E39\u0E1B\u0E1B\u0E01\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 \u0E43\u0E0A\u0E49\u0E23\u0E39\u0E1B\u0E1B\u0E01\u0E40\u0E23\u0E34\u0E48\u0E21\u0E15\u0E49\u0E19\u0E41\u0E17\u0E19: ${r.summary}`);
     }
     if (target === "published" && caps.llm) {
+      const stale = () => !ctx.project.factCheck.verdict || ctx.project.factCheck.contentHash !== articleHash(ctx.project);
+      if (stale()) await execTool(ctx, "fact_check", {});
+      if (ctx.project.factCheck.verdict === "revise") {
+        const bad = (ctx.project.factCheck.claims || []).filter((c) => c.verdict === "unsupported").map((c) => c.text).join(" / ");
+        if (bad) {
+          const fix = await execTool(ctx, "revise_draft", {
+            instruction: `\u0E25\u0E1A\u0E2B\u0E23\u0E37\u0E2D\u0E41\u0E01\u0E49\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E17\u0E35\u0E48\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07\u0E41\u0E25\u0E49\u0E27\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A (\u0E2B\u0E49\u0E32\u0E21\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E43\u0E2B\u0E21\u0E48): ${bad}`
+          });
+          if (fix.ok) await execTool(ctx, "fact_check", {});
+        }
+      }
+      if (ctx.project.factCheck.verdict === "block" && !opts.force) {
+        say(
+          `\u0E2B\u0E22\u0E38\u0E14\u0E01\u0E32\u0E23\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48: Fact-check \u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A\u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E19\u0E37\u0E49\u0E2D\u0E2B\u0E32\u0E44\u0E21\u0E48\u0E40\u0E1B\u0E47\u0E19\u0E01\u0E25\u0E32\u0E07 (${ctx.project.factCheck.summary || "\u0E14\u0E39\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14\u0E43\u0E19\u0E41\u0E17\u0E47\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A"}) \u0E01\u0E23\u0E38\u0E13\u0E32\u0E41\u0E01\u0E49\u0E44\u0E02\u0E01\u0E48\u0E2D\u0E19 \u0E2B\u0E23\u0E37\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48\u0E15\u0E48\u0E2D\u0E42\u0E14\u0E22\u0E22\u0E37\u0E19\u0E22\u0E31\u0E19\u0E40\u0E2D\u0E07`,
+          "error"
+        );
+        return { ok: false, blocked: true, warnings };
+      }
+    }
+    if (target === "published" && caps.llm) {
       const needQa = () => !ctx.project.qa.verdict || ctx.project.qa.contentHash !== contentHash(ctx.project);
       if (needQa()) await execTool(ctx, "qa_check", {});
       if (ctx.project.qa.verdict === "revise") {
@@ -7214,6 +7603,13 @@ async function publishProject(opts) {
       return { ok: false, warnings };
     }
     const data = saved.data;
+    if (target === "published") {
+      const fresh = getProject(projectId);
+      if (fresh) {
+        fresh.approvals.release = { at: (/* @__PURE__ */ new Date()).toISOString() };
+        saveProject(fresh);
+      }
+    }
     if (target === "published" && opts.channels && opts.channels.length > 0) {
       const r = await execTool(ctx, "publish_channels", { channels: opts.channels });
       if (!r.ok) warnings.push(`\u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07\u0E2D\u0E37\u0E48\u0E19: ${r.summary}`);
@@ -7260,7 +7656,7 @@ function providerOf(v) {
 function snapshot(id, after = 0) {
   const project = getProject(id);
   if (!project) return null;
-  return { project, events: getEvents(id, after, 300), running: isProjectRunning(id) };
+  return { project, flow: computeFlow(project), events: getEvents(id, after, 300), running: isProjectRunning(id) };
 }
 function registerWorkspaceRoutes(app2) {
   app2.get("/api/workspaces/capabilities", (_req, res) => {
@@ -7417,6 +7813,28 @@ function registerWorkspaceRoutes(app2) {
         provider: providerOf(req.body?.provider)
       })
     );
+  });
+  app2.post("/api/workspaces/:id/approve", (req, res) => {
+    const p = getProject(Number(req.params.id));
+    if (!p) return void res.status(404).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C" });
+    if (isProjectRunning(p.id)) return void res.status(409).json({ error: "\u0E17\u0E35\u0E21\u0E01\u0E33\u0E25\u0E31\u0E07\u0E17\u0E33\u0E07\u0E32\u0E19\u0E2D\u0E22\u0E39\u0E48 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E2D\u0E43\u0E2B\u0E49\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E01\u0E48\u0E2D\u0E19" });
+    if (req.body?.gate !== "article") return void res.status(400).json({ error: "\u0E08\u0E38\u0E14\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" });
+    if (req.body?.revoke === true) {
+      delete p.approvals.article;
+      saveProject(p);
+      appendEvent(p.id, { role: "system", agent: "ceo", kind: "message", content: "\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E22\u0E01\u0E40\u0E25\u0E34\u0E01\u0E01\u0E32\u0E23\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" });
+      return void res.json(snapshot(p.id));
+    }
+    if (!p.draft.title || !p.draft.content) return void res.status(400).json({ error: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E43\u0E2B\u0E49\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34" });
+    p.approvals.article = { hash: articleHash(p), at: (/* @__PURE__ */ new Date()).toISOString() };
+    saveProject(p);
+    appendEvent(p.id, {
+      role: "system",
+      agent: "ceo",
+      kind: "message",
+      content: "\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E41\u0E25\u0E49\u0E27 \u0E17\u0E35\u0E21\u0E1C\u0E25\u0E34\u0E15\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D \u0E40\u0E2A\u0E35\u0E22\u0E07 \u0E41\u0E25\u0E30\u0E04\u0E33\u0E1A\u0E23\u0E23\u0E22\u0E32\u0E22\u0E15\u0E48\u0E2D\u0E44\u0E14\u0E49"
+    });
+    res.json(snapshot(p.id));
   });
   app2.post("/api/workspaces/:id/confirm", (req, res) => {
     const out = confirmAction(Number(req.params.id), Number(req.body?.eventId));
@@ -7719,8 +8137,8 @@ function buildNotFoundShell(template, siteName) {
 
 // server/auth.ts
 import crypto6 from "node:crypto";
-import fs5 from "node:fs";
-import path5 from "node:path";
+import fs6 from "node:fs";
+import path6 from "node:path";
 var TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
 var SCRYPT_PREFIX = "scrypt:v1:";
 var LOGIN_WINDOW_MS = 15 * 60 * 1e3;
@@ -7731,19 +8149,19 @@ var globalFailures = [];
 var cachedAuthSecret = null;
 function getOrCreateLocalAuthSecret() {
   if (cachedAuthSecret) return cachedAuthSecret;
-  const keyFile = path5.join(DATA_DIR, ".admin_auth.key");
+  const keyFile = path6.join(DATA_DIR, ".admin_auth.key");
   try {
-    if (fs5.existsSync(keyFile)) {
-      const existing = fs5.readFileSync(keyFile, "utf8").trim();
+    if (fs6.existsSync(keyFile)) {
+      const existing = fs6.readFileSync(keyFile, "utf8").trim();
       if (existing.length >= 32) {
         cachedAuthSecret = existing;
         return existing;
       }
     }
     const fresh = crypto6.randomBytes(32).toString("hex");
-    fs5.writeFileSync(keyFile, fresh, { encoding: "utf8", mode: 384 });
+    fs6.writeFileSync(keyFile, fresh, { encoding: "utf8", mode: 384 });
     try {
-      fs5.chmodSync(keyFile, 384);
+      fs6.chmodSync(keyFile, 384);
     } catch {
     }
     cachedAuthSecret = fresh;
@@ -8037,8 +8455,8 @@ app.use((_req, res, next) => {
   next();
 });
 var UPLOADS_DIR = UPLOADS_ROOT;
-if (!fs6.existsSync(UPLOADS_DIR)) {
-  fs6.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (!fs7.existsSync(UPLOADS_DIR)) {
+  fs7.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 app.use(
   "/uploads",
@@ -8184,7 +8602,7 @@ var ALLOWED_UPLOAD_MIMES = /* @__PURE__ */ new Set([
 var storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
-    const rawExt = path6.extname(file.originalname || ".jpg").toLowerCase();
+    const rawExt = path7.extname(file.originalname || ".jpg").toLowerCase();
     const safeExt = ALLOWED_UPLOAD_EXTS.has(rawExt) ? rawExt : ".bin";
     cb(null, `komkrit-${Date.now()}-${Math.round(Math.random() * 1e5)}${safeExt}`);
   }
@@ -8193,7 +8611,7 @@ var upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ext = path6.extname(file.originalname || "").toLowerCase();
+    const ext = path7.extname(file.originalname || "").toLowerCase();
     const mime = (file.mimetype || "").toLowerCase();
     if (ALLOWED_UPLOAD_EXTS.has(ext) && ALLOWED_UPLOAD_MIMES.has(mime)) {
       cb(null, true);
@@ -8295,7 +8713,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     res.status(400).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E17\u0E35\u0E48\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14" });
     return;
   }
-  const fileBuffer = fs6.readFileSync(req.file.path);
+  const fileBuffer = fs7.readFileSync(req.file.path);
   const cloudUrl = await uploadMediaToCloudBlob(
     fileBuffer,
     req.file.filename,
@@ -9120,10 +9538,10 @@ app.delete("/api/ai/media/:id", async (req, res) => {
     if (existing.file_url.includes("blob.vercel-storage.com")) {
       await deleteMediaFromCloudBlob(existing.file_url);
     } else if (existing.file_url.startsWith("/uploads/")) {
-      const abs = path6.join(UPLOADS_ROOT, existing.file_url.replace(/^\/uploads\//, ""));
-      if (fs6.existsSync(abs)) {
+      const abs = path7.join(UPLOADS_ROOT, existing.file_url.replace(/^\/uploads\//, ""));
+      if (fs7.existsSync(abs)) {
         try {
-          fs6.unlinkSync(abs);
+          fs7.unlinkSync(abs);
         } catch {
         }
       }
@@ -11115,10 +11533,10 @@ function xmlEscape(s) {
 var indexTemplateCache = "";
 async function loadIndexTemplate(req) {
   if (indexTemplateCache) return indexTemplateCache;
-  const local = path6.resolve(process.cwd(), "dist", "index.html");
+  const local = path7.resolve(process.cwd(), "dist", "index.html");
   try {
-    if (fs6.existsSync(local)) {
-      indexTemplateCache = fs6.readFileSync(local, "utf8");
+    if (fs7.existsSync(local)) {
+      indexTemplateCache = fs7.readFileSync(local, "utf8");
       return indexTemplateCache;
     }
   } catch {
@@ -11231,10 +11649,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path6.resolve(process.cwd(), "dist");
+    const distDir = path7.resolve(process.cwd(), "dist");
     app.use(express.static(distDir));
     app.get("/{*splat}", (_req, res) => {
-      res.sendFile(path6.join(distDir, "index.html"));
+      res.sendFile(path7.join(distDir, "index.html"));
     });
   }
   app.listen(port, "0.0.0.0", () => {

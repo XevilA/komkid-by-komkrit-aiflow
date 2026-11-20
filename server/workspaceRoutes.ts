@@ -3,6 +3,8 @@ import { IS_SERVERLESS } from './db.ts';
 import {
   CATEGORY_IDS,
   appendEvent,
+  articleHash,
+  computeFlow,
   createProject,
   createProjectFromPost,
   createProjectFromWorkflow,
@@ -36,7 +38,7 @@ function providerOf(v: unknown): LlmProviderId | undefined {
 function snapshot(id: number, after = 0) {
   const project = getProject(id);
   if (!project) return null;
-  return { project, events: getEvents(id, after, 300), running: isProjectRunning(id) };
+  return { project, flow: computeFlow(project), events: getEvents(id, after, 300), running: isProjectRunning(id) };
 }
 
 export function registerWorkspaceRoutes(app: Express) {
@@ -190,6 +192,30 @@ export function registerWorkspaceRoutes(app: Express) {
         provider: providerOf(req.body?.provider),
       })
     );
+  });
+
+  // Owner approval gate: the approval is bound to this exact article text and lapses if it changes.
+  app.post('/api/workspaces/:id/approve', (req: Request, res: Response) => {
+    const p = getProject(Number(req.params.id));
+    if (!p) return void res.status(404).json({ error: 'ไม่พบโปรเจกต์' });
+    if (isProjectRunning(p.id)) return void res.status(409).json({ error: 'ทีมกำลังทำงานอยู่ กรุณารอให้เสร็จก่อน' });
+    if (req.body?.gate !== 'article') return void res.status(400).json({ error: 'จุดอนุมัติไม่ถูกต้อง' });
+    if (req.body?.revoke === true) {
+      delete p.approvals.article;
+      saveProject(p);
+      appendEvent(p.id, { role: 'system', agent: 'ceo', kind: 'message', content: 'เจ้าของช่องยกเลิกการอนุมัติบทความ' });
+      return void res.json(snapshot(p.id));
+    }
+    if (!p.draft.title || !p.draft.content) return void res.status(400).json({ error: 'ยังไม่มีบทความให้อนุมัติ' });
+    p.approvals.article = { hash: articleHash(p), at: new Date().toISOString() };
+    saveProject(p);
+    appendEvent(p.id, {
+      role: 'system',
+      agent: 'ceo',
+      kind: 'message',
+      content: 'เจ้าของช่องอนุมัติบทความแล้ว ทีมผลิตวิดีโอ เสียง และคำบรรยายต่อได้',
+    });
+    res.json(snapshot(p.id));
   });
 
   app.post('/api/workspaces/:id/confirm', (req, res) => {

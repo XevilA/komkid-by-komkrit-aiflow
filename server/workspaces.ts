@@ -49,6 +49,8 @@ export interface ProjectMedia {
   cover?: MediaItem;
   video?: MediaItem;
   audio?: MediaItem;
+  subtitles?: MediaItem;
+  clips?: MediaItem[];
   inline: MediaItem[];
 }
 
@@ -59,6 +61,7 @@ export interface ResearchNotes {
   angles?: string[];
   sources?: { title: string; uri: string }[];
   knowledgeUsed?: string[];
+  subQueries?: string[];
   relatedPosts?: { id: number; title: string; slug: string }[];
   updatedAt?: string;
 }
@@ -77,6 +80,44 @@ export interface ChannelState {
   results?: Record<string, { status: string; url: string; note: string; at: string }>;
 }
 
+export interface FactClaim {
+  text: string;
+  verdict: 'supported' | 'unsupported' | 'unverifiable';
+  evidence: string;
+}
+
+export interface FactCheck {
+  claims?: FactClaim[];
+  neutrality?: { score: number; notes: string };
+  verdict?: 'pass' | 'revise' | 'block';
+  summary?: string;
+  contentHash?: string;
+  checkedAt?: string;
+}
+
+export interface VideoClip {
+  title: string;
+  durationSec: number;
+  narration: string;
+  visualPrompt: string;
+  subtitle: string;
+}
+
+export interface Learning {
+  summary?: string;
+  whatWorked?: string[];
+  toImprove?: string[];
+  nextTopics?: string[];
+  metrics?: Record<string, unknown>;
+  at?: string;
+}
+
+export interface Approvals {
+  /** Owner approved this exact article text (invalidated automatically when the text changes). */
+  article?: { hash: string; at: string };
+  release?: { at: string };
+}
+
 export type ProjectStatus = 'drafting' | 'ready' | 'published' | 'archived';
 
 export interface ProjectRecord {
@@ -91,6 +132,10 @@ export interface ProjectRecord {
   research: ResearchNotes;
   qa: QaReport;
   channels: ChannelState;
+  factCheck: FactCheck;
+  videoPlan: { clips: VideoClip[]; updatedAt?: string };
+  learning: Learning;
+  approvals: Approvals;
   createdAt: string;
   updatedAt: string;
 }
@@ -129,6 +174,12 @@ function parse<T>(raw: unknown, fallback: T): T {
 function mapProject(r: any): ProjectRecord {
   const media = parse<ProjectMedia>(r.media_json, { inline: [] });
   if (!Array.isArray(media.inline)) media.inline = [];
+  let extra: any = {};
+  try {
+    extra = JSON.parse(r.extra_json || '{}');
+  } catch {
+    extra = {};
+  }
   return {
     id: r.id,
     title: r.title || '',
@@ -141,6 +192,10 @@ function mapProject(r: any): ProjectRecord {
     research: parse<ResearchNotes>(r.research_json, {}),
     qa: parse<QaReport>(r.qa_json, {}),
     channels: parse<ChannelState>(r.channels_json, {}),
+    factCheck: (extra.factCheck && typeof extra.factCheck === 'object' ? extra.factCheck : {}) as FactCheck,
+    videoPlan: { clips: Array.isArray(extra.videoPlan?.clips) ? extra.videoPlan.clips : [], updatedAt: extra.videoPlan?.updatedAt },
+    learning: (extra.learning && typeof extra.learning === 'object' ? extra.learning : {}) as Learning,
+    approvals: (extra.approvals && typeof extra.approvals === 'object' ? extra.approvals : {}) as Approvals,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -178,7 +233,7 @@ export function saveProject(p: ProjectRecord): ProjectRecord {
   db.prepare(
     `UPDATE content_projects SET
        title = ?, brief = ?, status = ?, post_id = ?, workflow_id = ?,
-       draft_json = ?, media_json = ?, research_json = ?, qa_json = ?, channels_json = ?, updated_at = ?
+       draft_json = ?, media_json = ?, research_json = ?, qa_json = ?, channels_json = ?, extra_json = ?, updated_at = ?
      WHERE id = ?`
   ).run(
     p.title,
@@ -191,6 +246,7 @@ export function saveProject(p: ProjectRecord): ProjectRecord {
     JSON.stringify(p.research),
     JSON.stringify(p.qa),
     JSON.stringify(p.channels),
+    JSON.stringify({ factCheck: p.factCheck, videoPlan: p.videoPlan, learning: p.learning, approvals: p.approvals }),
     now,
     p.id
   );
@@ -362,4 +418,82 @@ export function createProjectFromWorkflow(workflowId: number): ProjectRecord {
     updatedAt: new Date().toISOString(),
   };
   return saveProject(p);
+}
+
+// ============================================================================
+// APPROVAL GATES and the 11-step flow view
+// ============================================================================
+/** Fingerprint of the article text only (media changes do not void an article approval). */
+export function articleHash(p: Pick<ProjectRecord, 'draft'>): string {
+  return crypto
+    .createHash('sha1')
+    .update(JSON.stringify([p.draft.title, p.draft.subtitle, p.draft.content]))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+export function articleApproved(p: ProjectRecord): boolean {
+  return Boolean(p.approvals.article && p.approvals.article.hash === articleHash(p) && p.draft.content);
+}
+
+export interface FlowStep {
+  n: number;
+  id: string;
+  label: string;
+  status: 'done' | 'current' | 'todo' | 'optional';
+  detail: string;
+}
+
+/** Where this piece of content is in the 11-step Content AI workflow. */
+export function computeFlow(p: ProjectRecord): FlowStep[] {
+  const hasDraft = Boolean(p.draft.title && p.draft.content);
+  const fcFresh = Boolean(p.factCheck.verdict && p.factCheck.contentHash === articleHash(p));
+  const approved = articleApproved(p);
+  const produced = Boolean(p.media.video || p.media.audio);
+  const published = p.status === 'published';
+  const defs: { id: string; label: string; done: boolean; detail: string; optional?: boolean }[] = [
+    { id: 'owner', label: 'เจ้าของช่องสั่งงาน', done: Boolean(p.brief || hasDraft), detail: p.brief ? p.brief.slice(0, 60) : '' },
+    { id: 'ceo', label: 'CEO วางแผนและแจกงาน', done: Boolean(p.brief || hasDraft), detail: '' },
+    { id: 'research', label: 'Deep Research', done: Boolean(p.research.summary), detail: p.research.sources?.length ? `แหล่งอ้างอิง ${p.research.sources.length}` : '' },
+    { id: 'writer', label: 'Content Writer', done: hasDraft, detail: hasDraft ? `${p.draft.content.replace(/\s+/g, '').length.toLocaleString()} ตัวอักษร` : '' },
+    { id: 'factcheck', label: 'Fact-check', done: fcFresh, detail: fcFresh ? (p.factCheck.verdict === 'pass' ? 'ผ่าน' : p.factCheck.verdict === 'revise' ? 'ควรแก้' : 'ไม่ควรเผยแพร่') : '' },
+    { id: 'approve_article', label: 'เจ้าของช่องอนุมัติบทความ', done: approved, detail: approved ? 'อนุมัติแล้ว' : 'รอการอนุมัติ' },
+    { id: 'video_script', label: 'Video Script (2-3 คลิป)', done: p.videoPlan.clips.length > 0, detail: p.videoPlan.clips.length ? `${p.videoPlan.clips.length} คลิป` : '', optional: true },
+    { id: 'production', label: 'Avatar Production (วิดีโอ เสียง คำบรรยาย)', done: produced, detail: [p.media.video && 'วิดีโอ', p.media.audio && 'เสียง', p.media.subtitles && 'คำบรรยาย'].filter(Boolean).join(' ') as string, optional: true },
+    { id: 'approve_release', label: 'ตรวจและอนุมัติก่อนเผยแพร่', done: published || Boolean(p.approvals.release), detail: '' },
+    { id: 'publish', label: 'Publishing', done: published, detail: published && p.draft.slug ? `/articles/${p.draft.slug}` : '' },
+    { id: 'analytics', label: 'Analytics & Learning', done: Boolean(p.learning.summary), detail: p.learning.at ? 'วิเคราะห์แล้ว' : '' },
+  ];
+  let currentSet = false;
+  return defs.map((d, i) => {
+    let status: FlowStep['status'];
+    if (d.done) status = 'done';
+    else if (!currentSet && !d.optional) {
+      status = 'current';
+      currentSet = true;
+    } else status = d.optional ? 'optional' : 'todo';
+    return { n: i + 1, id: d.id, label: d.label, status, detail: d.detail };
+  });
+}
+
+export function recentLearnings(limit = 5): { summary: string; actions: string[]; createdAt: string }[] {
+  const rows = db.prepare('SELECT summary, actions_json, created_at FROM ai_learnings ORDER BY id DESC LIMIT ?').all(limit) as any[];
+  return rows.map((r) => {
+    let actions: string[] = [];
+    try {
+      actions = JSON.parse(r.actions_json || '[]');
+    } catch {
+      actions = [];
+    }
+    return { summary: r.summary, actions, createdAt: r.created_at };
+  });
+}
+
+export function saveLearning(projectId: number, summary: string, actions: string[]) {
+  db.prepare('INSERT INTO ai_learnings (project_id, created_at, summary, actions_json) VALUES (?, ?, ?, ?)').run(
+    projectId,
+    new Date().toISOString(),
+    summary,
+    JSON.stringify(actions)
+  );
 }

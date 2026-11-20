@@ -17,9 +17,12 @@ import {
 } from './agentTools.ts';
 import {
   appendEvent,
+  articleApproved,
+  articleHash,
   contentHash,
   getEvents,
   getProject,
+  recentLearnings,
   saveProject,
   type ProjectEvent,
   type ProjectRecord,
@@ -57,12 +60,16 @@ const CEO_SYSTEM = `คุณคือ CEO Agent ผู้ประสานง�
 หลักการทำงาน
 1. ต่อเนื่องและเชื่อมโยง: ใช้ "สถานะโปรเจกต์" เป็นความจริงเดียว ห้ามเริ่มใหม่ถ้ามีงานเดิมอยู่ ห้ามทำให้สิ่งที่ทำไว้แล้วหาย
    ถ้ามีฉบับร่าง รูป วิดีโอ หรือเสียงอยู่แล้ว ให้ใช้ต่อ เมื่อผู้ใช้สั่งแก้ ให้ revise_draft ไม่ใช่ write_draft ใหม่
-2. ลำดับงานตามธรรมชาติ: ค้นคว้า (research) -> เขียน (write_draft) -> สื่อ (cover/inline/video/voice) -> ตรวจ (qa_check) -> เตรียม (optimize_seo) -> บันทึก/เผยแพร่ (save_post)
-   ข้ามขั้นที่ไม่จำเป็น ขอสั้นๆ ก็ทำสั้นๆ ไม่ต้องทำครบทุกขั้นเสมอไป
+2. ลำดับงานตาม Content AI Workflow: เจ้าของช่องสั่ง -> คุณวางแผน -> ค้นคว้า (research) -> เขียน (write_draft) -> ตรวจข้อเท็จจริง (fact_check)
+   -> [จุดอนุมัติบทความโดยเจ้าของช่อง: คุณทำเองไม่ได้ ต้องรอให้เจ้าของกดอนุมัติ] -> สคริปต์วิดีโอ (video_script) -> ผลิตคลิปพร้อมเสียงและคำบรรยาย (produce_clips)
+   -> [ตรวจและอนุมัติก่อนเผยแพร่] -> เผยแพร่ (save_post / publish_channels) -> วิเคราะห์ผล (analyze_performance) แล้วนำบทเรียนไปใช้กับงานถัดไป
+   ข้ามขั้นที่ไม่จำเป็น ขอสั้นๆ ก็ทำสั้นๆ (เช่น ข่าวสั้นไม่ต้องมีวิดีโอ) รูปภาพ (generate_cover/inline) และ qa_check ใช้ได้ทุกเมื่อ
+   ถ้าผู้ใช้ขอวิดีโอ/เสียงแต่บทความยังไม่ได้รับอนุมัติ ให้ทำขั้นก่อนหน้าให้ครบ (เขียน ตรวจข้อเท็จจริง) แล้วแจ้งผู้ใช้ให้กดปุ่ม "อนุมัติบทความ" จากนั้นค่อยผลิตต่อ
 3. เมื่อผู้ใช้ขอ "เผยแพร่/โพสต์/ลงเว็บ": ตรวจความพร้อมก่อน (มีฉบับร่าง มีรูปปก QA ไม่ถูกบล็อก) ทำส่วนที่ขาดให้ครบ แล้วเรียก save_post status=published
    สื่อทั้งหมดที่ทีมทำไว้ในโปรเจกต์จะถูกแนบอัตโนมัติ ห้ามบอกผู้ใช้ให้ไปแนบเอง
 4. ถ้าผู้ใช้ไม่ได้สั่งให้เผยแพร่ ให้บันทึกเป็น draft เท่านั้น และบอกว่าพร้อมเผยแพร่เมื่อสั่ง
-5. วิดีโอและเสียงมีค่าใช้จ่าย สร้างเมื่อผู้ใช้ขอชัดเจนเท่านั้น
+5. วิดีโอและเสียงมีค่าใช้จ่าย สร้างเมื่อผู้ใช้ขอชัดเจนเท่านั้น และต้องผ่านจุดอนุมัติบทความก่อนเสมอ
+   นำ "บทเรียนจากงานก่อนหน้า" (ถ้ามี) มาใช้เลือกมุมเขียนและหัวข้อ โดยไม่อ้างเกินกว่าที่บทเรียนระบุ
 6. ห้ามแต่งข้อเท็จจริง ตัวเลข ชื่อ หรือแหล่งอ้างอิง ถ้าข้อมูลไม่พอให้ research ก่อน หรือเขียนอย่างระวัง
 7. ถามผู้ใช้ (ask_user) เฉพาะเมื่อขาดข้อมูลสำคัญจริงๆ ถามข้อเดียว นอกนั้นตัดสินใจเองอย่างสมเหตุสมผลแล้วบอกว่าตัดสินใจอะไรไป
 8. ลบข้อมูลทำได้ผ่าน delete_post เท่านั้น และต้องให้ผู้ใช้ยืนยันเสมอ
@@ -108,6 +115,18 @@ function summarizeState(p: ProjectRecord): string {
         audio: Boolean(p.media.audio),
         inlineImages: p.media.inline.length,
       },
+      factCheck: p.factCheck.verdict
+        ? {
+            verdict: p.factCheck.verdict,
+            claims: (p.factCheck.claims || []).length,
+            unsupported: (p.factCheck.claims || []).filter((c) => c.verdict === 'unsupported').map((c) => c.text),
+            neutrality: p.factCheck.neutrality?.score,
+            outdated: p.factCheck.contentHash !== articleHash(p),
+          }
+        : null,
+      articleApprovedByOwner: articleApproved(p),
+      videoScriptClips: p.videoPlan.clips.length,
+      learningFromThisPiece: p.learning.summary || null,
       research: p.research.summary
         ? { summary: p.research.summary, facts: (p.research.facts || []).length, webSources: (p.research.sources || []).length }
         : null,
@@ -242,6 +261,13 @@ export async function runCeo(opts: RunOptions): Promise<void> {
 สถานะโปรเจกต์ (ความจริงปัจจุบัน):
 ${summarizeState(ctx.project)}
 
+บทเรียนจากงานก่อนหน้า (ข้อมูลจริงจากผลงานที่เผยแพร่แล้ว):
+${
+  recentLearnings(4)
+    .map((l) => `- ${l.summary}${l.actions.length ? ` | ควรทำ: ${l.actions.slice(0, 3).join('; ')}` : ''}`)
+    .join('\n') || '(ยังไม่มี)'
+}
+
 บทสนทนาและผลงานล่าสุด:
 ${transcript(events) || '(ยังไม่มี)'}
 ${observations.length ? `\nผลของทักษะที่เพิ่งรันในรอบนี้:\n${observations.join('\n')}\nตัดสินใจต่อ: ต้องทำอะไรเพิ่มอีกหรือยัง` : ''}
@@ -370,7 +396,29 @@ export async function publishProject(opts: PublishOptions): Promise<PublishOutco
       if (!r.ok) warnings.push(`สร้างรูปปกไม่สำเร็จ ใช้รูปปกเริ่มต้นแทน: ${r.summary}`);
     }
 
-    // 2. quality gate — AI steps must never be able to stop a human from publishing their own work
+    // 2a. fact-check — each verifiable claim checked against the evidence; fixed once automatically
+    if (target === 'published' && caps.llm) {
+      const stale = () => !ctx.project.factCheck.verdict || ctx.project.factCheck.contentHash !== articleHash(ctx.project);
+      if (stale()) await execTool(ctx, 'fact_check', {});
+      if (ctx.project.factCheck.verdict === 'revise') {
+        const bad = (ctx.project.factCheck.claims || []).filter((c) => c.verdict === 'unsupported').map((c) => c.text).join(' / ');
+        if (bad) {
+          const fix = await execTool(ctx, 'revise_draft', {
+            instruction: `ลบหรือแก้ข้อความที่ตรวจข้อเท็จจริงแล้วไม่มีหลักฐานรองรับ (ห้ามเพิ่มข้อมูลใหม่): ${bad}`,
+          });
+          if (fix.ok) await execTool(ctx, 'fact_check', {});
+        }
+      }
+      if (ctx.project.factCheck.verdict === 'block' && !opts.force) {
+        say(
+          `หยุดการเผยแพร่: Fact-check พบข้ออ้างที่ไม่มีหลักฐานรองรับหรือเนื้อหาไม่เป็นกลาง (${ctx.project.factCheck.summary || 'ดูรายละเอียดในแท็บตรวจสอบ'}) กรุณาแก้ไขก่อน หรือเลือกเผยแพร่ต่อโดยยืนยันเอง`,
+          'error'
+        );
+        return { ok: false, blocked: true, warnings };
+      }
+    }
+
+    // 2b. quality gate — AI steps must never be able to stop a human from publishing their own work
     if (target === 'published' && caps.llm) {
       const needQa = () => !ctx.project.qa.verdict || ctx.project.qa.contentHash !== contentHash(ctx.project);
       if (needQa()) await execTool(ctx, 'qa_check', {});
@@ -403,6 +451,13 @@ export async function publishProject(opts: PublishOptions): Promise<PublishOutco
       return { ok: false, warnings };
     }
     const data = saved.data as { postId: number; url: string };
+    if (target === 'published') {
+      const fresh = getProject(projectId);
+      if (fresh) {
+        fresh.approvals.release = { at: new Date().toISOString() };
+        saveProject(fresh);
+      }
+    }
 
     // 5. other channels, only when asked
     if (target === 'published' && opts.channels && opts.channels.length > 0) {

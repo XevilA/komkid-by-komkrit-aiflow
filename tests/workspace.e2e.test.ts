@@ -9,6 +9,7 @@ before(async () => { srv = await startTestServer({}, { fakeVendors: true }); });
 after(async () => { await srv.stop(); });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const log = () => fs.readFileSync(srv.logFile, 'utf8');
 
 async function newWs(brief = '') {
   const r = await srv.api('POST', '/api/workspaces', brief ? { brief } : {});
@@ -206,4 +207,146 @@ test('workspace endpoints require admin; unknown ids are 404; a post can be reop
   // deleting the post detaches (not deletes) the workspace
   await srv.api('DELETE', `/api/posts/${p.json.id}`);
   assert.equal((await srv.api('GET', `/api/workspaces/${w.json.project.id}`)).json.project.postId, null);
+});
+
+// ============================== Content AI Workflow (11 steps) ==============================
+const flowOf = async (id: number) => ((await srv.api('GET', `/api/workspaces/${id}`)).json.flow as any[]);
+const step = (flow: any[], id: string) => flow.find((s) => s.id === id);
+
+test('the workspace reports the 11-step Content AI workflow and where this piece currently is', async () => {
+  const id = await newWs('เรื่องใหม่');
+  let flow = await flowOf(id);
+  assert.equal(flow.length, 11);
+  assert.deepEqual(flow.map((s) => s.n), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(step(flow, 'owner').status, 'done');
+  assert.equal(step(flow, 'research').status, 'current');
+  await say(id, 'ช่วยเขียนบทความเรื่อง ทักษะแห่งอนาคต');
+  flow = await flowOf(id);
+  assert.equal(step(flow, 'research').status, 'done');
+  assert.equal(step(flow, 'writer').status, 'done');
+  assert.equal(step(flow, 'factcheck').status, 'current');
+  assert.equal(step(flow, 'video_script').status, 'optional');
+});
+
+test('Fact-check checks each claim: unverifiable stays unverifiable (never counted as true)', async () => {
+  const id = await newWs();
+  await say(id, 'ช่วยเขียนบทความเรื่อง การอ่านออกเขียนได้');
+  const s = await say(id, 'ตรวจข้อเท็จจริงให้หน่อย');
+  const fc = s.project.factCheck;
+  assert.equal(fc.verdict, 'pass');
+  assert.equal(fc.claims.length, 3);
+  assert.equal(fc.claims.filter((c: any) => c.verdict === 'unverifiable').length, 1);
+  assert.equal(step(await flowOf(id), 'factcheck').status, 'done');
+  // editing the text makes the fact-check stale
+  await srv.api('PUT', `/api/workspaces/${id}`, { draft: { content: s.project.draft.content + '\n\nย่อหน้าใหม่ที่เจ้าของเพิ่มเอง' } });
+  assert.notEqual(step(await flowOf(id), 'factcheck').status, 'done');
+});
+
+test('owner approval gate: bound to the exact text, lapses on edit, and guards video/voice production', async () => {
+  const id = await newWs();
+  assert.equal((await srv.api('POST', `/api/workspaces/${id}/approve`, { gate: 'article' })).status, 400, 'nothing to approve yet');
+  await say(id, 'ช่วยเขียนบทความเรื่อง การสอนเชิงรุก');
+  assert.equal(step(await flowOf(id), 'approve_article').status, 'todo', 'fact-check comes first');
+
+  // asking for a video before approval: scripts may be written, production is refused
+  let s = await say(id, 'ผลิตวิดีโอให้บทความนี้');
+  const errs = s.events.filter((e: any) => e.kind === 'error').map((e: any) => e.content).join(' | ');
+  assert.match(errs, /รอเจ้าของช่องอนุมัติบทความ/);
+  assert.equal(s.project.media.video, undefined);
+  assert.equal(s.project.videoPlan.clips.length, 3, 'the script (cheap) is still written');
+
+  assert.equal((await srv.api('POST', `/api/workspaces/${id}/approve`, { gate: 'nope' })).status, 400);
+  assert.equal((await srv.api('POST', `/api/workspaces/${id}/approve`, { gate: 'article' }, { auth: false })).status, 401);
+  const ok = await srv.api('POST', `/api/workspaces/${id}/approve`, { gate: 'article' });
+  assert.equal(ok.status, 200);
+  assert.equal(step(ok.json.flow, 'approve_article').status, 'done');
+
+  // approved: the refusal is now only about missing capability (no video key in the test), not approval
+  s = await say(id, 'ผลิตวิดีโอให้บทความนี้');
+  const errs2 = s.events.filter((e: any) => e.kind === 'error').map((e: any) => e.content).join(' | ');
+  assert.match(errs2.split(' | ').slice(-1)[0], /ยังไม่ได้ตั้งค่าคีย์สำหรับสร้างวิดีโอ/);
+
+  // changing the article text voids the approval
+  await srv.api('PUT', `/api/workspaces/${id}`, { draft: { content: s.project.draft.content + '\n\nแก้ไขภายหลัง' } });
+  assert.notEqual(step(await flowOf(id), 'approve_article').status, 'done');
+  // a cover image does NOT void it (text unchanged)
+  await srv.api('POST', `/api/workspaces/${id}/approve`, { gate: 'article' });
+  await say(id, 'ทำรูปปกให้หน่อย');
+  assert.equal(step(await flowOf(id), 'approve_article').status, 'done');
+  // owner can revoke
+  const rev = await srv.api('POST', `/api/workspaces/${id}/approve`, { gate: 'article', revoke: true });
+  assert.notEqual(step(rev.json.flow, 'approve_article').status, 'done');
+});
+
+test('Video Script Agent turns the article into 3 clips with narration, subtitle and visual prompt', async () => {
+  const id = await newWs();
+  await say(id, 'ช่วยเขียนบทความเรื่อง ภาษาอังกฤษในห้องเรียน');
+  const s = await say(id, 'ช่วยเขียนสคริปต์วิดีโอให้หน่อย');
+  const clips = s.project.videoPlan.clips;
+  assert.equal(clips.length, 3);
+  for (const c of clips) {
+    assert.ok(c.narration && c.subtitle && c.visualPrompt);
+    assert.ok(c.durationSec >= 4 && c.durationSec <= 10);
+  }
+  assert.equal(step(await flowOf(id), 'video_script').status, 'done');
+});
+
+test('publish pipeline runs Fact-check; a blocking result stops it, force overrides, release approval is recorded', async () => {
+  const id = await newWs();
+  await say(id, 'ช่วยเขียนบทความเรื่อง ข้อสอบกลางภาค');
+  fs.writeFileSync(srv.ctrlFile, 'fc-unsupported');
+  const before = await postsCount();
+  await srv.api('POST', `/api/workspaces/${id}/publish`, {});
+  let s = await settle(id);
+  assert.equal(s.project.factCheck.verdict, 'block');
+  assert.equal(await postsCount(), before);
+  assert.ok(s.events.some((e: any) => e.kind === 'error' && /Fact-check/.test(e.content)));
+  await srv.api('POST', `/api/workspaces/${id}/publish`, { force: true });
+  s = await settle(id);
+  assert.equal(s.project.status, 'published');
+  assert.ok(s.project.approvals.release?.at, 'the release approval is recorded');
+  assert.equal(step(await flowOf(id), 'approve_release').status, 'done');
+
+  // one unsupported claim: the CEO removes it automatically, then re-checks
+  fs.writeFileSync(srv.ctrlFile, 'fc-revise');
+  const id2 = await newWs();
+  await say(id2, 'ช่วยเขียนบทความเรื่อง วินัยเชิงบวก');
+  await srv.api('POST', `/api/workspaces/${id2}/publish`, {});
+  const s2 = await settle(id2);
+  const tools = s2.events.filter((e: any) => e.kind === 'action').map((e: any) => e.data?.tool);
+  assert.ok(tools.indexOf('fact_check') < tools.indexOf('revise_draft'), 'revised after a failed check');
+  assert.equal(s2.project.status, 'published');
+  fs.writeFileSync(srv.ctrlFile, '');
+});
+
+test('Analytics & Learning uses only REAL data, refuses when there is none, and feeds lessons back to the CEO', async () => {
+  const id = await newWs();
+  await say(id, 'ช่วยเขียนบทความเรื่อง การประเมินผลตามสภาพจริง');
+  // not published yet -> nothing to analyse
+  let s = await say(id, 'วิเคราะห์ผลงานให้หน่อย');
+  assert.match(s.events.filter((e: any) => e.kind === 'error').map((e: any) => e.content).join(' '), /ยังไม่ได้เผยแพร่/);
+
+  await srv.api('POST', `/api/workspaces/${id}/publish`, {});
+  s = await settle(id);
+  // published but no readers or comments yet -> still refuses instead of inventing results
+  s = await say(id, 'วิเคราะห์ผลงานให้หน่อย');
+  assert.match(s.events.filter((e: any) => e.kind === 'error').map((e: any) => e.content).join(' '), /ข้อมูลผลลัพธ์ไม่พอ/);
+  assert.equal(s.project.learning.summary, undefined);
+
+  // real readers and a real comment
+  const slug = s.project.draft.slug;
+  await srv.api('GET', `/api/posts/by-slug/${slug}?incrementView=1`, undefined, { auth: false });
+  await srv.api('GET', `/api/posts/by-slug/${slug}?incrementView=1`, undefined, { auth: false });
+  await fetch(`${srv.base}/api/posts/${s.project.postId}/comments`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.9' }, body: JSON.stringify({ message: 'เป็นประโยชน์มาก', rating: 5 }) });
+  s = await say(id, 'วิเคราะห์ผลงานให้หน่อย');
+  assert.ok(s.project.learning.summary);
+  assert.equal(s.project.learning.metrics.views >= 2, true);
+  assert.equal(s.project.learning.metrics.comments, 1);
+  assert.match(log(), /analytics saw: metrics/);
+  assert.equal(step(await flowOf(id), 'analytics').status, 'done');
+
+  // the next piece of work: the CEO's context now contains the lesson
+  const id2 = await newWs();
+  await say(id2, 'ช่วยเขียนบทความเรื่อง ต่อยอดเรื่องห้องเรียน');
+  assert.match(log(), /ceo-saw-learning/);
 });

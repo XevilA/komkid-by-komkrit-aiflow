@@ -444,6 +444,21 @@ export function initDatabase() {
   } catch {
     /* table not ready yet */
   }
+  try {
+    const cols = db.prepare("PRAGMA table_info('content_projects')").all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'extra_json')) {
+      db.exec("ALTER TABLE content_projects ADD COLUMN extra_json TEXT NOT NULL DEFAULT '{}'");
+    }
+  } catch {
+    /* table not ready yet */
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS ai_learnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    created_at TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    actions_json TEXT NOT NULL DEFAULT '[]'
+  )`);
   db.exec(`CREATE TABLE IF NOT EXISTS oauth_pending (
     nonce TEXT PRIMARY KEY,
     channel_key TEXT NOT NULL,

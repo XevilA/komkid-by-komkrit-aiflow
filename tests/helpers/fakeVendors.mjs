@@ -21,6 +21,19 @@ function chatText(system, user) {
     const obs = user.includes('ผลของทักษะที่เพิ่งรันในรอบนี้');
     const hasDraft = !user.includes('"draft": null');
     const canPublish = user.includes('สิทธิ์เผยแพร่ในรอบนี้: ได้');
+    if (user.includes('บทเรียนจากงานก่อนหน้า') && !user.includes('(ยังไม่มี)\n\nบทสนทนา')) log('ceo-saw-learning');
+    if (/ตรวจข้อเท็จจริง/.test(msg) && hasDraft) {
+      return obs ? { thought: 'x', calls: [], done: true, reply: 'ตรวจข้อเท็จจริงแล้ว' } : { thought: 'fact-check', calls: [{ tool: 'fact_check', args: {} }], done: false, reply: '' };
+    }
+    if (/สคริปต์/.test(msg) && hasDraft) {
+      return obs ? { thought: 'x', calls: [], done: true, reply: 'เขียนสคริปต์แล้ว' } : { thought: 'script', calls: [{ tool: 'video_script', args: {} }], done: false, reply: '' };
+    }
+    if (/ผลิต|วิดีโอ/.test(msg) && hasDraft) {
+      return obs ? { thought: 'x', calls: [], done: true, reply: 'ดำเนินการผลิตแล้ว' } : { thought: 'produce', calls: [{ tool: 'video_script', args: {} }, { tool: 'produce_clips', args: {} }], done: false, reply: '' };
+    }
+    if (/วิเคราะห์ผล/.test(msg)) {
+      return obs ? { thought: 'x', calls: [], done: true, reply: 'วิเคราะห์ผลแล้ว' } : { thought: 'analytics', calls: [{ tool: 'analyze_performance', args: {} }], done: false, reply: '' };
+    }
     if (/ลบ/.test(msg)) {
       const id = (msg.match(/\d+/) || ['1'])[0];
       return obs ? { thought: 'x', calls: [], done: true, reply: 'ส่งคำขอลบให้ยืนยันแล้ว' } : { thought: 'ลบ', calls: [{ tool: 'delete_post', args: { postId: Number(id) } }], done: false, reply: '' };
@@ -50,6 +63,22 @@ function chatText(system, user) {
   if (system.includes('Writer Agent แก้ไขบทความ')) {
     const cur = JSON.parse(user.slice(user.lastIndexOf('{')));
     return { title: cur.title, subtitle: cur.subtitle, excerpt: cur.excerpt, content: cur.content + '\n\n## เพิ่มเติม\nย่อหน้าที่เพิ่มตามคำสั่งแก้ไข ' + 'ข้อความ '.repeat(20), tags: cur.tags };
+  }
+  if (system.includes('Fact-check Agent')) {
+    const c = ctrl();
+    const claims = c.includes('fc-unsupported')
+      ? [1, 2, 3].map((i) => ({ text: `ข้ออ้างเท็จ ${i}`, verdict: 'unsupported', evidence: 'ขัดแย้งกับหลักฐาน' }))
+      : c.includes('fc-revise')
+      ? [{ text: 'ข้ออ้างไม่มีหลักฐาน', verdict: 'unsupported', evidence: '' }, { text: 'ข้ออ้างที่ยืนยันได้', verdict: 'supported', evidence: 'ตรงกับ KB' }]
+      : [{ text: 'ข้ออ้างที่ยืนยันได้ 1', verdict: 'supported', evidence: 'ตรงกับ KB' }, { text: 'ข้ออ้างที่ยืนยันได้ 2', verdict: 'supported', evidence: 'ผลค้นคว้า' }, { text: 'ตัวเลขที่ไม่มีหลักฐาน', verdict: 'unverifiable', evidence: '' }];
+    return { claims, neutrality: { score: 88, notes: 'เป็นกลาง' }, summary: 'ตรวจครบ' };
+  }
+  if (system.includes('Video Script Agent')) {
+    return { clips: [1, 2, 3].map((i) => ({ title: `คลิป ${i}`, durationSec: 8, narration: `บทพูดคลิป ${i} สั้นๆ`, subtitle: `คำบรรยาย ${i}`, visualPrompt: `Presenter scene ${i}` })) };
+  }
+  if (system.includes('Analytics & Learning Agent')) {
+    log('analytics saw: ' + (user.includes('"views":') ? 'metrics' : 'none'));
+    return { summary: 'บทความได้รับความสนใจจากผู้อ่านตามตัวเลขจริง', whatWorked: ['หัวข้อตรงประเด็น'], toImprove: ['เพิ่มตัวอย่างจริง'], nextTopics: ['ต่อยอดหัวข้อเดิมเรื่องห้องเรียน'] };
   }
   if (system.includes('QA Agent')) {
     return ctrl().includes('qa-block')
