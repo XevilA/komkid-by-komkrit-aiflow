@@ -30,8 +30,8 @@ jobs:
       - name: Typecheck, Unit/Integration Tests & Production Build (Vite + Serverless API Bundle)
         run: |
           npx tsc --noEmit
+          npm run build   # the article-page tests need the built frontend (dist/index.html)
           npm test
-          npm run build
 
   deploy-contabo-coolify:
     name: 2. Auto-Deploy to Contabo VPS (5.183.33.183) & Coolify
