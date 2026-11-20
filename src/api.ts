@@ -146,6 +146,10 @@ export const api = {
     request<{ post: Post; comments: PostComment[] }>(
       `/api/posts/${id}?incrementView=${incrementView ? '1' : '0'}`
     ),
+  getPostBySlug: (slug: string, incrementView = true) =>
+    request<Post & { canonical: boolean; comments: PostComment[] }>(
+      `/api/posts/by-slug/${encodeURIComponent(slug)}?incrementView=${incrementView ? '1' : '0'}`
+    ),
   createPost: (payload: Partial<Post>) =>
     request<Post>('/api/posts', {
       method: 'POST',
@@ -170,7 +174,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   deletePost: (id: number) =>
-    request<{ ok: boolean }>(`/api/posts/${id}`, { method: 'DELETE' }),
+    request<{ ok: boolean; deletedId: number; title: string; removedComments: number }>(
+      `/api/posts/${id}`,
+      { method: 'DELETE' }
+    ),
 
   exportCmsBackup: () =>
     request<{
@@ -770,6 +777,51 @@ export const api = {
       };
       results: import('./types').DomainStatusItem[];
     }>('/api/domains/status'),
+
+  // Content workspaces (CEO agent team)
+  listWorkspaces: () =>
+    request<{ workspaces: import('./types').WsListItem[]; capabilities: import('./types').WsCapabilities }>(
+      '/api/workspaces'
+    ),
+  createWorkspace: (payload: { brief?: string; fromPostId?: number; fromWorkflowId?: number }) =>
+    request<import('./types').WsSnapshot>('/api/workspaces', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getWorkspace: (id: number, after = 0) =>
+    request<import('./types').WsSnapshot>(`/api/workspaces/${id}?after=${after}`),
+  updateWorkspace: (
+    id: number,
+    payload: {
+      brief?: string;
+      draft?: Partial<import('./types').WsDraft>;
+      media?: { cover?: string | null; video?: string | null; audio?: string | null };
+    }
+  ) =>
+    request<import('./types').WsSnapshot>(`/api/workspaces/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteWorkspace: (id: number) =>
+    request<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  sendWorkspaceMessage: (id: number, message: string, provider?: string) =>
+    request<import('./types').WsSnapshot>(`/api/workspaces/${id}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ message, provider }),
+    }),
+  publishWorkspace: (
+    id: number,
+    payload: { status?: 'draft' | 'published'; channels?: string[]; force?: boolean }
+  ) =>
+    request<import('./types').WsSnapshot>(`/api/workspaces/${id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  confirmWorkspaceAction: (id: number, eventId: number) =>
+    request<import('./types').WsSnapshot & { ok: boolean; message: string }>(
+      `/api/workspaces/${id}/confirm`,
+      { method: 'POST', body: JSON.stringify({ eventId }) }
+    ),
 
   // AI routing health (automatic failover) & Batch runs
   getAiHealth: () => request<import('./types').AiHealthResponse>('/api/ai/health'),

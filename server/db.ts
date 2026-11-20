@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { ensureSlugSchema, backfillPostSlugs } from './slug.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
@@ -344,6 +345,35 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_ai_call_log_created ON ai_call_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ai_batch_items_batch ON ai_batch_items(batch_id, status, idx);
 
+    CREATE TABLE IF NOT EXISTS content_projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      brief TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'drafting',
+      post_id INTEGER,
+      workflow_id INTEGER,
+      draft_json TEXT NOT NULL DEFAULT '{}',
+      media_json TEXT NOT NULL DEFAULT '{}',
+      research_json TEXT NOT NULL DEFAULT '{}',
+      qa_json TEXT NOT NULL DEFAULT '{}',
+      channels_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      role TEXT NOT NULL,
+      agent TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'message',
+      content TEXT NOT NULL DEFAULT '',
+      data_json TEXT NOT NULL DEFAULT '{}'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_events_project ON project_events(project_id, id);
+
     CREATE INDEX IF NOT EXISTS idx_posts_status_created ON posts(status, is_featured DESC, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category, content_type);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id, created_at DESC);
@@ -401,6 +431,8 @@ export function initDatabase() {
   seedIfEmpty();
   seedOmnichannelIfEmpty();
   seedSiteContentIfEmpty();
+  ensureSlugSchema(db);
+  backfillPostSlugs(db);
   upgradePlaintextSecretsToAes256Gcm();
 }
 
@@ -1037,7 +1069,7 @@ function seedIfEmpty() {
       ],
       fullArticleMarkdown: `## เมื่อ AI ไม่ได้มาแทนครู แต่มา "คืนเวลา" ให้หัวใจของความเป็นครู\n\nสิ่งหนึ่งที่ผมได้รับฟังจากคุณครูและผู้บริหารสถานศึกษาทั่วประเทศเสมอ คือความตั้งใจอยากทุ่มเทเวลาดูแลลูกศิษย์แต่ละคนอย่างใกล้ชิด แต่กลับต้องแบกรับภาระงานเอกสารและการเตรียมสื่อที่กินเวลามหาศาล\n\nวันนี้เทคโนโลยี **AI Copilot และระบบ Multi-Agent** ก้าวมาถึงจุดที่สามารถเป็นผู้ช่วยมือขวาของคุณครูได้จริง หากเราพัฒนา **5 ทักษะสำคัญ** ต่อไปนี้:\n\n### 1. ทักษะการออกแบบโจทย์การเรียนรู้ (Instructional Prompting)\nเปลี่ยนจากการสั่งให้ AI "เขียนเนื้อหาทั่วไป" เป็นการกำหนดบริบทระดับชั้น จุดประสงค์การเรียนรู้ และสมรรถนะที่ต้องการวัดผลอย่างชัดเจน\n\n### 2. ทักษะการปรับเนื้อหารายบุคคล (Personalized Differentiation)\nใช้ AI ช่วยปรับระดับความยากง่ายของใบงานและกรณีศึกษาให้เหมาะกับผู้เรียนที่มีพื้นฐานแตกต่างกันในห้องเดียว\n\n### 3. ทักษะการเปลี่ยนเนื้อหาเป็นสื่อภาพและกิจกรรม (Visual & Activity Design)\nย่อยบทเรียนซับซ้อนให้กลายเป็นแผนผังความคิด (Mind Map) อินโฟกราฟิก และโจทย์ Project-Based Learning\n\n### 4. ทักษะการตรวจสอบความถูกต้องและอคติ (Fact-Checking & QA Mindset)\nครูต้องเป็นผู้ตรวจทานข้อเท็จจริง ความเหมาะสมทางภาษา และความสอดคล้องกับบริบทสังคมไทยก่อนนำไปใช้จริงเสมอ\n\n### 5. ทักษะจริยธรรมและการปกป้องข้อมูลผู้เรียน (AI Ethics & PDPA)\nสร้างกติกาการใช้ AI ในห้องเรียนอย่างโปร่งใส ไม่นำข้อมูลระบุตัวตนของนักเรียนเข้าสู่ระบบภายนอก และสอนให้เด็กใช้ AI เพื่อต่อยอดความคิด ไม่ใช่แทนความคิด\n\n> "ทุกความคิดที่แตกต่าง คือจุดเริ่มต้นของการเปลี่ยนแปลง — เมื่อครูมีเครื่องมือที่ใช่ ห้องเรียนไทยจะเต็มไปด้วยพลังแห่งการสร้างสรรค์"`,
       videoScript: `[0:00-0:12 Hook] คุณครูครับ... จะดีแค่ไหนถ้างานเอกสารที่เคยใช้เวลา 3 ชั่วโมง เสร็จลงใน 20 นาที แล้วเราได้เวลาเหล่านั้นกลับไปคุยและดูแลลูกศิษย์จริงๆ?\n[0:12-0:45 Core] วันนี้ คมคิด by KOMKRIT สรุป 5 ทักษะครูยุค AI Copilot ตั้งแต่การตั้งโจทย์ตามสมรรถนะ การออกแบบใบงานรายบุคคล ไปจนถึงการตรวจทานคุณภาพและ PDPA...\n[0:45-0:60 CTA] เพราะ AI ไม่ได้มาแทนครู แต่มาคืนพลังให้ครูสร้างอนาคตที่ดีกว่า อ่านบทความฉบับเต็มได้ที่เว็บไซต์ คมคิด by KOMKRIT ครับ`,
-      socialHook: 'AI ไม่ได้มาแทนที่หัวใจของความเป็นครู... แต่มาช่วย "คืนเวลา" ให้ครูได้สร้างแรงบันดาลใจให้ลูกศิษย์อย่างเต็มที่ 💡 สรุป 5 ทักษะสำคัญของครูไทยยุค AI Copilot',
+      socialHook: 'AI ไม่ได้มาแทนที่หัวใจของความเป็นครู... แต่มาช่วย "คืนเวลา" ให้ครูได้สร้างแรงบันดาลใจให้ลูกศิษย์อย่างเต็มที่  สรุป 5 ทักษะสำคัญของครูไทยยุค AI Copilot',
     }),
     JSON.stringify({
       contentStructure: ['บทนำสะท้อนปัญหาจริงของครู', 'กรอบแนวคิด AI + Human', 'เจาะลึก 5 ทักษะพร้อมวิธีลงมือทำ', 'ข้อคิดส่งท้ายจาก Komkrit & CTA'],
@@ -1072,7 +1104,7 @@ function seedIfEmpty() {
       duration: '60 วินาที (Reels / TikTok / YouTube Shorts)',
       avatarStyle: 'Komkrit Smart Casual Navy Blazer พร้อมอินโฟกราฟิกประกอบด้านข้าง',
       scenes: [
-        { time: '00:00 - 00:10', visual: 'Medium Shot คุณคมกฤช + ตัวเลข 40% บนหน้าจอ', dialogue: 'จะดีแค่ไหนครับ ถ้าเราลดเวลางานเอกสารครูลงได้เกือบครึ่ง?', subtitle: 'คืนเวลา 40% ให้ห้องเรียนไทย 💡', bRoll: 'ภาพครูเตรียมเอกสารกองโตเปลี่ยนเป็นรอยยิ้มในห้องเรียน' },
+        { time: '00:00 - 00:10', visual: 'Medium Shot คุณคมกฤช + ตัวเลข 40% บนหน้าจอ', dialogue: 'จะดีแค่ไหนครับ ถ้าเราลดเวลางานเอกสารครูลงได้เกือบครึ่ง?', subtitle: 'คืนเวลา 40% ให้ห้องเรียนไทย ', bRoll: 'ภาพครูเตรียมเอกสารกองโตเปลี่ยนเป็นรอยยิ้มในห้องเรียน' },
         { time: '00:10 - 00:42', visual: 'Pop-up 5 Icons เรียงตามจังหวะพูด', dialogue: 'ด้วย 5 ทักษะ AI Copilot ตั้งแต่การตั้งโจทย์สมรรถนะ ออกแบบสื่อรายบุคคล ไปจนถึงการตรวจ QA และ PDPA', subtitle: '5 ทักษะสำคัญครูยุค AI Copilot', bRoll: 'หน้าจอระบบ Multi-Agent AI ทำงานเป็นทีม' },
         { time: '00:42 - 01:00', visual: 'โลโก้ คมคิด by KOMKRIT + ลิงก์บทความ', dialogue: 'เพราะ AI ไม่ได้มาแทนครู แต่มาเสริมพลังให้ครูสร้างคนคุณภาพ อ่านฉบับเต็มได้ที่ คมคิด by KOMKRIT ครับ', subtitle: 'อ่านต่อที่ คมคิด by KOMKRIT →', bRoll: 'ภาพนักเรียนทำกิจกรรมกลุ่มอย่างมีความสุข' },
       ],
@@ -1118,8 +1150,8 @@ function seedIfEmpty() {
         tags: ['คมคิดbyKOMKRIT', 'AIเพื่อการศึกษา', 'พัฒนาครู', 'EdTechThailand'],
       },
       facebook: {
-        post: '💡 AI ไม่ได้มาแทนที่หัวใจของความเป็นครู... แต่มาช่วย "คืนเวลา" ให้ครูได้สร้างแรงบันดาลใจให้ลูกศิษย์\n\nชวนอ่าน 5 ทักษะสำคัญของครูไทยยุค AI Copilot ที่เปลี่ยนงานเอกสารหนักๆ ให้เป็นสื่อการสอนคุณภาพสูง พร้อมแนวทางจริยธรรมและ PDPA ที่โรงเรียนนำไปใช้ได้ทันทีครับ',
-        engagementQuestion: 'คุณครูคิดว่างานส่วนไหนในโรงเรียนที่อยากให้ AI เข้ามาช่วยแบ่งเบาภาระมากที่สุดครับ? มาแลกเปลี่ยนกันใต้โพสต์นี้ได้เลยครับ 👇',
+        post: ' AI ไม่ได้มาแทนที่หัวใจของความเป็นครู... แต่มาช่วย "คืนเวลา" ให้ครูได้สร้างแรงบันดาลใจให้ลูกศิษย์\n\nชวนอ่าน 5 ทักษะสำคัญของครูไทยยุค AI Copilot ที่เปลี่ยนงานเอกสารหนักๆ ให้เป็นสื่อการสอนคุณภาพสูง พร้อมแนวทางจริยธรรมและ PDPA ที่โรงเรียนนำไปใช้ได้ทันทีครับ',
+        engagementQuestion: 'คุณครูคิดว่างานส่วนไหนในโรงเรียนที่อยากให้ AI เข้ามาช่วยแบ่งเบาภาระมากที่สุดครับ? มาแลกเปลี่ยนกันใต้โพสต์นี้ได้เลยครับ ',
       },
       tiktok: {
         hook: 'ลดเวลางานเอกสารครูลง 40% ด้วย 5 ทักษะ AI Copilot นี้!',
@@ -1127,12 +1159,12 @@ function seedIfEmpty() {
         hashtags: ['#คมคิดbyKOMKRIT', '#AIการศึกษา', '#ครูไทยยุคใหม่', '#EdTech'],
       },
       lineOa: {
-        headline: '📚 บทความใหม่: 5 ทักษะครูไทยยุค AI Copilot',
+        headline: ' บทความใหม่: 5 ทักษะครูไทยยุค AI Copilot',
         broadcastMessage: 'สวัสดีครับชาวคมคิด! วันนี้ผมสรุปแนวทางใช้ AI ช่วยลดภาระงานเอกสารครูและออกแบบใบงานรายบุคคลอย่างปลอดภัยตามหลัก PDPA อ่านฉบับเต็มพร้อมอินโฟกราฟิกได้เลยครับ →',
       },
       xTwitter: {
         thread: [
-          '1/ คำถามของการศึกษาไทยวันนี้ไม่ใช่ "จะให้ใช้ AI ไหม" แต่คือ "จะติดอาวุธให้ครูใช้ AI คืนเวลาสู่ห้องเรียนอย่างไร" 🧵👇',
+          '1/ คำถามของการศึกษาไทยวันนี้ไม่ใช่ "จะให้ใช้ AI ไหม" แต่คือ "จะติดอาวุธให้ครูใช้ AI คืนเวลาสู่ห้องเรียนอย่างไร" ',
           '2/ 5 ทักษะสำคัญของครูยุค AI Copilot: (1) Instructional Prompting (2) ใบงานรายบุคคล (3) เปลี่ยนเนื้อหาเป็นภาพ/โปรเจกต์ (4) ตรวจ Fact Check (5) จริยธรรม & PDPA',
           '3/ เพราะ AI + Human = Greater Impact อ่านบทความเต็มได้ที่เว็บไซต์ คมคิด by KOMKRIT ครับ #คมคิดbyKOMKRIT',
         ],
@@ -1144,7 +1176,7 @@ function seedIfEmpty() {
           'Slide 3: 3. สร้างสื่อภาพ & 4. ครูตรวจทานความถูกต้อง (QA)',
           'Slide 4: 5. ยึดมั่นจริยธรรม & PDPA — AI + Human = Greater Impact',
         ],
-        caption: 'คิดต่างอย่างสร้างสรรค์ เพื่อการศึกษา เพื่อสังคม เพื่ออนาคตที่ดีกว่า ✨ อ่านฉบับเต็มได้ที่ลิงก์หน้าโปรไฟล์',
+        caption: 'คิดต่างอย่างสร้างสรรค์ เพื่อการศึกษา เพื่อสังคม เพื่ออนาคตที่ดีกว่า  อ่านฉบับเต็มได้ที่ลิงก์หน้าโปรไฟล์',
       },
       websiteBlog: {
         slug: '5-ai-copilot-skills-for-thai-teachers',

@@ -9,10 +9,10 @@ interface Props {
 
 const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
   queued: { text: 'รอคิว', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
-  running: { text: 'กำลังรัน', cls: 'bg-sky-50 text-sky-800 border-sky-200' },
-  paused: { text: 'หยุดชั่วคราว (ล้มเหลวติดกัน)', cls: 'bg-amber-50 text-amber-900 border-amber-200' },
+  running: { text: 'กำลังรัน', cls: 'bg-slate-100 text-slate-700 border-slate-300' },
+  paused: { text: 'หยุดชั่วคราว (ล้มเหลวติดกัน)', cls: 'bg-slate-100 text-slate-700 border-slate-300' },
   completed: { text: 'เสร็จสมบูรณ์', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
-  completed_with_errors: { text: 'เสร็จ (มีรายการล้มเหลว)', cls: 'bg-amber-50 text-amber-900 border-amber-200' },
+  completed_with_errors: { text: 'เสร็จ (มีรายการล้มเหลว)', cls: 'bg-slate-100 text-slate-700 border-slate-300' },
   cancelled: { text: 'ยกเลิกแล้ว', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
 };
 
@@ -151,16 +151,16 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
   const st = batch ? STATUS_LABEL[batch.status] : null;
 
   return (
-    <div className="rounded-2xl bg-white border border-slate-200/80 shadow-2xs">
+    <div className="rounded-lg bg-white border border-slate-200/80 ">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left cursor-pointer"
       >
         <span className="flex items-center gap-2.5">
-          <Layers className="w-4 h-4 text-amber-600" />
+          <Layers className="w-4 h-4 text-slate-700" />
           <span className="text-sm font-bold text-slate-900">รันเป็นชุด (Batch) — ประหยัดสุด</span>
-          <span className="hidden sm:inline text-[11px] text-slate-400">
+          <span className="hidden sm:inline text-xs text-slate-400">
             ใส่หลายหัวข้อ ให้ AI ทำทีเดียว
           </span>
         </span>
@@ -179,7 +179,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
               value={topicsText}
               onChange={(e) => setTopicsText(e.target.value)}
               placeholder={`พิมพ์หัวข้อ หนึ่งบรรทัดต่อหนึ่งหัวข้อ (สูงสุด ${maxItems} หัวข้อ)\nเช่น\nAI Tutor ในโรงเรียนขนาดเล็ก\nห้องเรียน Active Learning\nทักษะภาษาไทย-เมียนมา`}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0a101d] focus:bg-white focus:outline-none"
+              className="w-full rounded-md border border-slate-200 bg-slate-50/60 px-3.5 py-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0a101d] focus:bg-white focus:outline-none"
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -199,7 +199,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
               ).map((m) => (
                 <label
                   key={m.id}
-                  className={`rounded-xl border p-3 cursor-pointer transition ${
+                  className={`rounded-md border p-3 cursor-pointer transition ${
                     mode === m.id
                       ? 'border-[#0a101d] bg-slate-900/[0.03]'
                       : 'border-slate-200 hover:bg-slate-50'
@@ -215,13 +215,13 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                     />
                     {m.title}
                   </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{m.desc}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">{m.desc}</p>
                 </label>
               ))}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-[11px] text-slate-500">
+              <span className="text-xs text-slate-500">
                 {topicCount > 0 ? (
                   <>
                     พร้อมรัน <strong className="text-slate-800">{topicCount}</strong> หัวข้อ (ตัดซ้ำให้แล้ว)
@@ -236,7 +236,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
               <button
                 type="submit"
                 disabled={starting || topicCount === 0 || topicCount > maxItems}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#0a101d] px-5 py-2.5 text-xs font-semibold text-amber-300 hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-md bg-[#0a101d] px-5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5" />
                 {starting ? 'กำลังสร้างคิว...' : `เริ่มรัน ${topicCount || ''} หัวข้อ`}
@@ -251,10 +251,10 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
           )}
 
           {batch && st && (
-            <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+            <div className="rounded-md border border-slate-200 p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-bold text-slate-900">{batch.name}</div>
-                <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${st.cls}`}>
+                <span className={`rounded border px-2.5 py-0.5 text-xs font-semibold ${st.cls}`}>
                   {st.text}
                 </span>
               </div>
@@ -266,7 +266,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-600">
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-600">
                   <span>
                     สำเร็จ <strong>{batch.done}</strong>/{batch.total}
                   </span>
@@ -294,7 +294,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
 
               <ul className="max-h-56 overflow-y-auto divide-y divide-slate-100 rounded-lg border border-slate-100">
                 {(batch.items || []).map((it) => (
-                  <li key={it.id} className="px-3 py-2 text-[11px] flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                  <li key={it.id} className="px-3 py-2 text-xs flex flex-wrap items-center gap-x-3 gap-y-0.5">
                     <span className="flex-1 min-w-[10rem] font-medium text-slate-800">{it.topic}</span>
                     <span
                       className={
@@ -325,7 +325,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                   <button
                     type="button"
                     onClick={cancel}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                   >
                     <Square className="w-3 h-3" /> ยกเลิก
                   </button>
@@ -334,7 +334,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                   <button
                     type="button"
                     onClick={() => resume(async (id) => api.processAiBatch(id))}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a101d] px-3 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-slate-800 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer"
                   >
                     <Play className="w-3 h-3" /> ทำต่อ
                   </button>
@@ -343,12 +343,12 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                   <button
                     type="button"
                     onClick={() => resume(api.retryFailedAiBatch)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" /> ลองใหม่เฉพาะที่ล้มเหลว
                   </button>
                 )}
-                <span className="text-[11px] text-slate-400">
+                <span className="text-xs text-slate-400">
                   {backgroundCapable
                     ? 'ปิดหน้านี้ได้ ระบบบนเซิร์ฟเวอร์รันต่อให้จนเสร็จ'
                     : 'โฮสต์นี้เป็น Serverless: กรุณาเปิดหน้านี้ค้างไว้จนกว่าจะเสร็จ'}
@@ -360,7 +360,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
 
           {recent.length > 0 && (
             <div>
-              <div className="text-[11px] font-bold text-slate-400 mb-1.5">Batch ล่าสุด</div>
+              <div className="text-xs font-bold text-slate-400 mb-1.5">Batch ล่าสุด</div>
               <ul className="space-y-1">
                 {recent.map((r) => (
                   <li key={r.id}>
@@ -369,8 +369,8 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                       onClick={() => openBatch(r.id)}
                       className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-1.5 text-left hover:bg-slate-50 cursor-pointer"
                     >
-                      <span className="text-[11px] font-medium text-slate-800 truncate">{r.name}</span>
-                      <span className="text-[11px] text-slate-500 shrink-0">
+                      <span className="text-xs font-medium text-slate-800 truncate">{r.name}</span>
+                      <span className="text-xs text-slate-500 shrink-0">
                         {r.done}/{r.total} • {STATUS_LABEL[r.status]?.text || r.status}
                       </span>
                     </button>

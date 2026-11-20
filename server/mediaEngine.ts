@@ -17,6 +17,8 @@ const execFileAsync = promisify(execFile);
 
 export const UPLOADS_ROOT = IS_SERVERLESS
   ? '/tmp/komkrit-uploads'
+  : process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
   : path.resolve(process.cwd(), 'uploads');
 const IMAGES_DIR = path.join(UPLOADS_ROOT, 'images');
 const VIDEOS_DIR = path.join(UPLOADS_ROOT, 'videos');

@@ -11,7 +11,7 @@ import { api, DashboardStats, getStoredAdminToken } from './api';
 import { PublicWebsite } from './components/PublicWebsite';
 import { AdminLayout } from './components/AdminLayout';
 import { AdminLoginScreen } from './components/AdminLoginScreen';
-import { ArticleReaderModal } from './components/ArticleReaderModal';
+import { ArticlePage } from './components/ArticlePage';
 
 function isUrlAdminRoute(): boolean {
   return (
@@ -37,11 +37,31 @@ export const App: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [readingPostId, setReadingPostId] = useState<number | null>(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const pid = sp.get('post');
-    return pid ? Number(pid) : null;
-  });
+  const [path, setPath] = useState<string>(() => window.location.pathname);
+
+  const navigate = useCallback((to: string, opts?: { replace?: boolean }) => {
+    if (opts?.replace) window.history.replaceState({}, '', to);
+    else if (to !== window.location.pathname + window.location.search) window.history.pushState({}, '', to);
+    setPath(window.location.pathname);
+    setViewMode(to.startsWith('/admin') ? 'admin' : 'public');
+    if (!opts?.replace) window.scrollTo({ top: 0 });
+  }, []);
+
+  const articleSlug = path.startsWith('/articles/')
+    ? (() => {
+        try {
+          return decodeURIComponent(path.slice('/articles/'.length)).replace(/\/+$/, '');
+        } catch {
+          return '';
+        }
+      })()
+    : '';
+
+  // Old share links (/?post=12) become real article addresses
+  useEffect(() => {
+    const pid = new URLSearchParams(window.location.search).get('post');
+    if (pid && /^\d+$/.test(pid)) navigate(`/articles/${pid}`, { replace: true });
+  }, [navigate]);
 
   const [initialEditPost, setInitialEditPost] = useState<Post | null>(null);
   const [openCreateImmediately, setOpenCreateImmediately] = useState(false);
@@ -49,6 +69,7 @@ export const App: React.FC = () => {
   // Sync browser back/forward navigation between `/` and `/admin`
   useEffect(() => {
     const syncRoute = () => {
+      setPath(window.location.pathname);
       setViewMode(isUrlAdminRoute() ? 'admin' : 'public');
     };
     window.addEventListener('popstate', syncRoute);
@@ -137,19 +158,13 @@ export const App: React.FC = () => {
 
   const handleOpenPublic = () => {
     setViewMode('public');
-    if (window.location.pathname.startsWith('/admin') || window.location.hash) {
-      window.history.pushState({}, '', '/');
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    navigate('/');
   };
 
   const handleGoToAdmin = (menu = 'dashboard') => {
     setAdminMenu(menu);
     setViewMode('admin');
-    if (!window.location.pathname.startsWith('/admin')) {
-      window.history.pushState({}, '', '/admin');
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    navigate('/admin');
   };
 
   const handleLogout = () => {
@@ -167,6 +182,14 @@ export const App: React.FC = () => {
     handleGoToAdmin('posts');
   };
 
+  const articleHref = (id: number) => {
+    const p = posts.find((x) => x.id === id);
+    return `/articles/${encodeURIComponent(p?.slug || String(id))}`;
+  };
+  const openPost = (id: number) => navigate(articleHref(id));
+  // Admin previews open in a new tab so the editing session stays where it is
+  const previewPost = (id: number) => window.open(articleHref(id), '_blank', 'noopener');
+
   if (loading || !authChecked) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#0d2546] text-white gap-3">
@@ -182,6 +205,21 @@ export const App: React.FC = () => {
     );
   }
 
+  if (articleSlug) {
+    return (
+      <ArticlePage
+        slug={articleSlug}
+        allPosts={posts}
+        isAdmin={Boolean(adminUsername)}
+        brandTitle={siteConfig?.brandTitle || 'คมคิด'}
+        brandSub={siteConfig?.brandSub || 'by KOMKRIT'}
+        onNavigate={navigate}
+        onEditInAdmin={handleEditPostInAdmin}
+        onCommentsUpdated={adminUsername ? loadAdminData : loadPublicData}
+      />
+    );
+  }
+
   return (
     <>
       {viewMode === 'public' ? (
@@ -190,7 +228,7 @@ export const App: React.FC = () => {
           pillars={pillars}
           siteConfig={siteConfig}
           specialProjects={specialProjects}
-          onOpenPost={(id) => setReadingPostId(id)}
+          onOpenPost={openPost}
         />
       ) : !adminUsername ? (
         <AdminLoginScreen
@@ -220,17 +258,10 @@ export const App: React.FC = () => {
           onRefreshAll={loadAdminData}
           onOpenPublicWebsite={handleOpenPublic}
           onLogout={handleLogout}
-          onPreviewPost={(id) => setReadingPostId(id)}
+          onPreviewPost={previewPost}
         />
       )}
 
-      <ArticleReaderModal
-        postId={readingPostId}
-        onClose={() => setReadingPostId(null)}
-        canEdit={Boolean(adminUsername)}
-        onEditInAdmin={handleEditPostInAdmin}
-        onCommentsUpdated={adminUsername ? loadAdminData : loadPublicData}
-      />
     </>
   );
 };

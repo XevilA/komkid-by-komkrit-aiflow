@@ -226,7 +226,7 @@ export const PublicWebsite: React.FC<Props> = ({
   return (
     <div className="min-h-screen flex flex-col bg-[#f3f6fb]">
       {/* Top Navbar (Desktop matches Image 2, Mobile matches Image 3) */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md shadow-xs border-b border-slate-200/70">
+      <header className="sticky top-0 z-40 bg-white/95 border-b border-slate-200/70">
         <div className="mx-auto max-w-[1360px] px-4 sm:px-6 h-16 sm:h-[70px] flex items-center justify-between gap-3">
           {/* Brand Logo */}
           <button
@@ -240,13 +240,13 @@ export const PublicWebsite: React.FC<Props> = ({
             <img
               src="/images/avatar-komkrit.png"
               alt="คมคิด by KOMKRIT"
-              className="h-10 w-10 sm:h-11 sm:w-11 rounded-full object-cover shadow-xs"
+              className="h-10 w-10 sm:h-11 sm:w-11 rounded-full object-cover "
             />
             <div className="leading-none">
               <div className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#0d2546]">
                 {cfg.brandTitle}
               </div>
-              <div className="text-[11px] sm:text-xs font-bold tracking-wide text-[#e88d14]">
+              <div className="text-xs sm:text-xs font-bold tracking-wide text-[#e88d14]">
                 {cfg.brandSub}
               </div>
             </div>
@@ -268,7 +268,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 >
                   {item.label}
                   {active && (
-                    <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-[#f59e0b]" />
+                    <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-slate-900" />
                   )}
                 </button>
               );
@@ -288,7 +288,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   }
                 }}
                 placeholder="ค้นหาบทความ, คอร์ส, เนื้อหา..."
-                className="w-52 xl:w-60 rounded-full border border-slate-200 bg-slate-50 pl-4 pr-9 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-[#f59e0b] focus:bg-white focus:outline-none transition"
+                className="w-52 xl:w-60 rounded-full border border-slate-200 bg-slate-50 pl-4 pr-9 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:outline-none transition"
               />
               <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
             </div>
@@ -296,10 +296,10 @@ export const PublicWebsite: React.FC<Props> = ({
             {/* Social Icons */}
             <div className="hidden xl:flex items-center gap-1.5">
               {[
-                { href: cfg.socialX, label: 'X (Twitter)', text: '𝕏', cls: 'bg-slate-900 text-[11px]' },
-                { href: cfg.socialYoutube, label: 'YouTube', text: '▶', cls: 'bg-[#ef4444] text-[10px]' },
+                { href: cfg.socialX, label: 'X (Twitter)', text: '𝕏', cls: 'bg-slate-900 text-xs' },
+                { href: cfg.socialYoutube, label: 'YouTube', text: '▶', cls: 'bg-[#ef4444] text-xs' },
                 { href: cfg.socialFacebook, label: 'Facebook', text: 'f', cls: 'bg-[#1877f2] text-xs' },
-                { href: cfg.socialInstagram, label: 'Instagram', text: 'IG', cls: 'bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-[10px]' },
+                { href: cfg.socialInstagram, label: 'Instagram', text: 'IG', cls: ' text-xs bg-slate-50' },
               ]
                 .filter((s) => s.href)
                 .map((s) => (
@@ -318,7 +318,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
             <button
               onClick={() => setNewsletterOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[#0d2546] px-4 py-2 text-xs font-semibold text-white hover:bg-[#173966] transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded bg-[#0d2546] px-4 py-2 text-xs font-semibold text-white hover:bg-[#173966] transition cursor-pointer"
             >
               <Mail className="w-3.5 h-3.5" />
               สมัครรับข่าวสาร
@@ -354,7 +354,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="ค้นหาบทความ, ความรู้, คอร์ส..."
                 autoFocus
-                className="w-full rounded-full border border-slate-200 bg-slate-50 pl-4 pr-9 py-2 text-sm focus:border-[#f59e0b] focus:bg-white focus:outline-none"
+                className="w-full rounded-full border border-slate-200 bg-slate-50 pl-4 pr-9 py-2 text-sm focus:border-slate-300 focus:bg-white focus:outline-none"
               />
               <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
             </div>
@@ -363,7 +363,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
         {/* Mobile Slide-down Drawer */}
         {mobileMenuOpen && (
-          <div className="lg:hidden border-t border-slate-100 bg-white px-4 py-4 space-y-2 shadow-xl">
+          <div className="lg:hidden border-t border-slate-100 bg-white px-4 py-4 space-y-2 ">
             {navItems.map((item) => (
               <button
                 key={item.id}
@@ -371,7 +371,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   setActiveTab(item.id);
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center justify-between rounded-xl px-4 py-2.5 text-sm font-semibold cursor-pointer ${
+                className={`w-full flex items-center justify-between rounded-md px-4 py-2.5 text-sm font-semibold cursor-pointer ${
                   activeTab === item.id
                     ? 'bg-[#0d2546] text-white'
                     : 'text-slate-700 hover:bg-slate-50'
@@ -387,7 +387,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   setMobileMenuOpen(false);
                   setNewsletterOpen(true);
                 }}
-                className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-[#0d2546] py-2.5 text-xs font-bold text-white cursor-pointer"
+                className="w-full flex items-center justify-center gap-1.5 rounded-md bg-[#0d2546] py-2.5 text-xs font-bold text-white cursor-pointer"
               >
                 <Mail className="w-3.5 h-3.5" /> สมัครรับข่าวสารฟรี
               </button>
@@ -398,7 +398,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
       {/* HERO BANNER (Matches Image 2 Desktop & Image 3 Mobile!) */}
       {(activeTab === 'home' || activeTab === 'articles') && (
-        <section className="relative overflow-hidden bg-gradient-to-r from-[#dce9f7] via-[#e9eff6] to-[#d9e5f3] border-b border-slate-200/80">
+        <section className="relative overflow-hidden border-b border-slate-200/80 bg-slate-50">
           {/* Soft coastal clouds & warm horizon glow */}
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_rgba(255,255,255,0.95),_rgba(255,255,255,0.35)_52%,_transparent_80%)] z-10" />
 
@@ -424,14 +424,14 @@ export const PublicWebsite: React.FC<Props> = ({
                       const el = document.getElementById('latest-section');
                       el?.scrollIntoView({ behavior: 'smooth' });
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#f59e0b] to-[#ea8810] px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold text-white shadow-md hover:brightness-105 transition cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold text-white hover:brightness-105 transition cursor-pointer bg-slate-900"
                   >
                     ดูบทความล่าสุด
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => setActiveTab('about')}
-                    className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/90 border border-[#0d2546]/20 px-4 py-2 text-xs font-bold text-[#0d2546] hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
+                    className="hidden sm:inline-flex items-center gap-1.5 rounded bg-white/90 border border-[#0d2546]/20 px-4 py-2 text-xs font-bold text-[#0d2546] hover:bg-[#0d2546] hover:text-white transition cursor-pointer"
                   >
                     เกี่ยวกับ คมคิด
                   </button>
@@ -455,7 +455,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
               {/* Right Quote (Desktop xl / lg) */}
               <div className="hidden lg:flex lg:col-span-3 z-20 pr-8 flex-col items-end text-right">
-                <div className="rounded-2xl bg-white/55 backdrop-blur-xs px-5 py-4 border border-white/70 shadow-xs">
+                <div className="rounded-lg bg-white/55 px-5 py-4 border border-white/70 ">
                   <p className="text-base xl:text-lg font-semibold text-[#0d2546] leading-relaxed">
                     “ {cfg.heroQuote} ”
                   </p>
@@ -471,7 +471,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
       {/* 7 CATEGORY CARDS BAR (Desktop 7-col horizontal cards, Mobile swipeable square cards matching Image 2 & 3!) */}
       {(activeTab === 'home' || activeTab === 'articles') && (
-        <section className="bg-white border-b border-slate-200/70 py-3.5 sm:py-4 shadow-2xs">
+        <section className="bg-white border-b border-slate-200/70 py-3.5 sm:py-4 ">
           <div className="mx-auto max-w-[1360px] px-4 sm:px-6 relative">
             {/* Desktop 7-col grid */}
             <div className="hidden lg:grid lg:grid-cols-7 gap-3">
@@ -481,14 +481,14 @@ export const PublicWebsite: React.FC<Props> = ({
                   <button
                     key={cat.id}
                     onClick={() => handleCategoryClick(cat.id)}
-                    className={`group flex items-center gap-3 rounded-xl border p-2.5 text-left transition cursor-pointer ${
+                    className={`group flex items-center gap-3 rounded-md border p-2.5 text-left transition cursor-pointer ${
                       isSelected
-                        ? 'border-[#f59e0b] bg-amber-50/70 shadow-sm ring-1 ring-[#f59e0b]'
-                        : 'border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-xs'
+                        ? 'border-slate-300 bg-slate-100 ring-1 ring-slate-300'
+                        : 'border-slate-200/80 bg-white hover:border-slate-300 hover:'
                     }`}
                   >
                     <div
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-xs group-hover:scale-105 transition"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full group-hover:scale-105 transition"
                       style={{ backgroundColor: cat.color }}
                     >
                       {CATEGORY_ICONS[cat.id]}
@@ -497,7 +497,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       <div className="truncate text-[13.5px] font-bold text-[#0d2546]">
                         {cat.nameTh}
                       </div>
-                      <div className="truncate text-[10.5px] text-slate-400">
+                      <div className="truncate text-xs text-slate-400">
                         {cat.nameEn}
                       </div>
                     </div>
@@ -518,14 +518,14 @@ export const PublicWebsite: React.FC<Props> = ({
                     <button
                       key={cat.id}
                       onClick={() => handleCategoryClick(cat.id)}
-                      className={`snap-start flex flex-col items-center justify-center shrink-0 w-[96px] rounded-2xl border p-2.5 text-center transition cursor-pointer ${
+                      className={`snap-start flex flex-col items-center justify-center shrink-0 w-[96px] rounded-lg border p-2.5 text-center transition cursor-pointer ${
                         isSelected
-                          ? 'border-[#f59e0b] bg-amber-50 shadow-xs'
+                          ? 'border-slate-300 bg-slate-100 '
                           : 'border-slate-200/90 bg-white'
                       }`}
                     >
                       <div
-                        className="flex h-11 w-11 items-center justify-center rounded-full shadow-xs mb-1.5"
+                        className="flex h-11 w-11 items-center justify-center rounded-full mb-1.5"
                         style={{ backgroundColor: cat.color }}
                       >
                         {CATEGORY_ICONS[cat.id]}
@@ -533,7 +533,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       <div className="text-xs font-bold text-[#0d2546] leading-tight line-clamp-2">
                         {cat.nameTh}
                       </div>
-                      <div className="mt-0.5 text-[10px] text-slate-400 truncate w-full">
+                      <div className="mt-0.5 text-xs text-slate-400 truncate w-full">
                         {cat.nameEn.split(' ')[0]}
                       </div>
                     </button>
@@ -549,18 +549,18 @@ export const PublicWebsite: React.FC<Props> = ({
       <main id="latest-section" className="flex-1 mx-auto w-full max-w-[1360px] px-4 sm:px-6 py-6 sm:py-8">
         {/* Active Filter Pill Bar if filtering */}
         {(selectedCategory !== 'all' || searchQuery.trim()) && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-2.5 border border-amber-200 shadow-2xs">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-md bg-white px-4 py-2.5 border border-slate-300 ">
             <div className="flex items-center gap-2 text-sm">
               <span className="font-semibold text-[#0d2546]">
                 กำลังแสดงผล ({filteredPosts.length} รายการ):
               </span>
               {selectedCategory !== 'all' && (
-                <span className="rounded-full bg-[#0d2546] px-3 py-0.5 text-xs font-bold text-white">
+                <span className="rounded bg-[#0d2546] px-3 py-0.5 text-xs font-bold text-white">
                   หมวด: {getCategoryBadge(selectedCategory).nameTh}
                 </span>
               )}
               {searchQuery.trim() && (
-                <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-900">
+                <span className="rounded bg-slate-100 px-3 py-0.5 text-xs font-bold text-slate-700">
                   ค้นหา: "{searchQuery}"
                 </span>
               )}
@@ -572,7 +572,7 @@ export const PublicWebsite: React.FC<Props> = ({
               }}
               className="text-xs font-bold text-rose-600 hover:underline cursor-pointer"
             >
-              ล้างตัวกรองทั้งหมด ✕
+              ล้างตัวกรองทั้งหมด 
             </button>
           </div>
         )}
@@ -582,10 +582,10 @@ export const PublicWebsite: React.FC<Props> = ({
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
               {/* LEFT COLUMN: บทความล่าสุด (Latest Articles) */}
-              <div className="lg:col-span-4 rounded-2xl bg-white border border-slate-200/80 p-4 sm:p-5 shadow-xs">
+              <div className="lg:col-span-4 rounded-lg bg-white border border-slate-200/80 p-4 sm:p-5 ">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <span className="h-5 w-1.5 rounded-full bg-[#f59e0b]" />
+                    <span className="h-5 w-1.5 rounded-full bg-slate-900" />
                     <h2 className="text-lg font-extrabold text-[#0d2546]">
                       บทความล่าสุด
                     </h2>
@@ -612,7 +612,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           onClick={() => onOpenPost(post.id)}
                           className="group py-3 first:pt-0 last:pb-0 flex items-center gap-3.5 cursor-pointer"
                         >
-                          <div className="relative h-[68px] w-[104px] sm:h-[72px] sm:w-[110px] shrink-0 overflow-hidden rounded-xl bg-[#0d2546]">
+                          <div className="relative h-[68px] w-[104px] sm:h-[72px] sm:w-[110px] shrink-0 overflow-hidden rounded-md bg-[#0d2546]">
                             <img
                               src={post.coverImage}
                               alt={post.title}
@@ -626,7 +626,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           </div>
                           <div className="min-w-0 flex-1">
                             <span
-                              className="inline-block rounded-md px-2 py-0.5 text-[10px] font-bold mb-1"
+                              className="inline-block rounded-md px-2 py-0.5 text-xs font-bold mb-1"
                               style={{
                                 backgroundColor: cat.bgLight,
                                 color: cat.color,
@@ -634,10 +634,10 @@ export const PublicWebsite: React.FC<Props> = ({
                             >
                               {cat.badgeLabel}
                             </span>
-                            <h3 className="text-[13.5px] font-bold text-[#0d2546] leading-snug line-clamp-2 group-hover:text-[#d97706] transition">
+                            <h3 className="text-[13.5px] font-bold text-[#0d2546] leading-snug line-clamp-2 group-hover:text-slate-700 transition">
                               {post.title}
                             </h3>
-                            <div className="mt-1.5 flex items-center gap-3 text-[11px] text-slate-400">
+                            <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-400">
                               <span className="inline-flex items-center gap-1">
                                 <Calendar className="w-3 h-3" />
                                 {formatThaiDate(post.createdAt)}
@@ -652,7 +652,7 @@ export const PublicWebsite: React.FC<Props> = ({
                               </span>
                             </div>
                           </div>
-                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#f59e0b] shrink-0" />
+                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-200 shrink-0" />
                         </div>
                       );
                     })}
@@ -665,7 +665,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 {featuredPost && (
                   <div
                     onClick={() => onOpenPost(featuredPost.id)}
-                    className="group relative overflow-hidden rounded-2xl bg-[#0c203b] min-h-[300px] sm:min-h-[330px] flex items-center shadow-md cursor-pointer border border-[#1a3a63]"
+                    className="group relative overflow-hidden rounded-lg bg-[#0c203b] min-h-[300px] sm:min-h-[330px] flex items-center cursor-pointer border border-[#1a3a63]"
                   >
                     {/* Right speaker image */}
                     <img
@@ -674,10 +674,10 @@ export const PublicWebsite: React.FC<Props> = ({
                       className="absolute right-0 top-0 h-full w-[68%] object-cover object-center group-hover:scale-103 transition duration-500"
                     />
                     {/* Smooth Navy Gradient Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-r from-[#0b1f3a] via-[#0d2546]/92 via-48% to-transparent" />
+                    <div className="absolute inset-0 via-48% bg-slate-900/50" />
 
                     <div className="relative z-10 p-6 sm:p-7 max-w-[66%]">
-                      <span className="inline-block rounded-full bg-[#f59e0b] px-3 py-1 text-[11px] font-extrabold text-[#0b1f3a] shadow-xs">
+                      <span className="inline-block rounded bg-slate-900 px-3 py-1 text-xs font-extrabold text-[#0b1f3a] ">
                         {getCategoryBadge(featuredPost.category).nameTh}
                       </span>
 
@@ -686,7 +686,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           <>
                             การศึกษาไทย
                             <br />
-                            ในยุค <span className="text-4xl sm:text-5xl text-[#fbbf24]">AI</span>
+                            ในยุค <span className="text-4xl sm:text-5xl text-slate-200">AI</span>
                           </>
                         ) : (
                           featuredPost.title
@@ -697,7 +697,7 @@ export const PublicWebsite: React.FC<Props> = ({
                         {featuredPost.subtitle || featuredPost.excerpt}
                       </p>
 
-                      <button className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#f59e0b] to-[#e68a10] px-5 py-2 text-xs sm:text-sm font-extrabold text-[#0b1f3a] shadow-md group-hover:brightness-110 transition cursor-pointer">
+                      <button className="mt-5 inline-flex items-center gap-2 rounded px-5 py-2 text-xs sm:text-sm font-extrabold text-[#0b1f3a] group-hover:brightness-110 transition cursor-pointer bg-slate-50">
                         อ่านต่อ <ArrowRight className="w-4 h-4" />
                       </button>
                     </div>
@@ -716,18 +716,18 @@ export const PublicWebsite: React.FC<Props> = ({
                       setSpecialProjectOpen(true);
                     }
                   }}
-                  className="group relative overflow-hidden rounded-2xl bg-white border border-slate-200/80 p-4 sm:p-5 shadow-2xs cursor-pointer hover:shadow-sm transition"
+                  className="group relative overflow-hidden rounded-lg bg-white border border-slate-200/80 p-4 sm:p-5 cursor-pointer hover: transition"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-[#d97706]">
+                      <div className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
                         {featuredProject.badgeLabel}
                       </div>
                       <h3 className="text-base sm:text-lg font-extrabold text-[#0d2546]">
                         {featuredProject.title}
                       </h3>
                       {featuredProject.subtitle && (
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-xs text-slate-500">
                           {featuredProject.subtitle}
                         </p>
                       )}
@@ -737,12 +737,12 @@ export const PublicWebsite: React.FC<Props> = ({
                       {featuredProject.tags.slice(0, 2).map((t, i) => (
                         <span
                           key={i}
-                          className="inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-[#0d2546] border border-slate-200/70"
+                          className="inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2.5 py-1 text-xs font-semibold text-[#0d2546] border border-slate-200/70"
                         >
                           {t}
                         </span>
                       ))}
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#0d2546] px-3 py-1.5 text-[11px] font-bold text-white group-hover:bg-[#193d6e] transition">
+                      <span className="inline-flex items-center gap-1 rounded bg-[#0d2546] px-3 py-1.5 text-xs font-bold text-white group-hover:bg-[#193d6e] transition">
                         {featuredProject.ctaLabel} <ArrowRight className="w-3 h-3" />
                       </span>
                     </div>
@@ -752,12 +752,12 @@ export const PublicWebsite: React.FC<Props> = ({
               </div>
 
               {/* RIGHT COLUMN: Komkrit Profile & Quote Card */}
-              <div className="lg:col-span-3 rounded-2xl bg-white border border-slate-200/80 p-5 shadow-xs space-y-4">
+              <div className="lg:col-span-3 rounded-lg bg-white border border-slate-200/80 p-5 space-y-4">
                 <div className="flex items-start gap-3.5">
                   <img
                     src={cfg.authorImageUrl}
                     alt={cfg.authorName}
-                    className="h-24 w-24 rounded-xl object-cover shrink-0 border border-slate-100 shadow-2xs"
+                    className="h-24 w-24 rounded-md object-cover shrink-0 border border-slate-100 "
                   />
                   <div>
                     <div className="text-xl font-extrabold text-[#0d2546] leading-none">
@@ -771,7 +771,7 @@ export const PublicWebsite: React.FC<Props> = ({
                     </p>
                     <button
                       onClick={() => setActiveTab('about')}
-                      className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-[#0d2546] px-3.5 py-1.5 text-[11px] font-bold text-white hover:bg-[#193d6e] transition cursor-pointer"
+                      className="mt-2.5 inline-flex items-center gap-1 rounded bg-[#0d2546] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[#193d6e] transition cursor-pointer"
                     >
                       เกี่ยวกับผม <ArrowRight className="w-3 h-3" />
                     </button>
@@ -779,8 +779,8 @@ export const PublicWebsite: React.FC<Props> = ({
                 </div>
 
                 {/* Quote Box */}
-                <div className="rounded-xl bg-[#f7f9fc] border border-slate-200/60 p-4 relative">
-                  <span className="text-2xl font-serif text-slate-300 leading-none">“</span>
+                <div className="rounded-md bg-[#f7f9fc] border border-slate-200/60 p-4 relative">
+                  <span className="text-2xl text-slate-300 leading-none">“</span>
                   <p className="text-xs sm:text-[13px] font-semibold text-[#0d2546] leading-relaxed -mt-2 pl-3">
                     {cfg.authorQuote}
                   </p>
@@ -788,7 +788,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
                 {/* Social & Subscribe */}
                 <div className="pt-1">
-                  <div className="text-[11px] font-bold text-slate-500 mb-2">
+                  <div className="text-xs font-bold text-slate-500 mb-2">
                     ติดตามผมได้ที่
                   </div>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -799,7 +799,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label="X"
-                          className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white text-[11px] font-bold"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white text-xs font-bold"
                         >
                           𝕏
                         </a>
@@ -810,7 +810,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label="YouTube"
-                          className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-600 text-white text-[10px] font-bold"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-600 text-white text-xs font-bold"
                         >
                           ▶
                         </a>
@@ -832,7 +832,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label="Instagram"
-                          className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-white text-[10px] font-bold"
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-white text-xs font-bold bg-slate-900"
                         >
                           IG
                         </a>
@@ -843,7 +843,7 @@ export const PublicWebsite: React.FC<Props> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label="LINE"
-                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#06c755] text-white text-[9px] font-bold"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#06c755] text-white text-xs font-bold"
                         >
                           LINE
                         </a>
@@ -852,7 +852,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
                     <button
                       onClick={() => setNewsletterOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#0d2546] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#1a3e70] transition cursor-pointer"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#0d2546] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#1a3e70] transition cursor-pointer"
                     >
                       <Mail className="w-3 h-3" /> สมัครรับข่าวสาร
                     </button>
@@ -888,7 +888,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       <div
                         key={post.id}
                         onClick={() => onOpenPost(post.id)}
-                        className="group rounded-2xl bg-white border border-slate-200/80 overflow-hidden shadow-2xs hover:shadow-md transition cursor-pointer flex flex-col"
+                        className="group rounded-lg bg-white border border-slate-200/80 overflow-hidden hover: transition cursor-pointer flex flex-col"
                       >
                         <div className="relative h-40 overflow-hidden bg-[#0d2546]">
                           <img
@@ -897,36 +897,36 @@ export const PublicWebsite: React.FC<Props> = ({
                             className="h-full w-full object-cover group-hover:scale-105 transition duration-300"
                           />
                           <span
-                            className="absolute top-2.5 left-2.5 rounded-full px-2.5 py-0.5 text-[10.5px] font-bold text-white shadow-xs"
+                            className="absolute top-2.5 left-2.5 rounded px-2.5 py-0.5 text-xs font-bold text-white "
                             style={{ backgroundColor: cat.color }}
                           >
                             {cat.nameTh}
                           </span>
                           {post.contentType === 'video' && (
-                            <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1 rounded-full bg-rose-600 px-2.5 py-0.5 text-[10px] font-bold text-white">
+                            <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1 rounded bg-rose-600 px-2.5 py-0.5 text-xs font-bold text-white">
                               <Play className="w-3 h-3 fill-white" /> วิดีโอ
                             </span>
                           )}
                           {post.contentType === 'course' && (
-                            <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1 rounded-full bg-purple-700 px-2.5 py-0.5 text-[10px] font-bold text-white">
+                            <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1 rounded bg-slate-900 px-2.5 py-0.5 text-xs font-bold text-white">
                               เวิร์กช็อป
                             </span>
                           )}
                         </div>
                         <div className="p-4 flex-1 flex flex-col justify-between">
                           <div>
-                            <h3 className="text-sm font-bold text-[#0d2546] line-clamp-2 group-hover:text-[#d97706] transition">
+                            <h3 className="text-sm font-bold text-[#0d2546] line-clamp-2 group-hover:text-slate-700 transition">
                               {post.title}
                             </h3>
                             <p className="mt-1.5 text-xs text-slate-500 line-clamp-2 font-body">
                               {post.excerpt}
                             </p>
                           </div>
-                          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
                             <span>{formatThaiDate(post.createdAt)}</span>
                             <span className="inline-flex items-center gap-2">
-                              <span>👁 {formatViews(post.views)}</span>
-                              <span>💬 {post.commentsCount}</span>
+                              <span> {formatViews(post.views)}</span>
+                              <span> {post.commentsCount}</span>
                             </span>
                           </div>
                         </div>
@@ -938,10 +938,10 @@ export const PublicWebsite: React.FC<Props> = ({
             )}
 
             {/* Full-Width Newsletter Banner (Exact match to Image 3 dark navy callout!) */}
-            <div className="rounded-2xl bg-gradient-to-r from-[#0d2546] via-[#13325c] to-[#0d2546] p-5 sm:p-6 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md">
+            <div className="rounded-lg p-5 sm:p-6 text-white flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-900">
               <div className="flex items-center gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/15 border border-white/20">
-                  <GraduationCap className="w-6 h-6 text-[#fbbf24]" />
+                  <GraduationCap className="w-6 h-6 text-slate-200" />
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-extrabold">
@@ -955,13 +955,13 @@ export const PublicWebsite: React.FC<Props> = ({
               <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto shrink-0">
                 <button
                   onClick={() => setSurveyOpen(true)}
-                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-full bg-[#f59e0b] px-5 py-2.5 text-xs sm:text-sm font-extrabold text-[#0b1f3a] hover:brightness-105 transition cursor-pointer"
+                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded bg-slate-900 px-5 py-2.5 text-xs sm:text-sm font-extrabold text-[#0b1f3a] hover:brightness-105 transition cursor-pointer"
                 >
                   เสนอหัวข้อ / แบบสำรวจผู้เรียน
                 </button>
                 <button
                   onClick={() => setNewsletterOpen(true)}
-                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-extrabold text-[#0d2546] hover:bg-amber-400 transition cursor-pointer"
+                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded bg-white px-6 py-2.5 text-sm font-extrabold text-[#0d2546] hover:bg-slate-200 transition cursor-pointer"
                 >
                   สมัครเลย <ArrowRight className="w-4 h-4" />
                 </button>
@@ -991,7 +991,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   <div
                     key={post.id}
                     onClick={() => onOpenPost(post.id)}
-                    className="group rounded-2xl bg-white border border-slate-200/80 overflow-hidden shadow-xs hover:shadow-lg transition cursor-pointer flex flex-col"
+                    className="group rounded-lg bg-white border border-slate-200/80 overflow-hidden hover: transition cursor-pointer flex flex-col"
                   >
                     <div className="relative h-48 overflow-hidden bg-[#0d2546]">
                       <img
@@ -1000,7 +1000,7 @@ export const PublicWebsite: React.FC<Props> = ({
                         className="h-full w-full object-cover group-hover:scale-105 transition duration-300"
                       />
                       <span
-                        className="absolute top-3 left-3 rounded-full px-3 py-1 text-xs font-bold text-white shadow-xs"
+                        className="absolute top-3 left-3 rounded px-3 py-1 text-xs font-bold text-white "
                         style={{ backgroundColor: cat.color }}
                       >
                         {cat.nameTh}
@@ -1008,7 +1008,7 @@ export const PublicWebsite: React.FC<Props> = ({
                     </div>
                     <div className="p-5 flex-1 flex flex-col justify-between">
                       <div>
-                        <h3 className="text-base font-extrabold text-[#0d2546] group-hover:text-[#d97706] transition line-clamp-2">
+                        <h3 className="text-base font-extrabold text-[#0d2546] group-hover:text-slate-700 transition line-clamp-2">
                           {post.title}
                         </h3>
                         <p className="mt-2 text-sm text-slate-600 line-clamp-3 font-body">
@@ -1017,7 +1017,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       </div>
                       <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
                         <span>{formatThaiDate(post.createdAt)}</span>
-                        <span className="font-semibold text-[#0d2546] group-hover:text-[#d97706]">
+                        <span className="font-semibold text-[#0d2546] group-hover:text-slate-700">
                           อ่านบทความ →
                         </span>
                       </div>
@@ -1045,7 +1045,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
             {/* Featured YouTube Player (DB-driven) */}
             {featuredVideoId && (
-            <div className="rounded-2xl bg-[#0b1f3a] text-white overflow-hidden shadow-lg grid grid-cols-1 lg:grid-cols-12">
+            <div className="rounded-lg bg-[#0b1f3a] text-white overflow-hidden grid grid-cols-1 lg:grid-cols-12">
               <div className="lg:col-span-7 aspect-video bg-black">
                 <iframe
                   src={`https://www.youtube.com/embed/${featuredVideoId}`}
@@ -1056,7 +1056,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 />
               </div>
               <div className="lg:col-span-5 p-6 sm:p-8 flex flex-col justify-center">
-                <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-rose-600 px-3 py-1 text-xs font-bold">
+                <span className="inline-flex w-fit items-center gap-1.5 rounded bg-rose-600 px-3 py-1 text-xs font-bold">
                   YouTube
                 </span>
                 <h3 className="mt-3 text-xl sm:text-2xl font-extrabold leading-snug">
@@ -1070,7 +1070,7 @@ export const PublicWebsite: React.FC<Props> = ({
                     href={cfg.featuredVideoUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-full bg-[#f59e0b] px-5 py-2 text-xs font-extrabold text-[#0b1f3a] hover:brightness-105"
+                    className="rounded bg-slate-900 px-5 py-2 text-xs font-extrabold text-[#0b1f3a] hover:brightness-105"
                   >
                     รับชมบน YouTube ↗
                   </a>
@@ -1084,7 +1084,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 <div
                   key={post.id}
                   onClick={() => onOpenPost(post.id)}
-                  className="group rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-xs hover:shadow-md cursor-pointer"
+                  className="group rounded-lg bg-white border border-slate-200 overflow-hidden hover: cursor-pointer"
                 >
                   <div className="relative h-44 bg-[#0d2546]">
                     <img
@@ -1093,7 +1093,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       className="h-full w-full object-cover"
                     />
                     <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-600 text-white shadow-lg group-hover:scale-110 transition">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-600 text-white group-hover:scale-110 transition">
                         <Play className="w-5 h-5 fill-white ml-0.5" />
                       </div>
                     </div>
@@ -1111,8 +1111,8 @@ export const PublicWebsite: React.FC<Props> = ({
         {/* TAB 4: COURSES & WORKSHOPS */}
         {activeTab === 'courses' && (
           <div className="space-y-6">
-            <div className="rounded-2xl bg-gradient-to-r from-[#0d2546] to-[#1b4478] p-6 sm:p-8 text-white">
-              <span className="rounded-full bg-[#f59e0b] px-3 py-1 text-xs font-extrabold text-[#0b1f3a]">
+            <div className="rounded-lg p-6 sm:p-8 text-white bg-slate-900">
+              <span className="rounded bg-slate-900 px-3 py-1 text-xs font-extrabold text-[#0b1f3a]">
                 COURSES & WORKSHOPS
               </span>
               <h2 className="mt-3 text-2xl sm:text-3xl font-extrabold">
@@ -1129,16 +1129,16 @@ export const PublicWebsite: React.FC<Props> = ({
                   <div
                     key={post.id}
                     onClick={() => onOpenPost(post.id)}
-                    className="rounded-2xl bg-white border border-slate-200 p-5 shadow-xs hover:shadow-md transition cursor-pointer flex flex-col sm:flex-row gap-4"
+                    className="rounded-lg bg-white border border-slate-200 p-5 hover: transition cursor-pointer flex flex-col sm:flex-row gap-4"
                   >
                     <img
                       src={post.coverImage}
                       alt={post.title}
-                      className="h-36 w-full sm:w-44 rounded-xl object-cover shrink-0"
+                      className="h-36 w-full sm:w-44 rounded-md object-cover shrink-0"
                     />
                     <div className="flex flex-col justify-between">
                       <div>
-                        <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-bold text-purple-800">
+                        <span className="rounded bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-700">
                           หลักสูตรแนะนำ
                         </span>
                         <h3 className="mt-2 text-lg font-extrabold text-[#0d2546]">
@@ -1149,7 +1149,7 @@ export const PublicWebsite: React.FC<Props> = ({
                         </p>
                       </div>
                       <div className="mt-3 flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#d97706]">
+                        <span className="text-xs font-bold text-slate-700">
                           อ่านรายละเอียดหลักสูตร →
                         </span>
                       </div>
@@ -1164,7 +1164,7 @@ export const PublicWebsite: React.FC<Props> = ({
         {/* TAB 5: ABOUT KOMKRIT & 5-PILLAR ECOSYSTEM (Matches LINE Image 4 & Image 2!) */}
         {activeTab === 'about' && (
           <div className="space-y-8">
-            <div className="rounded-2xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xs grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            <div className="rounded-lg bg-white border border-slate-200 p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
               <div className="lg:col-span-4 flex flex-col items-center text-center">
                 <img
                   src="/images/badge-komkid.png"
@@ -1179,7 +1179,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 </p>
               </div>
               <div className="lg:col-span-8 space-y-4">
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
+                <span className="rounded bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700">
                   วิสัยทัศน์ & พันธกิจ
                 </span>
                 <h3 className="text-2xl sm:text-3xl font-extrabold text-[#0d2546]">
@@ -1189,17 +1189,17 @@ export const PublicWebsite: React.FC<Props> = ({
                   {cfg.aboutStory}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  <div className="rounded-xl bg-[#f8fafd] p-3.5 border border-slate-100">
-                    <Award className="w-5 h-5 text-[#f59e0b] mb-1" />
+                  <div className="rounded-md bg-[#f8fafd] p-3.5 border border-slate-100">
+                    <Award className="w-5 h-5 text-slate-200 mb-1" />
                     <div className="font-bold text-sm text-[#0d2546]">AI + Human Synergy</div>
                     <div className="text-xs text-slate-500">ระบบ Multi-Agent AI ภายใต้การกำกับคุณภาพโดยมนุษย์</div>
                   </div>
-                  <div className="rounded-xl bg-[#f8fafd] p-3.5 border border-slate-100">
+                  <div className="rounded-md bg-[#f8fafd] p-3.5 border border-slate-100">
                     <Languages className="w-5 h-5 text-[#0284c7] mb-1" />
                     <div className="font-bold text-sm text-[#0d2546]">โรงเรียนภาษา & อาชีพ</div>
                     <div className="text-xs text-slate-500">เชื่อมสะพานทักษะภาษาและวิชาชีพไทย-เมียนมา</div>
                   </div>
-                  <div className="rounded-xl bg-[#f8fafd] p-3.5 border border-slate-100">
+                  <div className="rounded-md bg-[#f8fafd] p-3.5 border border-slate-100">
                     <Building2 className="w-5 h-5 text-[#0d9488] mb-1" />
                     <div className="font-bold text-sm text-[#0d2546]">Lifelong Learning</div>
                     <div className="text-xs text-slate-500">ขับเคลื่อนภูเก็ตและชุมชนไทยสู่การเรียนรู้ตลอดชีวิต</div>
@@ -1209,9 +1209,9 @@ export const PublicWebsite: React.FC<Props> = ({
             </div>
 
             {/* KOMKID 5-Pillar Business Model (Exact match to LINE Image 4!) */}
-            <div className="rounded-2xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xs">
+            <div className="rounded-lg bg-white border border-slate-200 p-6 sm:p-8 ">
               <div className="text-center max-w-2xl mx-auto mb-6">
-                <div className="inline-flex items-center gap-2 rounded-full bg-[#0d2546] px-4 py-1 text-xs font-extrabold text-[#fbbf24]">
+                <div className="inline-flex items-center gap-2 rounded bg-[#0d2546] px-4 py-1 text-xs font-extrabold text-slate-200">
                   KOMKID 5-PILLAR BUSINESS MODEL
                 </div>
                 <h3 className="mt-2 text-xl sm:text-2xl font-extrabold text-[#0d2546]">
@@ -1226,15 +1226,15 @@ export const PublicWebsite: React.FC<Props> = ({
                 {pillars.map((p) => (
                   <div
                     key={p.id}
-                    className="rounded-2xl border border-amber-200/80 bg-gradient-to-b from-amber-50/40 to-white p-4 shadow-2xs flex flex-col justify-between"
+                    className="rounded-lg border border-slate-300 p-4 flex flex-col justify-between bg-slate-50"
                   >
                     <div>
                       <div className="flex items-center justify-between gap-1 mb-2">
-                        <span className="text-[10px] font-extrabold rounded-full bg-[#0d2546] text-amber-300 px-2.5 py-0.5">
+                        <span className="text-xs font-extrabold rounded bg-[#0d2546] text-slate-200 px-2.5 py-0.5">
                           PILLAR {p.pillarIndex}
                         </span>
                         {p.statusBadge && (
-                          <span className="text-[10px] font-extrabold rounded-full bg-amber-100 text-amber-900 px-2 py-0.5">
+                          <span className="text-xs font-extrabold rounded bg-slate-100 text-slate-700 px-2 py-0.5">
                             {p.statusBadge}
                           </span>
                         )}
@@ -1242,7 +1242,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       <h4 className="font-extrabold text-sm text-[#0d2546]">
                         {p.title}
                       </h4>
-                      <div className="text-[11px] font-semibold text-[#d97706] mt-0.5">
+                      <div className="text-xs font-semibold text-slate-700 mt-0.5">
                         {p.subtitle}
                       </div>
                       <p className="mt-2 text-xs text-slate-600 font-body leading-relaxed">
@@ -1250,7 +1250,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       </p>
                     </div>
                     <div className="mt-4 pt-2.5 border-t border-slate-100">
-                      <div className="text-[10px] text-slate-400">{p.metricLabel}</div>
+                      <div className="text-xs text-slate-400">{p.metricLabel}</div>
                       <div className="text-sm font-extrabold text-[#0d2546]">
                         {p.metricValue}
                       </div>
@@ -1264,7 +1264,7 @@ export const PublicWebsite: React.FC<Props> = ({
 
         {/* TAB 6: CONTACT */}
         {activeTab === 'contact' && (
-          <div className="max-w-2xl mx-auto rounded-2xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xs">
+          <div className="max-w-2xl mx-auto rounded-lg bg-white border border-slate-200 p-6 sm:p-8 ">
             <h2 className="text-2xl font-extrabold text-[#0d2546]">
               ติดต่อ คมคิด by KOMKRIT
             </h2>
@@ -1273,7 +1273,7 @@ export const PublicWebsite: React.FC<Props> = ({
             </p>
 
             {contactSent ? (
-              <div className="mt-6 rounded-xl bg-emerald-50 border border-emerald-200 p-5 text-center">
+              <div className="mt-6 rounded-md bg-emerald-50 border border-emerald-200 p-5 text-center">
                 <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
                 <div className="font-bold text-emerald-900">ส่งข้อความเรียบร้อยแล้ว!</div>
                 <p className="text-xs text-emerald-700 mt-1">
@@ -1294,7 +1294,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       onChange={(e) =>
                         setContactForm({ ...contactForm, name: e.target.value })
                       }
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                      className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                       placeholder="ระบุชื่อของคุณ"
                     />
                   </div>
@@ -1309,7 +1309,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       onChange={(e) =>
                         setContactForm({ ...contactForm, email: e.target.value })
                       }
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                      className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                       placeholder="name@example.com"
                     />
                   </div>
@@ -1323,7 +1323,7 @@ export const PublicWebsite: React.FC<Props> = ({
                     onChange={(e) =>
                       setContactForm({ ...contactForm, subject: e.target.value })
                     }
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                    className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                   >
                     <option>ติดต่องานบรรยาย / เวิร์กช็อป AI for Education</option>
                     <option>สอบถามโครงการโรงเรียนภาษาและอาชีพ ไทย-เมียนมา</option>
@@ -1342,13 +1342,13 @@ export const PublicWebsite: React.FC<Props> = ({
                     onChange={(e) =>
                       setContactForm({ ...contactForm, message: e.target.value })
                     }
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                    className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                     placeholder="พิมพ์ข้อความของคุณ..."
                   />
                 </div>
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 rounded-full bg-[#0d2546] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#193d6e] transition cursor-pointer"
+                  className="inline-flex items-center gap-2 rounded bg-[#0d2546] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#193d6e] transition cursor-pointer"
                 >
                   <Send className="w-4 h-4" /> ส่งข้อความถึงทีมงาน
                 </button>
@@ -1370,7 +1370,7 @@ export const PublicWebsite: React.FC<Props> = ({
             />
             <div>
               <div className="text-lg font-extrabold leading-none">คมคิด</div>
-              <div className="text-[11px] font-bold text-[#fbbf24]">by KOMKRIT</div>
+              <div className="text-xs font-bold text-slate-200">by KOMKRIT</div>
             </div>
             <span className="mx-2 h-6 w-px bg-white/20" />
             <span className="font-brush text-lg text-slate-200">
@@ -1384,7 +1384,7 @@ export const PublicWebsite: React.FC<Props> = ({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className="hover:text-[#fbbf24] transition cursor-pointer"
+                className="hover:text-slate-200 transition cursor-pointer"
               >
                 {item.label}
               </button>
@@ -1396,7 +1396,7 @@ export const PublicWebsite: React.FC<Props> = ({
             <div className="text-xs sm:text-sm font-semibold text-slate-100">
               “การศึกษาที่ดี สร้างคนที่ดี สร้างสังคมที่ดีได้”
             </div>
-            <div className="text-[11px] text-slate-400">
+            <div className="text-xs text-slate-400">
               Better Education · Better People · A Better Society
             </div>
           </div>
@@ -1406,11 +1406,11 @@ export const PublicWebsite: React.FC<Props> = ({
       {/* NEWSLETTER MODAL */}
       {newsletterOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
           onClick={() => setNewsletterOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md rounded-lg bg-white p-6 "
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
@@ -1450,7 +1450,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   value={subName}
                   onChange={(e) => setSubName(e.target.value)}
                   placeholder="ชื่อของคุณ (ไม่บังคับ)"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                  className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                 />
                 <input
                   type="email"
@@ -1458,12 +1458,12 @@ export const PublicWebsite: React.FC<Props> = ({
                   value={subEmail}
                   onChange={(e) => setSubEmail(e.target.value)}
                   placeholder="อีเมลของคุณ *"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                  className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                 />
                 <select
                   value={subRole}
                   onChange={(e) => setSubRole(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-[#f59e0b] focus:outline-none"
+                  className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm focus:border-slate-300 focus:outline-none"
                 >
                   <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
                   <option value="นักเรียน">นักเรียน / นักศึกษา</option>
@@ -1472,7 +1472,7 @@ export const PublicWebsite: React.FC<Props> = ({
                 </select>
                 <button
                   type="submit"
-                  className="w-full rounded-xl bg-[#0d2546] py-2.5 text-sm font-bold text-white hover:bg-[#183d6e] transition cursor-pointer"
+                  className="w-full rounded-md bg-[#0d2546] py-2.5 text-sm font-bold text-white hover:bg-[#183d6e] transition cursor-pointer"
                 >
                   ยืนยันสมัครรับข่าวสาร
                 </button>
@@ -1485,16 +1485,16 @@ export const PublicWebsite: React.FC<Props> = ({
       {/* SPECIAL PROJECT MODAL (DB-driven) */}
       {specialProjectOpen && featuredProject && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
           onClick={() => setSpecialProjectOpen(false)}
         >
           <div
-            className="w-full max-w-xl rounded-2xl bg-white p-6 sm:p-7 shadow-2xl max-h-[90vh] overflow-y-auto"
+            className="w-full max-w-xl rounded-lg bg-white p-6 sm:p-7 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-2">
               <div>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
+                <span className="rounded bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700">
                   {featuredProject.badgeLabel}
                 </span>
                 <h3 className="mt-2 text-xl font-extrabold text-[#0d2546]">
@@ -1519,7 +1519,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   {featuredProject.highlights.map((h, i) => (
                     <li
                       key={i}
-                      className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 text-[13px] text-slate-700"
+                      className="rounded-md bg-slate-50 border border-slate-100 px-3 py-2 text-[13px] text-slate-700"
                     >
                       {h}
                     </li>
@@ -1534,7 +1534,7 @@ export const PublicWebsite: React.FC<Props> = ({
                   setSpecialProjectOpen(false);
                   setActiveTab('contact');
                 }}
-                className="rounded-full bg-[#0d2546] px-5 py-2 text-xs font-bold text-white cursor-pointer"
+                className="rounded bg-[#0d2546] px-5 py-2 text-xs font-bold text-white cursor-pointer"
               >
                 สอบถามความร่วมมือโครงการ
               </button>
@@ -1546,16 +1546,16 @@ export const PublicWebsite: React.FC<Props> = ({
       {/* PUBLIC AUDIENCE FEEDBACK & LEARNER SURVEY MODAL */}
       {surveyOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
           onClick={() => setSurveyOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-lg rounded-lg bg-white p-6 "
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-2 mb-3">
               <div>
-                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10.5px] font-extrabold text-amber-900">
+                <span className="rounded bg-slate-100 px-2.5 py-0.5 text-xs font-extrabold text-slate-700">
                   AUDIENCE FEEDBACK • เสียงสะท้อนจากผู้ชมและผู้เรียน
                 </span>
                 <h3 className="mt-1 font-extrabold text-lg text-[#0d2546]">
@@ -1602,14 +1602,14 @@ export const PublicWebsite: React.FC<Props> = ({
                       setSurveyData({ ...surveyData, respondentName: e.target.value })
                     }
                     placeholder="ชื่อของคุณ *"
-                    className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                    className="rounded-md border border-slate-200 px-3.5 py-2 text-sm"
                   />
                   <select
                     value={surveyData.respondentRole}
                     onChange={(e) =>
                       setSurveyData({ ...surveyData, respondentRole: e.target.value })
                     }
-                    className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                    className="rounded-md border border-slate-200 px-3.5 py-2 text-sm"
                   >
                     <option value="ครู / บุคลากรทางการศึกษา">ครู / บุคลากรทางการศึกษา</option>
                     <option value="นักเรียน / นักศึกษา">นักเรียน / นักศึกษา</option>
@@ -1626,7 +1626,7 @@ export const PublicWebsite: React.FC<Props> = ({
                       setSurveyData({ ...surveyData, schoolOrOrg: e.target.value })
                     }
                     placeholder="โรงเรียน / หน่วยงาน (ถ้ามี)"
-                    className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                    className="rounded-md border border-slate-200 px-3.5 py-2 text-sm"
                   />
                   <select
                     value={surveyData.preferredChannel}
@@ -1636,7 +1636,7 @@ export const PublicWebsite: React.FC<Props> = ({
                         preferredChannel: e.target.value,
                       })
                     }
-                    className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                    className="rounded-md border border-slate-200 px-3.5 py-2 text-sm"
                   >
                     <option>LINE OA</option>
                     <option>YouTube</option>
@@ -1656,7 +1656,7 @@ export const PublicWebsite: React.FC<Props> = ({
                     setSurveyData({ ...surveyData, requestedTopic: e.target.value })
                   }
                   placeholder="หัวข้อหรือปัญหาการศึกษาที่อยากให้ คมคิด นำเสนอ *"
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold"
+                  className="w-full rounded-md border border-slate-200 px-3.5 py-2 text-sm font-semibold"
                 />
                 <textarea
                   rows={2}
@@ -1665,11 +1665,11 @@ export const PublicWebsite: React.FC<Props> = ({
                     setSurveyData({ ...surveyData, feedbackDetail: e.target.value })
                   }
                   placeholder="ข้อเสนอแนะเพิ่มเติม..."
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm"
+                  className="w-full rounded-md border border-slate-200 px-3.5 py-2 text-sm"
                 />
                 <button
                   type="submit"
-                  className="w-full rounded-xl bg-[#0d2546] py-2.5 text-sm font-extrabold text-white hover:bg-[#183d6e] transition cursor-pointer"
+                  className="w-full rounded-md bg-[#0d2546] py-2.5 text-sm font-extrabold text-white hover:bg-[#183d6e] transition cursor-pointer"
                 >
                   ส่งแบบสำรวจให้ทีมงานคมคิด
                 </button>

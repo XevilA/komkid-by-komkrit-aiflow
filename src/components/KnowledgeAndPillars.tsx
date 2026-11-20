@@ -172,7 +172,7 @@ export const KnowledgeBaseManager: React.FC<{
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 ">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
           <div>
             <h2 className="text-sm sm:text-base font-bold text-slate-900">
@@ -187,7 +187,7 @@ export const KnowledgeBaseManager: React.FC<{
             onClick={openCreate}
             className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer shrink-0"
           >
-            <Plus className="w-3.5 h-3.5 text-amber-400" />
+            <Plus className="w-3.5 h-3.5 text-slate-500" />
             เพิ่มข้อมูลอ้างอิงใหม่
           </button>
         </div>
@@ -233,7 +233,7 @@ export const KnowledgeBaseManager: React.FC<{
           return (
             <div
               key={k.id}
-              className={`rounded-lg bg-white border p-4 sm:p-5 shadow-2xs flex flex-col justify-between ${
+              className={`rounded-lg bg-white border p-4 sm:p-5  flex flex-col justify-between ${
                 k.isActive
                   ? 'border-slate-200'
                   : 'border-slate-200 bg-slate-50 opacity-75'
@@ -241,13 +241,13 @@ export const KnowledgeBaseManager: React.FC<{
             >
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
                     {catLabel}
                   </span>
                   <button
                     type="button"
                     onClick={() => handleToggle(k)}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold cursor-pointer ${
                       k.isActive
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         : 'bg-slate-100 text-slate-600 border border-slate-200'
@@ -271,7 +271,7 @@ export const KnowledgeBaseManager: React.FC<{
                   {k.content}
                 </p>
               </div>
-              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                 <span className="truncate max-w-[180px]">
                   อ้างอิง: {k.sourceRef || '-'}
                 </span>
@@ -299,14 +299,14 @@ export const KnowledgeBaseManager: React.FC<{
                           await handleDelete(k.id);
                           setConfirmDeleteKbId(null);
                         }}
-                        className="text-[11px] font-semibold text-rose-700 cursor-pointer"
+                        className="text-xs font-semibold text-rose-700 cursor-pointer"
                       >
                         ยืนยันลบ
                       </button>
                       <button
                         type="button"
                         onClick={() => setConfirmDeleteKbId(null)}
-                        className="text-[11px] text-slate-500 cursor-pointer ml-1"
+                        className="text-xs text-slate-500 cursor-pointer ml-1"
                       >
                         ยกเลิก
                       </button>
@@ -328,8 +328,8 @@ export const KnowledgeBaseManager: React.FC<{
       </div>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="my-auto w-full max-w-2xl rounded-lg bg-white shadow-xl border border-slate-200 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-2xl rounded-lg bg-white border border-slate-200 overflow-hidden">
             <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
               <div className="font-bold text-sm">
                 {editingId
@@ -487,7 +487,7 @@ export const FivePillarManager: React.FC<{
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 ">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-slate-900">
             โครงสร้างหน่วยธุรกิจและเป้าหมายองค์กร (Business Pillars & KPI)
@@ -514,7 +514,7 @@ export const FivePillarManager: React.FC<{
           }}
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
         >
-          <Plus className="w-3.5 h-3.5 text-amber-400" />
+          <Plus className="w-3.5 h-3.5 text-slate-500" />
           เพิ่มหน่วยธุรกิจใหม่
         </button>
       </div>
@@ -523,7 +523,7 @@ export const FivePillarManager: React.FC<{
         {pillars.map((p) => (
           <div
             key={p.id}
-            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs flex flex-col justify-between"
+            className="rounded-lg bg-white border border-slate-200 p-5 flex flex-col justify-between"
           >
             <div>
               <div className="flex items-center justify-between">
@@ -531,17 +531,17 @@ export const FivePillarManager: React.FC<{
                   0{p.pillarNumber}
                 </span>
                 <span
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     p.status === 'active'
                       ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-800 border border-amber-200'
+                      : 'bg-slate-100 text-slate-700 border border-slate-300'
                   }`}
                 >
                   {p.status === 'active' ? 'ดำเนินการปกติ' : 'กำลังพัฒนา'}
                 </span>
               </div>
 
-              <div className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="mt-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 {p.nameEn}
               </div>
               <h3 className="text-sm font-bold text-slate-900 mt-0.5">
@@ -566,7 +566,7 @@ export const FivePillarManager: React.FC<{
                     style={{ width: `${p.currentProgress}%` }}
                   />
                 </div>
-                <div className="text-[11px] text-slate-500">
+                <div className="text-xs text-slate-500">
                   เป้าหมาย: {p.targetKpi}
                 </div>
               </div>
@@ -588,7 +588,7 @@ export const FivePillarManager: React.FC<{
                   <button
                     type="button"
                     onClick={() => handleDeletePillar(p.id)}
-                    className="rounded bg-rose-600 px-2 py-1 text-[11px] font-semibold text-white cursor-pointer"
+                    className="rounded bg-rose-600 px-2 py-1 text-xs font-semibold text-white cursor-pointer"
                   >
                     ยืนยันลบ
                   </button>
@@ -608,8 +608,8 @@ export const FivePillarManager: React.FC<{
       </div>
 
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 space-y-4 border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
               แก้ไขข้อมูลหน่วยธุรกิจ #{editing.pillarNumber}
             </h3>
@@ -692,8 +692,8 @@ export const FivePillarManager: React.FC<{
       )}
 
       {creatingPillar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 space-y-4 border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
               เพิ่มหน่วยธุรกิจใหม่
             </h3>
@@ -1106,7 +1106,7 @@ export const AudienceAndSettingsHub: React.FC<{
 
     return (
       <div className="space-y-5">
-        <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
+        <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 ">
           <div>
             <h2 className="text-sm sm:text-base font-bold text-slate-900">
               การตั้งค่าการเชื่อมต่อผู้ให้บริการ AI (API Key Management)
@@ -1139,10 +1139,10 @@ export const AudienceAndSettingsHub: React.FC<{
           <form onSubmit={handleSaveSettings} className="space-y-5">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* 1. Google Gemini */}
-              <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3.5">
+              <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-3.5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                       PRIMARY MULTIMODAL PROVIDER
                     </div>
                     <h3 className="text-sm font-bold text-slate-900">
@@ -1150,7 +1150,7 @@ export const AudienceAndSettingsHub: React.FC<{
                     </h3>
                   </div>
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                       settings.hasGeminiKey
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         : 'bg-slate-100 text-slate-600'
@@ -1216,7 +1216,7 @@ export const AudienceAndSettingsHub: React.FC<{
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
                       โมเดลข้อความ
                     </label>
                     <select
@@ -1238,7 +1238,7 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
                       โมเดลรูปภาพ
                     </label>
                     <select
@@ -1257,7 +1257,7 @@ export const AudienceAndSettingsHub: React.FC<{
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
                       โมเดลวิดีโอ
                     </label>
                     <select
@@ -1290,10 +1290,10 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
 
               {/* 2. Anthropic Claude */}
-              <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3.5">
+              <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-3.5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                       EDITORIAL & WRITING PROVIDER
                     </div>
                     <h3 className="text-sm font-bold text-slate-900">
@@ -1301,7 +1301,7 @@ export const AudienceAndSettingsHub: React.FC<{
                     </h3>
                   </div>
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                       settings.hasClaudeKey
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         : 'bg-slate-100 text-slate-600'
@@ -1358,7 +1358,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
                     โมเดล Claude เริ่มต้น
                   </label>
                   <select
@@ -1390,10 +1390,10 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
 
               {/* 3. DeepSeek */}
-              <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3.5">
+              <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-3.5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                       REASONING & RESEARCH PROVIDER
                     </div>
                     <h3 className="text-sm font-bold text-slate-900">
@@ -1401,7 +1401,7 @@ export const AudienceAndSettingsHub: React.FC<{
                     </h3>
                   </div>
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                       settings.hasDeepseekKey
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         : 'bg-slate-100 text-slate-600'
@@ -1461,7 +1461,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
                     โมเดล DeepSeek เริ่มต้น
                   </label>
                   <select
@@ -1496,10 +1496,10 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
 
               {/* 4. OpenAI */}
-              <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3.5">
+              <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-3.5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                       OPENAI GPT & IMAGE PROVIDER
                     </div>
                     <h3 className="text-sm font-bold text-slate-900">
@@ -1507,7 +1507,7 @@ export const AudienceAndSettingsHub: React.FC<{
                     </h3>
                   </div>
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                       settings.hasOpenaiKey
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         : 'bg-slate-100 text-slate-600'
@@ -1564,7 +1564,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
                     โมเดล OpenAI เริ่มต้น
                   </label>
                   <select
@@ -1596,7 +1596,7 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
             </div>
 
-            <div className="rounded-lg bg-white border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+            <div className="rounded-lg bg-white border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3 ">
               <div className="text-xs text-slate-500">
                 {savedNotice ? (
                   <span className="font-semibold text-emerald-700 flex items-center gap-1.5">
@@ -1611,7 +1611,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 type="submit"
                 className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
               >
-                <Save className="w-4 h-4 text-amber-400" />
+                <Save className="w-4 h-4 text-slate-500" />
                 บันทึกการตั้งค่า API ทั้งหมด
               </button>
             </div>
@@ -1660,7 +1660,7 @@ export const AudienceAndSettingsHub: React.FC<{
     <div className="space-y-5">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
         {/* 1. Contact Messages */}
-        <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+        <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <Mail className="w-4 h-4 text-slate-600" />
@@ -1670,7 +1670,7 @@ export const AudienceAndSettingsHub: React.FC<{
               <button
                 type="button"
                 onClick={handleMarkAllContactsRead}
-                className="inline-flex items-center gap-1 rounded bg-emerald-50 border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 cursor-pointer"
+                className="inline-flex items-center gap-1 rounded bg-emerald-50 border border-emerald-200 px-2 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 cursor-pointer"
               >
                 <MailCheck className="w-3 h-3" />
                 ทำเครื่องหมายว่าอ่านแล้ว ({unreadContactCount})
@@ -1689,7 +1689,7 @@ export const AudienceAndSettingsHub: React.FC<{
                   key={m.id}
                   className={`rounded-md border p-3.5 text-xs space-y-2 ${
                     m.status === 'unread'
-                      ? 'bg-amber-50/40 border-amber-200'
+                      ? 'bg-slate-100 border-slate-300'
                       : 'bg-slate-50/50 border-slate-200'
                   }`}
                 >
@@ -1705,16 +1705,16 @@ export const AudienceAndSettingsHub: React.FC<{
                         await loadAll();
                         await onRefreshStats();
                       }}
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold cursor-pointer ${
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold cursor-pointer ${
                         m.status === 'unread'
-                          ? 'bg-amber-500 text-slate-950'
+                          ? 'bg-slate-900 text-slate-950'
                           : 'bg-slate-200 text-slate-700'
                       }`}
                     >
                       {m.status === 'unread' ? 'ยังไม่อ่าน' : 'อ่านแล้ว'}
                     </button>
                   </div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-xs text-slate-500">
                     {m.email} {m.phone && `• ${m.phone}`}
                   </div>
                   <div className="font-semibold text-slate-800">{m.subject}</div>
@@ -1727,7 +1727,7 @@ export const AudienceAndSettingsHub: React.FC<{
                         await loadAll();
                         await onRefreshStats();
                       }}
-                      className="text-[11px] text-rose-600 hover:underline cursor-pointer"
+                      className="text-xs text-rose-600 hover:underline cursor-pointer"
                     >
                       ลบข้อความ
                     </button>
@@ -1739,7 +1739,7 @@ export const AudienceAndSettingsHub: React.FC<{
         </div>
 
         {/* 2. Newsletter Subscribers */}
-        <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+        <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <Users className="w-4 h-4 text-slate-600" />
@@ -1749,7 +1749,7 @@ export const AudienceAndSettingsHub: React.FC<{
               <button
                 type="button"
                 onClick={handleExportSubscribersCsv}
-                className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
               >
                 <Download className="w-3 h-3" /> ส่งออก CSV
               </button>
@@ -1771,7 +1771,7 @@ export const AudienceAndSettingsHub: React.FC<{
                     <div className="font-bold text-slate-900 truncate">
                       {s.name}
                     </div>
-                    <div className="text-[11px] text-slate-500 truncate">
+                    <div className="text-xs text-slate-500 truncate">
                       {s.email} • {s.role}
                     </div>
                   </div>
@@ -1792,7 +1792,7 @@ export const AudienceAndSettingsHub: React.FC<{
                           await loadAll();
                           await onRefreshStats();
                         }}
-                        className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-semibold text-white cursor-pointer"
+                        className="rounded bg-rose-600 px-2 py-0.5 text-xs font-semibold text-white cursor-pointer"
                       >
                         ยืนยันลบ
                       </button>
@@ -1813,7 +1813,7 @@ export const AudienceAndSettingsHub: React.FC<{
         </div>
 
         {/* 3. Reader Comments */}
-        <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+        <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-slate-600" />
@@ -1856,7 +1856,7 @@ export const AudienceAndSettingsHub: React.FC<{
                             await loadAll();
                             await onRefreshStats();
                           }}
-                          className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-semibold text-white cursor-pointer"
+                          className="rounded bg-rose-600 px-2 py-0.5 text-xs font-semibold text-white cursor-pointer"
                         >
                           ยืนยันลบ
                         </button>
@@ -1872,7 +1872,7 @@ export const AudienceAndSettingsHub: React.FC<{
                     </div>
                   </div>
                   <p className="text-slate-700">{c.message}</p>
-                  <div className="text-[10px] text-slate-400">
+                  <div className="text-xs text-slate-400">
                     โพสต์ #{c.postId} • {formatThaiDate(c.createdAt)}
                   </div>
                 </div>
@@ -1884,8 +1884,8 @@ export const AudienceAndSettingsHub: React.FC<{
 
       {/* Edit Comment Modal */}
       {editingComment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 space-y-4 border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
               แก้ไขความคิดเห็น
             </h3>
@@ -1954,8 +1954,8 @@ export const AudienceAndSettingsHub: React.FC<{
 
       {/* Edit Subscriber Modal */}
       {editingSubscriber && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 space-y-4 border border-slate-200">
             <h3 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3">
               แก้ไขข้อมูลสมาชิก
             </h3>

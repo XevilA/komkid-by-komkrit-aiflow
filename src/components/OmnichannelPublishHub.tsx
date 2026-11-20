@@ -350,7 +350,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
   return (
     <div className="space-y-5">
       {/* Header Summary Card */}
-      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-slate-900">
             ระบบบริหารช่องทางเผยแพร่ (Omnichannel Publishing)
@@ -400,7 +400,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
           return (
             <div
               key={ch.id}
-              className={`rounded-lg bg-white border p-4 shadow-2xs flex flex-col justify-between transition ${
+              className={`rounded-lg bg-white border p-4  flex flex-col justify-between transition ${
                 ch.enabled
                   ? 'border-slate-200'
                   : 'border-slate-200 bg-slate-50 opacity-70'
@@ -410,7 +410,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div
-                      className={`flex h-8 w-8 items-center justify-center rounded-md text-white text-[11px] font-bold shrink-0 ${st.badgeBg}`}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md text-white text-xs font-bold shrink-0 ${st.badgeBg}`}
                     >
                       {st.shortIcon}
                     </div>
@@ -419,8 +419,8 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                         {ch.channelName}
                       </div>
                       <div
-                        className={`text-[11px] font-medium truncate ${
-                          isReady ? 'text-emerald-700' : 'text-amber-700'
+                        className={`text-xs font-medium truncate ${
+                          isReady ? 'text-emerald-700' : 'text-slate-700'
                         }`}
                       >
                         {statusLabel}
@@ -439,12 +439,12 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                     <Settings2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <p className="mt-2.5 text-[11px] text-slate-500 line-clamp-2">
+                <p className="mt-2.5 text-xs text-slate-500 line-clamp-2">
                   {st.hint}
                 </p>
               </div>
 
-              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
                 <span className="truncate text-slate-400 max-w-[140px]">
                   {ch.handleOrUrl || 'พร้อมเชื่อมต่อ'}
                 </span>
@@ -465,7 +465,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         <form
           onSubmit={handleDispatch}
-          className="lg:col-span-6 rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4"
+          className="lg:col-span-6 rounded-lg bg-white border border-slate-200 p-5 space-y-4"
         >
           <div className="border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -535,7 +535,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                 <Film className="w-3.5 h-3.5 text-slate-500" />
                 ไฟล์วิดีโอแนบ (สำหรับ YouTube, TikTok, Facebook, Instagram)
               </label>
-              <label className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
+              <label className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                 <Upload className="w-3 h-3" />
                 {uploadingVideo ? 'กำลังอัปโหลด...' : 'อัปโหลด .MP4'}
                 <input
@@ -619,7 +619,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               className={`rounded-md p-3 text-xs font-medium ${
                 dispatchNotice.ok
                   ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
-                  : 'bg-amber-50 border border-amber-200 text-amber-900'
+                  : 'bg-slate-100 border border-slate-300 text-slate-700'
               }`}
             >
               {dispatchNotice.text}
@@ -633,12 +633,12 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
           >
             {scheduleMode === 'schedule' ? (
               <>
-                <CalendarClock className="w-4 h-4 text-amber-400" />
+                <CalendarClock className="w-4 h-4 text-slate-500" />
                 บันทึกตารางเวลาเผยแพร่ ({selectedChannels.length} ช่องทาง)
               </>
             ) : (
               <>
-                <Send className="w-4 h-4 text-amber-400" />
+                <Send className="w-4 h-4 text-slate-500" />
                 {dispatching
                   ? 'กำลังส่งข้อมูลไปยัง API...'
                   : `ดำเนินการเผยแพร่ทันที (${selectedChannels.length} ช่องทาง)`}
@@ -648,7 +648,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
         </form>
 
         {/* Right: Publish Logs */}
-        <div className="lg:col-span-6 rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+        <div className="lg:col-span-6 rounded-lg bg-white border border-slate-200 p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900">
               ประวัติการเผยแพร่และตารางเวลา ({logs.length})
@@ -679,15 +679,15 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                        <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">
                           {lg.channelName}
                         </span>
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                             lg.status === 'published'
                               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                               : lg.status === 'scheduled'
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              ? 'bg-slate-100 text-slate-700 border border-slate-300'
                               : 'bg-rose-50 text-rose-800 border border-rose-200'
                           }`}
                         >
@@ -701,7 +701,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                       <div className="mt-1 font-semibold text-xs text-slate-900">
                         {lg.title}
                       </div>
-                      <p className="text-[11px] text-slate-500 line-clamp-1">
+                      <p className="text-xs text-slate-500 line-clamp-1">
                         {lg.contentSnippet}
                       </p>
                     </div>
@@ -711,7 +711,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                         <button
                           type="button"
                           onClick={() => onOpenPost(lg.postId!)}
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                         >
                           ดูโพสต์
                         </button>
@@ -723,7 +723,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                             href={lg.publishedUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                            className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                           >
                             ลิงก์ปลายทาง <ExternalLink className="w-3 h-3" />
                           </a>
@@ -742,7 +742,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   </div>
 
                   {lg.errorDetail && (
-                    <div className="rounded bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[11px] text-rose-800 flex items-center justify-between gap-2">
+                    <div className="rounded bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-xs text-rose-800 flex items-center justify-between gap-2">
                       <span>สาเหตุ: {lg.errorDetail}</span>
                       <button
                         type="button"
@@ -755,7 +755,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                             setTokenInput('');
                           }
                         }}
-                        className="rounded bg-rose-700 px-2 py-0.5 text-[10px] font-semibold text-white shrink-0 cursor-pointer"
+                        className="rounded bg-rose-700 px-2 py-0.5 text-xs font-semibold text-white shrink-0 cursor-pointer"
                       >
                         ตั้งค่า Token
                       </button>
@@ -769,7 +769,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
       </div>
 
       {/* Audience Survey & Feedback Loop */}
-      <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+      <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
           <div>
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -808,7 +808,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               className="rounded-md border border-slate-200 p-4 flex flex-col justify-between bg-slate-50/40"
             >
               <div>
-                <div className="flex items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="rounded bg-slate-200/80 px-2 py-0.5 font-semibold text-slate-800">
                     {sv.respondentRole}
                   </span>
@@ -826,7 +826,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               </div>
 
               <div className="mt-4 pt-2.5 border-t border-slate-200/80 flex items-center justify-between gap-2">
-                <div className="text-[11px] text-slate-500 truncate">
+                <div className="text-xs text-slate-500 truncate">
                   {sv.respondentName} ({sv.schoolOrOrg || sv.preferredChannel})
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
@@ -834,9 +834,9 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                     type="button"
                     disabled={triggeringTopic === sv.requestedTopic}
                     onClick={() => handleAiProduceFromSurvey(sv)}
-                    className="inline-flex items-center gap-1 rounded bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                   >
-                    <PenLine className="w-3 h-3 text-amber-400" />
+                    <PenLine className="w-3 h-3 text-slate-500" />
                     {triggeringTopic === sv.requestedTopic
                       ? 'กำลังส่ง...'
                       : 'สั่ง AI ผลิต'}
@@ -856,7 +856,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                         setConfirmDeleteSurveyId(null);
                         await loadHub();
                       }}
-                      className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-semibold text-white cursor-pointer"
+                      className="rounded bg-rose-600 px-2 py-0.5 text-xs font-semibold text-white cursor-pointer"
                     >
                       ยืนยันลบ
                     </button>
@@ -878,11 +878,11 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
 
       {/* Channel Configuration Modal */}
       {editingChannel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 space-y-4 border border-slate-200">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   CHANNEL API CONFIGURATION
                 </div>
                 <h3 className="text-base font-bold text-slate-900">
@@ -1087,8 +1087,8 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
 
       {/* Survey Modal */}
       {surveyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 shadow-xl space-y-4 border border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto">
+          <div className="my-auto w-full max-w-lg rounded-lg bg-white p-6 space-y-4 border border-slate-200">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-base font-bold text-slate-900">
                 {editingSurveyId

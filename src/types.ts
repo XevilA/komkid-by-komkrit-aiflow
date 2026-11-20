@@ -34,56 +34,56 @@ export const CATEGORIES: CategoryMeta[] = [
     nameTh: 'การศึกษา',
     nameEn: 'Education',
     badgeLabel: 'การศึกษา',
-    color: '#102a4c',
-    bgLight: '#e8eff7',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
   {
     id: 'innovation',
     nameTh: 'นวัตกรรม',
     nameEn: 'Innovation',
     badgeLabel: 'นวัตกรรม',
-    color: '#f59e0b',
-    bgLight: '#fef3c7',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
   {
     id: 'society',
     nameTh: 'สังคม',
     nameEn: 'Society',
     badgeLabel: 'สังคม',
-    color: '#3ca34b',
-    bgLight: '#dcfce7',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
   {
     id: 'international',
     nameTh: 'ต่างประเทศ',
     nameEn: 'International',
     badgeLabel: 'ต่างประเทศ',
-    color: '#0284c7',
-    bgLight: '#e0f2fe',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
   {
     id: 'career',
     nameTh: 'อาชีพ & การพัฒนา',
     nameEn: 'Career & Lifelong Learning',
     badgeLabel: 'อาชีพ & การพัฒนา',
-    color: '#6d28d9',
-    bgLight: '#ede9fe',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
   {
     id: 'ai-tech',
     nameTh: 'AI & เทคโนโลยี',
     nameEn: 'AI & Technology',
     badgeLabel: 'AI & การศึกษา',
-    color: '#0d9488',
-    bgLight: '#ccfbf1',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
   {
     id: 'special',
     nameTh: 'บทความพิเศษ',
     nameEn: 'Special View',
     badgeLabel: 'บทความพิเศษ',
-    color: '#eab308',
-    bgLight: '#fef9c3',
+    color: '#1e293b',
+    bgLight: '#f1f5f9',
   },
 ];
 
@@ -98,6 +98,7 @@ export const INPUT_SOURCES = [
 
 export interface Post {
   id: number;
+  slug: string;
   title: string;
   subtitle: string;
   excerpt: string;
@@ -727,4 +728,97 @@ export interface AiBatchSummary {
     byProvider: Record<string, number>;
   };
   items?: AiBatchItem[];
+}
+
+// ---- Content workspaces (shared state of the CEO agent team) ----
+export interface WsDraft {
+  title: string;
+  subtitle: string;
+  excerpt: string;
+  content: string;
+  category: CategoryId;
+  contentType: 'news' | 'article' | 'video' | 'course';
+  tags: string[];
+  slug: string;
+  suggestedImagePrompt?: string;
+  suggestedVideoPrompt?: string;
+}
+
+export interface WsMediaItem {
+  url: string;
+  assetId?: number | null;
+  prompt?: string;
+  caption?: string;
+}
+
+export interface WsQa {
+  verdict?: 'pass' | 'revise' | 'block';
+  scores?: { facts: number; language: number; brand: number; risk: number; overall: number };
+  issues?: { severity: 'high' | 'medium' | 'low'; text: string }[];
+  summary?: string;
+  checkedAt?: string;
+}
+
+export interface Workspace {
+  id: number;
+  title: string;
+  brief: string;
+  status: 'drafting' | 'ready' | 'published' | 'archived';
+  postId: number | null;
+  workflowId: number | null;
+  draft: WsDraft;
+  media: { cover?: WsMediaItem; video?: WsMediaItem; audio?: WsMediaItem; inline: WsMediaItem[] };
+  research: {
+    query?: string;
+    summary?: string;
+    facts?: string[];
+    angles?: string[];
+    sources?: { title: string; uri: string }[];
+    knowledgeUsed?: string[];
+    relatedPosts?: { id: number; title: string; slug: string }[];
+  };
+  qa: WsQa;
+  channels: { results?: Record<string, { status: string; url: string; note: string; at: string }> };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WsEvent {
+  id: number;
+  projectId: number;
+  createdAt: string;
+  role: 'user' | 'ceo' | 'agent' | 'system';
+  agent: string;
+  kind: 'message' | 'action' | 'result' | 'error' | 'confirm';
+  content: string;
+  data: any;
+}
+
+export interface WsSnapshot {
+  project: Workspace;
+  events: WsEvent[];
+  running: boolean;
+}
+
+export interface WsListItem {
+  id: number;
+  title: string;
+  brief: string;
+  status: Workspace['status'];
+  postId: number | null;
+  updatedAt: string;
+  hasCover: boolean;
+  hasVideo: boolean;
+  hasAudio: boolean;
+  wordCount: number;
+}
+
+export interface WsCapabilities {
+  llm: boolean;
+  image: boolean;
+  video: boolean;
+  audio: boolean;
+  webSearch: boolean;
+  channels: { key: string; name: string }[];
+  serverless: boolean;
 }

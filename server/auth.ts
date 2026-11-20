@@ -11,6 +11,8 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_LOGIN_ATTEMPTS = 10;
 
 const loginAttemptsMap = new Map<string, number[]>();
+const GLOBAL_MAX_FAILURES = 80; // across all addresses, per window: slows distributed guessing
+let globalFailures: number[] = [];
 let cachedAuthSecret: string | null = null;
 
 function getOrCreateLocalAuthSecret(): string {
@@ -82,13 +84,37 @@ function verifyPasswordHash(input: string, stored: string): boolean {
   return safeEqual(input, stored);
 }
 
-export function getAdminCredentials(): { username: string; password: string } {
+const PLACEHOLDER_PASSWORDS = new Set(['change-me-strong-password', 'change-me-admin']);
+let bootstrapPassword: string | null = null;
+
+/**
+ * The admin password always comes from configuration (ADMIN_PASSWORD or the saved, hashed password).
+ * There is deliberately NO built-in default:
+ *  - long-lived server without a password: a random one-time password is generated at boot and
+ *    printed once to the server log, so a fresh install can be set up and then changed in the UI
+ *  - serverless without a password: login is refused until ADMIN_PASSWORD is configured
+ */
+export function getAdminCredentials(): { username: string; password: string | null; bootstrap: boolean } {
   const rawUser = getSettingValue('admin_username', 'ADMIN_USERNAME');
   const rawPass = getSettingValue('admin_password', 'ADMIN_PASSWORD');
-  const username = rawUser && rawUser !== 'change-me-admin' ? rawUser : 'admin';
-  const password =
-    rawPass && rawPass !== 'change-me-strong-password' ? rawPass : 'komkrit2026';
-  return { username, password };
+  const username = rawUser && !PLACEHOLDER_PASSWORDS.has(rawUser) ? rawUser : 'admin';
+  if (rawPass && !PLACEHOLDER_PASSWORDS.has(rawPass)) {
+    return { username, password: rawPass, bootstrap: false };
+  }
+  if (IS_SERVERLESS) return { username, password: null, bootstrap: false };
+  if (!bootstrapPassword) {
+    bootstrapPassword = crypto.randomBytes(18).toString('base64url');
+    console.warn(
+      `\n[SECURITY] ยังไม่ได้ตั้งค่า ADMIN_PASSWORD — สร้างรหัสผ่านชั่วคราวสำหรับรอบการทำงานนี้\n` +
+        `            ชื่อผู้ใช้: ${username}\n            รหัสผ่านชั่วคราว: ${bootstrapPassword}\n` +
+        `            กรุณาเข้าสู่ระบบแล้วเปลี่ยนรหัสผ่านทันที หรือกำหนด ADMIN_PASSWORD ใน environment\n`
+    );
+  }
+  return { username, password: bootstrapPassword, bootstrap: true };
+}
+
+export function isAdminPasswordConfigured(): boolean {
+  return getAdminCredentials().password !== null;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -98,16 +124,18 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+/** Uses Express's proxy-aware address (see `trust proxy`); client-supplied headers are never trusted directly. */
 export function getClientIp(req: Request): string {
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.trim()) {
-    return xff.split(',')[0].trim();
-  }
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 export function checkLoginRateLimit(ip: string): { allowed: boolean; retryAfterSec: number } {
   const now = Date.now();
+  globalFailures = globalFailures.filter((ts) => now - ts < LOGIN_WINDOW_MS);
+  if (globalFailures.length >= GLOBAL_MAX_FAILURES) {
+    const retryAfterSec = Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (now - globalFailures[0])) / 1000));
+    return { allowed: false, retryAfterSec };
+  }
   const prev = (loginAttemptsMap.get(ip) || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
   loginAttemptsMap.set(ip, prev);
   if (prev.length >= MAX_LOGIN_ATTEMPTS) {
@@ -123,6 +151,7 @@ export function recordLoginFailure(ip: string): void {
   const prev = (loginAttemptsMap.get(ip) || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
   prev.push(now);
   loginAttemptsMap.set(ip, prev);
+  globalFailures.push(now);
 }
 
 export function clearLoginFailures(ip: string): void {
@@ -131,6 +160,7 @@ export function clearLoginFailures(ip: string): void {
 
 export function verifyCredentials(usernameInput: string, passwordInput: string): boolean {
   const { username, password } = getAdminCredentials();
+  if (password === null) return false;
   const userOk = safeEqual(usernameInput.trim(), username);
   const passOk = verifyPasswordHash(passwordInput, password);
   if (userOk && passOk) {

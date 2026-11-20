@@ -8,7 +8,7 @@ const STATE_STYLE: Record<
   { dot: string; label: string; text: string }
 > = {
   ok: { dot: 'bg-emerald-500', label: 'ปกติ', text: 'text-emerald-800' },
-  degraded: { dot: 'bg-amber-500', label: 'เริ่มมีปัญหา', text: 'text-amber-800' },
+  degraded: { dot: 'bg-slate-900', label: 'เริ่มมีปัญหา', text: 'text-slate-700' },
   cooldown: { dot: 'bg-rose-500', label: 'พักการใช้งานชั่วคราว', text: 'text-rose-800' },
   unconfigured: { dot: 'bg-slate-300', label: 'ยังไม่ได้ใส่คีย์', text: 'text-slate-500' },
 };
@@ -35,16 +35,16 @@ const OrderEditor: React.FC<{
     onChange(next);
   };
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <div className="rounded-md border border-slate-200 bg-white p-4">
       <div className="text-xs font-bold text-slate-900">{title}</div>
-      <p className="text-[11px] text-slate-500 mt-0.5 mb-3">{hint}</p>
+      <p className="text-xs text-slate-500 mt-0.5 mb-3">{hint}</p>
       <ol className="space-y-1.5">
         {order.map((id, i) => (
           <li
             key={id}
             className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2"
           >
-            <span className="w-5 text-[11px] font-bold text-slate-400">{i + 1}</span>
+            <span className="w-5 text-xs font-bold text-slate-400">{i + 1}</span>
             <span
               className={`flex-1 text-xs font-semibold ${
                 configured(id) ? 'text-slate-900' : 'text-slate-400'
@@ -122,7 +122,7 @@ export const AiRoutingPanel: React.FC = () => {
 
   if (!data) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 text-xs text-slate-500">
+      <div className="rounded-md border border-slate-200 bg-white p-6 text-xs text-slate-500">
         กำลังโหลดสถานะระบบ AI...
       </div>
     );
@@ -135,7 +135,7 @@ export const AiRoutingPanel: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="rounded-md border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -181,12 +181,12 @@ export const AiRoutingPanel: React.FC = () => {
                   <span className={`h-2.5 w-2.5 rounded-full ${st.dot}`} />
                   <span className="text-xs font-bold text-slate-900 flex-1">{p.label}</span>
                 </div>
-                <div className={`mt-1 text-[11px] font-semibold ${st.text}`}>
+                <div className={`mt-1 text-xs font-semibold ${st.text}`}>
                   {st.label}
                   {p.state === 'cooldown' && ` • กลับมาลองใหม่ใน ${fmtWait(p.cooldownRemainingSec)}`}
                 </div>
                 {p.lastError && p.state !== 'unconfigured' && (
-                  <div className="mt-1 text-[11px] text-slate-500 line-clamp-2" title={p.lastError}>
+                  <div className="mt-1 text-xs text-slate-500 line-clamp-2" title={p.lastError}>
                     ปัญหาล่าสุด: {p.lastError}
                   </div>
                 )}
@@ -197,7 +197,7 @@ export const AiRoutingPanel: React.FC = () => {
                       await api.resetAiHealth(p.id);
                       load(false);
                     }}
-                    className="mt-2 text-[11px] font-semibold text-sky-700 hover:underline cursor-pointer"
+                    className="mt-2 text-xs font-semibold text-slate-700 hover:underline cursor-pointer"
                   >
                     ปลดพักแล้วลองใหม่ทันที
                   </button>
@@ -207,7 +207,7 @@ export const AiRoutingPanel: React.FC = () => {
           })}
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-500">
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
           <span>
             24 ชม.ล่าสุด: เรียก <strong className="text-slate-800">{data.last24h.calls}</strong> ครั้ง
           </span>
@@ -250,20 +250,20 @@ export const AiRoutingPanel: React.FC = () => {
           type="button"
           disabled={!dirty || saving}
           onClick={() => save({ fallbackOrder, economyOrder })}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#0a101d] px-4 py-2 text-xs font-semibold text-amber-300 hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#0a101d] px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
         >
           <Zap className="w-3.5 h-3.5" />
           {saving ? 'กำลังบันทึก...' : 'บันทึกลำดับ'}
         </button>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="rounded-md border border-slate-200 bg-white p-5">
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-xs font-bold text-slate-900">เหตุการณ์ล่าสุด (ล้มเหลว / สลับค่าย)</h4>
           <button
             type="button"
             onClick={() => load(false)}
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
           >
             <RefreshCw className="w-3 h-3" /> รีเฟรช
           </button>
@@ -273,7 +273,7 @@ export const AiRoutingPanel: React.FC = () => {
         ) : (
           <ul className="divide-y divide-slate-100">
             {data.recentEvents.map((ev, i) => (
-              <li key={i} className="py-2 text-[11px] flex flex-wrap gap-x-3 gap-y-0.5">
+              <li key={i} className="py-2 text-xs flex flex-wrap gap-x-3 gap-y-0.5">
                 <span className="text-slate-400 tabular-nums">
                   {new Date(ev.created_at).toLocaleString('th-TH')}
                 </span>

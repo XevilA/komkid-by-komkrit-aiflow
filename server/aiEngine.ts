@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { searchKnowledge } from './knowledge.ts';
+import { stripEmoji } from './text.ts';
 import { GoogleGenAI } from '@google/genai';
 import { db, IS_SERVERLESS } from './db.ts';
 import { generateRealImage, getSettingValue } from './mediaEngine.ts';
@@ -161,35 +163,7 @@ function resolveActiveProvider(requested?: LlmProviderId): Exclude<LlmProviderId
 }
 
 export function getActiveKnowledgeContext(topic: string) {
-  const rows = db
-    .prepare(
-      'SELECT title, category, summary, content, source_ref FROM knowledge_base WHERE is_active = 1 ORDER BY id ASC'
-    )
-    .all() as {
-    title: string;
-    category: string;
-    summary: string;
-    content: string;
-    source_ref: string;
-  }[];
-
-  const lower = topic.toLowerCase();
-  const scored = rows.map((r) => {
-    let score = r.category === 'brand_guideline' ? 10 : 1;
-    const words = lower.split(/\s+/).filter((w) => w.length > 1);
-    for (const w of words) {
-      if (
-        r.title.toLowerCase().includes(w) ||
-        r.summary.toLowerCase().includes(w) ||
-        r.content.toLowerCase().includes(w)
-      ) {
-        score += 4;
-      }
-    }
-    return { ...r, score };
-  });
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, 6);
+  return searchKnowledge(topic, 6);
 }
 
 function sanitizeApiError(rawMsg: string, secret?: string): string {
@@ -973,6 +947,7 @@ export async function callRealLlm(params: LlmCallParams): Promise<LlmCallResult>
   // Direct path: connection tests with a user-supplied key, or failover switched off.
   if (!useFailover) {
     const r = await callProviderOnce(params);
+    r.text = stripEmoji(r.text);
     validateText(r.text);
     if (useCache) writeLlmCache(key, r);
     return r;
@@ -985,14 +960,17 @@ export async function callRealLlm(params: LlmCallParams): Promise<LlmCallResult>
   try {
     const out = await runWithFailover<LlmCallResult>({
       attempts,
-      call: (spec) =>
-        callProviderOnce({
+      call: async (spec) => {
+        const r = await callProviderOnce({
           ...params,
           provider: spec.provider as ConcreteProvider,
           tier: spec.tier,
           // an explicit model id belongs to the provider it was chosen for
           model: spec.provider === requested ? params.model : undefined,
-        }),
+        });
+        r.text = stripEmoji(r.text);
+        return r;
+      },
       validate: (r) => validateText(r.text),
       timeoutMs: ATTEMPT_TIMEOUT_MS,
       totalBudgetMs: IS_SERVERLESS ? 55000 : undefined,
@@ -1021,7 +999,7 @@ export async function callRealLlm(params: LlmCallParams): Promise<LlmCallResult>
   }
 }
 
-function extractStrictJson(rawText: string): any {
+export function extractStrictJson(rawText: string): any {
   const cleaned = rawText
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')

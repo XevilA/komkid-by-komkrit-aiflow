@@ -36,7 +36,6 @@ import {
   DashboardStats,
 } from '../types';
 import { api, formatViews } from '../api';
-import { PostCrudManager } from './PostCrudManager';
 import { AiCommandCenter } from './AiCommandCenter';
 import {
   KnowledgeBaseManager,
@@ -44,8 +43,9 @@ import {
   AudienceAndSettingsHub,
 } from './KnowledgeAndPillars';
 import { OmnichannelPublishHub } from './OmnichannelPublishHub';
-import { AiChatStudio, MediaAgentHandoff } from './AiChatStudio';
-import { MediaGenStudio } from './MediaGenStudio';
+import { AgentWorkspace } from './AgentWorkspace';
+import { ContentManager } from './ContentManager';
+import { MediaGenStudio, MediaAgentHandoff } from './MediaGenStudio';
 import { SiteAndDomainManager } from './SiteAndDomainManager';
 import { AiRoutingPanel } from './AiRoutingPanel';
 import { SiteConfig, SpecialProject } from '../types';
@@ -118,6 +118,7 @@ export const AdminLayout: React.FC<Props> = ({
   const [blueprintOpen, setBlueprintOpen] = useState(false);
 
   const [mediaHandoff, setMediaHandoff] = useState<MediaAgentHandoff | null>(null);
+  const [workspaceRequest, setWorkspaceRequest] = useState<{ kind: 'post' | 'workflow'; id: number } | null>(null);
   const [prefillNewPost, setPrefillNewPost] = useState<Partial<Post> | null>(null);
 
   const toggleDesktopMenu = useCallback((next?: boolean) => {
@@ -202,7 +203,7 @@ export const AdminLayout: React.FC<Props> = ({
   const menuItems = [
     {
       id: 'posts',
-      label: 'จัดการเนื้อหาและบทความ',
+      label: 'เนื้อหาและบทความ',
       shortLabel: 'เนื้อหา',
       sub: 'ข่าวสาร บทความ วิดีโอ และหลักสูตร',
       icon: <FileText className="w-4 h-4" />,
@@ -210,15 +211,15 @@ export const AdminLayout: React.FC<Props> = ({
     },
     {
       id: 'ai-chat',
-      label: 'ระบบผู้ช่วย AI (Co-Work)',
-      shortLabel: 'AI Chat',
+      label: 'CEO Agent: สั่งงานทีม AI',
+      shortLabel: 'CEO Agent',
       sub: 'สนทนา ร่างบทความ และสั่งผลิตสื่อ',
       icon: <Bot className="w-4 h-4" />,
     },
     {
       id: 'ai-command',
-      label: 'เวิร์กโฟลว์ Agent (01–08)',
-      shortLabel: 'เวิร์กโฟลว์',
+      label: 'แคมเปญ AI 8 Agent',
+      shortLabel: 'แคมเปญ AI',
       sub: 'กระบวนการวิจัย เขียน และตรวจสอบคุณภาพ',
       icon: <Workflow className="w-4 h-4" />,
       badge: workflows.length || undefined,
@@ -232,8 +233,8 @@ export const AdminLayout: React.FC<Props> = ({
     },
     {
       id: 'settings',
-      label: 'ตั้งค่าระบบและฐานข้อมูล',
-      shortLabel: 'ตั้งค่าระบบ',
+      label: 'ตั้งค่าระบบ',
+      shortLabel: 'ตั้งค่า',
       sub: 'สมาชิก ช่องทางเผยแพร่ คลังความรู้ และ API',
       icon: <Settings className="w-4 h-4" />,
       badge: stats?.unreadContacts || undefined,
@@ -287,318 +288,196 @@ export const AdminLayout: React.FC<Props> = ({
   const activeMenuItem =
     menuItems.find((m) => m.id === normalizedMenu) || menuItems[0];
 
+  const navLink = (active: boolean) =>
+    `flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors cursor-pointer ${
+      active ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+    }`;
+
   return (
-    <div
-      className={`${
-        isAiChatActive ? 'h-screen overflow-hidden' : 'min-h-screen'
-      } flex flex-col lg:flex-row bg-slate-50 text-slate-900 antialiased`}
-    >
-      {/* Mobile Sidebar Backdrop */}
+    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased lg:flex-row">
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-2xs lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* =================================================================== */}
-      {/* ENTERPRISE SIDEBAR NAVIGATION                                       */}
-      {/* =================================================================== */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col justify-between transition-transform duration-200 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col justify-between border-r border-slate-200 bg-white transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } ${desktopMenuCollapsed ? 'lg:hidden' : 'lg:sticky lg:top-0 lg:bottom-auto lg:h-screen lg:self-start lg:translate-x-0 lg:shrink-0'}`}
+        } ${
+          desktopMenuCollapsed
+            ? 'lg:hidden'
+            : 'lg:sticky lg:top-0 lg:bottom-auto lg:h-screen lg:shrink-0 lg:self-start lg:translate-x-0'
+        }`}
       >
         <div className="flex-1 overflow-y-auto">
-          {/* Organization Header */}
-          <div className="h-14 px-4 border-b border-slate-800 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <img
-                src="/images/avatar-komkrit.png"
-                alt="Komkrit"
-                className="h-8 w-8 rounded-md border border-slate-700 object-cover shrink-0"
-              />
-              <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold truncate">
-                  ADMINISTRATION
-                </div>
-                <div className="font-bold text-xs text-white truncate">
-                  คมคิด by KOMKRIT
-                </div>
+          <div className="flex h-14 items-center justify-between gap-2 border-b border-slate-200 px-4">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <img src="/images/avatar-komkrit.png" alt="" className="h-7 w-7 shrink-0 rounded-full" />
+              <div className="min-w-0 text-sm font-semibold tracking-tight text-slate-900">
+                คมคิด <span className="font-normal text-slate-500">ผู้ดูแลระบบ</span>
               </div>
             </div>
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex shrink-0 items-center">
               <button
                 type="button"
                 onClick={() => toggleDesktopMenu(true)}
-                title="พับเก็บแถบเมนู"
-                className="hidden lg:inline-flex items-center justify-center p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                title="พับเก็บเมนู"
+                className="hidden rounded-md p-1.5 text-slate-500 hover:bg-slate-100 cursor-pointer lg:inline-flex"
               >
-                <PanelLeftClose className="w-4 h-4" />
+                <PanelLeftClose className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => setSidebarOpen(false)}
-                className="lg:hidden p-1.5 text-slate-400 hover:text-white cursor-pointer"
+                aria-label="ปิดเมนู"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 cursor-pointer lg:hidden"
               >
-                <X className="w-4 h-4" />
+                <X className="h-4 w-4" />
               </button>
             </div>
           </div>
 
-          {/* Primary Navigation */}
-          <div className="p-3">
-            <div className="px-2.5 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              ระบบจัดการหลัก
-            </div>
-            <nav className="space-y-1">
-              {menuItems.map((m) => {
-                const active = normalizedMenu === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveMenu(m.id);
-                      setSidebarOpen(false);
-                    }}
-                    className={`group relative w-full flex items-center justify-between rounded-md px-3 py-2.5 text-left transition cursor-pointer ${
-                      active
-                        ? 'bg-slate-800 text-white font-semibold'
-                        : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                    }`}
-                  >
-                    {active && (
-                      <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r bg-amber-400" />
-                    )}
-                    <span className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className={`flex h-7 w-7 items-center justify-center rounded-md shrink-0 transition ${
-                          active
-                            ? 'bg-slate-700 text-amber-400'
-                            : 'bg-slate-800/80 text-slate-400 group-hover:text-slate-200'
-                        }`}
-                      >
-                        {m.icon}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-xs font-semibold leading-tight truncate">
-                          {m.label}
-                        </span>
-                        <span className="block text-[11px] text-slate-400 mt-0.5 truncate">
-                          {m.sub}
-                        </span>
-                      </span>
-                    </span>
-                    {typeof m.badge === 'number' && m.badge > 0 && (
-                      <span
-                        className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold shrink-0 ${
-                          active
-                            ? 'bg-amber-400/20 text-amber-300'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}
-                      >
-                        {m.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
+          <nav className="space-y-0.5 p-3" aria-label="เมนูหลัก">
+            {menuItems.map((m) => {
+              const active = normalizedMenu === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveMenu(m.id);
+                    setSidebarOpen(false);
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  className={navLink(active)}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span className="text-slate-500">{m.icon}</span>
+                    {m.shortLabel}
+                  </span>
+                  {typeof m.badge === 'number' && m.badge > 0 && (
+                    <span className="text-xs tabular-nums text-slate-400">{m.badge}</span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
 
-          {/* Quick Settings Shortcuts */}
-          <div className="px-3 pt-2 pb-4 border-t border-slate-800/80">
-            <div className="px-2.5 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              ทางลัดการจัดการ
-            </div>
+          <div className="border-t border-slate-200 p-3">
+            <div className="px-3 pb-1.5 text-xs font-medium text-slate-400">การตั้งค่า</div>
             <div className="space-y-0.5">
-              {settingsTabs.map((st) => {
-                const isCurrent =
-                  normalizedMenu === 'settings' && settingsTab === st.id;
-                return (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() => {
-                      openSettingsSection(st.id);
-                      setSidebarOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-2.5 rounded-md px-3 py-1.5 text-xs transition cursor-pointer ${
-                      isCurrent
-                        ? 'bg-slate-800/90 text-amber-300 font-semibold'
-                        : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200'
-                    }`}
-                  >
-                    <span className="opacity-80 shrink-0">{st.icon}</span>
-                    <span className="truncate">{st.label}</span>
-                  </button>
-                );
-              })}
+              {settingsTabs.map((st) => (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => {
+                    openSettingsSection(st.id);
+                    setSidebarOpen(false);
+                  }}
+                  className={navLink(normalizedMenu === 'settings' && settingsTab === st.id)}
+                >
+                  <span className="truncate">{st.label}</span>
+                </button>
+              ))}
               <button
                 type="button"
                 onClick={() => {
                   setBlueprintOpen(true);
                   setSidebarOpen(false);
                 }}
-                className="w-full flex items-center gap-2.5 rounded-md px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-800/40 hover:text-slate-200 transition cursor-pointer"
+                className={navLink(false)}
               >
-                <BookOpen className="w-4 h-4 opacity-80 shrink-0" />
-                <span className="truncate">เอกสารสถาปัตยกรรมระบบ</span>
+                เอกสารสถาปัตยกรรมระบบ
               </button>
             </div>
           </div>
         </div>
 
-        {/* Sidebar Footer */}
-        <div className="p-3 border-t border-slate-800 bg-slate-900/95 space-y-1.5">
-          <div className="px-2 py-1 flex items-center justify-between text-[11px] text-slate-400">
+        <div className="space-y-2 border-t border-slate-200 p-3">
+          <div className="flex items-center justify-between px-1 text-xs text-slate-500">
             <span className="truncate">ผู้ดูแล: {adminUsername || 'admin'}</span>
-            <span
-              className={`inline-flex items-center gap-1 font-medium ${
-                connectedProvidersCount > 0 ? 'text-emerald-400' : 'text-amber-400'
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  connectedProvidersCount > 0 ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
-              />
-              AI {connectedProvidersCount}/4
+            <span className={connectedProvidersCount > 0 ? 'text-emerald-700' : 'text-slate-700'}>
+              AI {connectedProvidersCount}/4 ค่าย
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={onOpenPublicWebsite}
-              className="flex items-center justify-center gap-1.5 rounded-md bg-slate-800 border border-slate-700 px-2.5 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700 transition cursor-pointer"
+              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
-              <Globe className="w-3.5 h-3.5" />
               หน้าเว็บหลัก
             </button>
             <button
               type="button"
               onClick={onLogout}
-              className="flex items-center justify-center gap-1.5 rounded-md bg-slate-800/60 border border-slate-800 px-2.5 py-2 text-xs font-medium text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 hover:border-rose-900/50 transition cursor-pointer"
+              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
-              <LogOut className="w-3.5 h-3.5" />
               ออกจากระบบ
             </button>
           </div>
         </div>
       </aside>
 
-      {/* =================================================================== */}
-      {/* MAIN WORKSPACE CONTAINER                                            */}
-      {/* =================================================================== */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 pb-14 lg:pb-0">
-        {/* Formal Top Header Bar */}
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 h-14 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col pb-14 lg:pb-0">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2.5">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden inline-flex items-center justify-center p-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer shrink-0"
-              aria-label="เปิดเมนูหลัก"
+              aria-label="เปิดเมนู"
+              className="shrink-0 rounded-md border border-slate-300 p-2 text-slate-700 hover:bg-slate-50 cursor-pointer lg:hidden"
             >
-              <Menu className="w-4 h-4" />
+              <Menu className="h-4 w-4" />
             </button>
             {desktopMenuCollapsed && (
               <button
                 type="button"
                 onClick={() => toggleDesktopMenu(false)}
-                title="แสดงแถบเมนูด้านซ้าย"
-                className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50 transition cursor-pointer shrink-0"
+                className="hidden shrink-0 items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer lg:inline-flex"
               >
-                <PanelLeftOpen className="w-3.5 h-3.5 text-slate-500" />
-                เมนูหลัก
+                <PanelLeftOpen className="h-3.5 w-3.5" /> เมนู
               </button>
             )}
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                ระบบบริหารจัดการ
-              </span>
-              <span className="hidden md:inline text-slate-300">/</span>
-              <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">
-                {activeMenuItem.label}
-              </h1>
-            </div>
+            <h1 className="truncate text-sm font-semibold text-slate-900 sm:text-base">{activeMenuItem.label}</h1>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {isAiChatActive && (
-              <button
-                type="button"
-                onClick={() => toggleChatFullScreen(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-              >
-                <Maximize2 className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">ขยายเต็มจอ</span>
-              </button>
-            )}
-
+          <div className="flex shrink-0 items-center gap-2">
             {aiStatus && (
               <button
                 type="button"
                 onClick={() => openSettingsSection('api_keys')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium border transition cursor-pointer ${
-                  connectedProvidersCount > 0
-                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800 hover:bg-emerald-100/60'
-                    : 'bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100/70'
-                }`}
+                className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
               >
-                <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">
-                  {connectedProvidersCount > 0
-                    ? `เชื่อมต่อ AI แล้ว (${connectedProvidersCount} ค่าย)`
-                    : 'ตั้งค่า API Key'}
-                </span>
-                <span className="sm:hidden">API ({connectedProvidersCount})</span>
+                {connectedProvidersCount > 0 ? `เชื่อมต่อ AI ${connectedProvidersCount} ค่าย` : 'ตั้งค่า API Key'}
               </button>
             )}
-
             <button
               type="button"
               onClick={onOpenPublicWebsite}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
-              <Globe className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden sm:inline">ดูหน้าเว็บไซต์</span>
+              ดูหน้าเว็บไซต์
             </button>
           </div>
         </header>
 
-        {/* Main Content Area */}
-        <main
-          className={
-            isAiChatActive
-              ? 'flex-1 flex flex-col min-h-0 w-full overflow-hidden'
-              : 'flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto space-y-6'
-          }
-        >
-          {/* Formal API Configuration Notice */}
+        <main className="mx-auto w-full max-w-[1400px] flex-1 space-y-6 p-4 sm:p-6">
           {aiStatus &&
             connectedProvidersCount === 0 &&
             (normalizedMenu === 'media-gen' || normalizedMenu === 'ai-command') && (
-              <div className="rounded-lg bg-amber-50/80 border border-amber-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                  <div>
-                    <div className="text-xs sm:text-sm font-semibold text-slate-900">
-                      ยังไม่ได้กำหนดค่า API Key สำหรับประมวลผล AI
-                    </div>
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      กรุณาเชื่อมต่อคีย์ผู้ให้บริการ (เช่น Google Gemini, OpenAI, Anthropic หรือ DeepSeek) ในหน้าการเชื่อมต่อ API เพื่อเปิดใช้งานระบบอัตโนมัติ
-                    </p>
-                  </div>
+              <div className="flex flex-col justify-between gap-3 rounded-md border border-slate-300 bg-slate-100 p-4 sm:flex-row sm:items-center">
+                <div>
+                  <div className="text-sm font-medium text-slate-900">ยังไม่ได้กำหนดค่า API Key สำหรับ AI</div>
+                  <p className="mt-0.5 text-sm text-slate-600">
+                    เชื่อมต่อคีย์ของ Google Gemini, OpenAI, Anthropic หรือ DeepSeek อย่างน้อยหนึ่งค่าย เพื่อเปิดใช้งานทีม AI
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => openSettingsSection('api_keys')}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer shrink-0"
+                  className="shrink-0 rounded-md bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-800 cursor-pointer"
                 >
-                  <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Key
+                  ตั้งค่า API Key
                 </button>
               </div>
             )}
@@ -608,7 +487,7 @@ export const AdminLayout: React.FC<Props> = ({
             <>
               {/* Formal Executive Summary Bar */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                <div className="rounded-lg bg-white border border-slate-200 p-3.5 sm:p-4 shadow-2xs">
+                <div className="rounded-lg bg-white border border-slate-200 p-3.5 sm:p-4 ">
                   <div className="flex items-center justify-between gap-1 text-xs font-medium text-slate-500">
                     <span className="truncate">เนื้อหาทั้งหมดในระบบ</span>
                     <FileText className="w-4 h-4 text-slate-400 shrink-0" />
@@ -617,13 +496,13 @@ export const AdminLayout: React.FC<Props> = ({
                     <span className="text-xl sm:text-2xl font-bold text-slate-900">
                       {stats?.postsTotal ?? posts.length}
                     </span>
-                    <span className="text-[11px] font-medium text-slate-500">
+                    <span className="text-xs font-medium text-slate-500">
                       เผยแพร่ {publishedPostsCount} • ร่าง {draftPostsCount}
                     </span>
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-white border border-slate-200 p-3.5 sm:p-4 shadow-2xs">
+                <div className="rounded-lg bg-white border border-slate-200 p-3.5 sm:p-4 ">
                   <div className="flex items-center justify-between gap-1 text-xs font-medium text-slate-500">
                     <span className="truncate">จำนวนการเข้าชมสะสม</span>
                     <Eye className="w-4 h-4 text-slate-400 shrink-0" />
@@ -632,7 +511,7 @@ export const AdminLayout: React.FC<Props> = ({
                     <span className="text-xl sm:text-2xl font-bold text-slate-900">
                       {formatViews(stats?.totalViews ?? 0)}
                     </span>
-                    <span className="text-[11px] font-medium text-slate-500">
+                    <span className="text-xs font-medium text-slate-500">
                       ครั้ง
                     </span>
                   </div>
@@ -640,7 +519,7 @@ export const AdminLayout: React.FC<Props> = ({
 
                 <div
                   onClick={() => openSettingsSection('knowledge')}
-                  className="rounded-lg bg-white border border-slate-200 p-4 shadow-2xs hover:border-slate-300 transition cursor-pointer"
+                  className="rounded-lg bg-white border border-slate-200 p-4 hover:border-slate-300 transition cursor-pointer"
                 >
                   <div className="flex items-center justify-between text-xs font-medium text-slate-500">
                     <span>ฐานความรู้ & เวิร์กโฟลว์</span>
@@ -650,7 +529,7 @@ export const AdminLayout: React.FC<Props> = ({
                     <span className="text-xl sm:text-2xl font-bold text-slate-900">
                       {activeKbCount}
                     </span>
-                    <span className="text-[11px] font-medium text-slate-500">
+                    <span className="text-xs font-medium text-slate-500">
                       แคมเปญ AI {workflows.length} รายการ
                     </span>
                   </div>
@@ -658,7 +537,7 @@ export const AdminLayout: React.FC<Props> = ({
 
                 <div
                   onClick={() => openSettingsSection('inbox')}
-                  className="rounded-lg bg-white border border-slate-200 p-4 shadow-2xs hover:border-slate-300 transition cursor-pointer"
+                  className="rounded-lg bg-white border border-slate-200 p-4 hover:border-slate-300 transition cursor-pointer"
                 >
                   <div className="flex items-center justify-between text-xs font-medium text-slate-500">
                     <span>สมาชิกและข้อความติดต่อ</span>
@@ -669,9 +548,9 @@ export const AdminLayout: React.FC<Props> = ({
                       {(stats?.totalSubscribers ?? 0) + (stats?.unreadContacts ?? 0)}
                     </span>
                     <span
-                      className={`text-[11px] font-medium ${
+                      className={`text-xs font-medium ${
                         (stats?.unreadContacts ?? 0) > 0
-                          ? 'text-amber-700 font-semibold'
+                          ? 'text-slate-700 font-semibold'
                           : 'text-slate-500'
                       }`}
                     >
@@ -681,7 +560,7 @@ export const AdminLayout: React.FC<Props> = ({
                 </div>
               </div>
 
-              <PostCrudManager
+              <ContentManager
                 posts={posts}
                 initialEditPost={initialEditPost}
                 prefillNewPost={prefillNewPost}
@@ -693,52 +572,24 @@ export const AdminLayout: React.FC<Props> = ({
                 onRefresh={onRefreshAll}
                 onPreviewPost={onPreviewPost}
                 onOpenSettings={() => openSettingsSection('api_keys')}
+                onEditWithCeo={(postId) => {
+                  setWorkspaceRequest({ kind: 'post', id: postId });
+                  setActiveMenu('ai-chat');
+                }}
+                onWriteWithCeo={() => setActiveMenu('ai-chat')}
               />
             </>
           )}
 
           {/* 2. AI CO-WORK & CHAT WORKSPACE */}
           {normalizedMenu === 'ai-chat' && (
-            <div
-              className={
-                chatFullScreen
-                  ? 'fixed inset-0 z-50 bg-white flex flex-col'
-                  : 'flex-1 flex flex-col min-h-0 h-full'
-              }
-            >
-              <AiChatStudio
-                onRefreshAll={onRefreshAll}
-                onOpenSettings={() => {
-                  toggleChatFullScreen(false);
-                  openSettingsSection('api_keys');
-                }}
-                onPreviewPost={(postId) => {
-                  toggleChatFullScreen(false);
-                  onPreviewPost(postId);
-                }}
-                isTabMenuCollapsed={desktopMenuCollapsed}
-                onToggleTabMenu={() => toggleDesktopMenu()}
-                isFullScreen={chatFullScreen}
-                onToggleFullScreen={() => toggleChatFullScreen()}
-                onNavigateMenu={(menuId) => {
-                  toggleChatFullScreen(false);
-                  setActiveMenu(menuId);
-                }}
-                onOpenPublicWebsite={onOpenPublicWebsite}
-                initialAiSettings={aiStatus}
-                onSyncAiSettings={(st) => setAiStatus(st)}
-                onSendToMediaStudio={(handoff) => {
-                  toggleChatFullScreen(false);
-                  setMediaHandoff(handoff);
-                  setActiveMenu('media-gen');
-                }}
-                onOpenInPostEditor={(draft) => {
-                  toggleChatFullScreen(false);
-                  setPrefillNewPost(draft);
-                  setActiveMenu('posts');
-                }}
-              />
-            </div>
+            <AgentWorkspace
+              request={workspaceRequest}
+              onRequestHandled={() => setWorkspaceRequest(null)}
+              onRefreshAll={onRefreshAll}
+              onOpenSettings={() => openSettingsSection('api_keys')}
+              onPreviewPost={onPreviewPost}
+            />
           )}
 
           {/* 3. AI MEDIA & VIDEO PRODUCTION STUDIO */}
@@ -760,6 +611,10 @@ export const AdminLayout: React.FC<Props> = ({
           {/* 4. MULTI-AGENT WORKFLOW CONSOLE (01-08) */}
           {normalizedMenu === 'ai-command' && (
             <AiCommandCenter
+              onOpenInCeo={(id) => {
+                setWorkspaceRequest({ kind: 'workflow', id });
+                setActiveMenu('ai-chat');
+              }}
               workflows={workflows}
               kbCount={activeKbCount}
               onRefreshAll={onRefreshAll}
@@ -818,7 +673,7 @@ export const AdminLayout: React.FC<Props> = ({
                 <div className="space-y-5">
                   <form
                     onSubmit={handleChangePassword}
-                    className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs"
+                    className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 "
                   >
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
                       <div className="flex items-center gap-2.5">
@@ -960,7 +815,7 @@ export const AdminLayout: React.FC<Props> = ({
                 key={m.id}
                 type="button"
                 onClick={() => setActiveMenu(m.id)}
-                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition cursor-pointer ${
+                className={`flex flex-col items-center justify-center gap-0.5 text-xs font-medium transition cursor-pointer ${
                   active
                     ? 'text-slate-900 font-bold bg-slate-50'
                     : 'text-slate-500 hover:text-slate-800'
@@ -979,16 +834,16 @@ export const AdminLayout: React.FC<Props> = ({
       {/* SYSTEM ARCHITECTURE REFERENCE MODAL */}
       {blueprintOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto"
           onClick={() => setBlueprintOpen(false)}
         >
           <div
-            className="my-auto w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-lg bg-white p-5 sm:p-6 shadow-xl space-y-5 border border-slate-200"
+            className="my-auto w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-lg bg-white p-5 sm:p-6 space-y-5 border border-slate-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 pb-3.5">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                   SYSTEM ARCHITECTURE
                 </div>
                 <h3 className="text-base font-bold text-slate-900 mt-0.5">

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { db } from './db.ts';
 import { getSettingValue, UPLOADS_ROOT } from './mediaEngine.ts';
 import { decryptSecretValue } from './secretVault.ts';
+import { ensurePostSlug } from './slug.ts';
 
 export interface DispatchChannelInput {
   channelKey: string;
@@ -95,7 +96,7 @@ export async function dispatchSingleChannelReal(
       channelName: chName,
       mode: 'internal_live',
       status: 'published',
-      externalUrl: `/?post=${targetPostId}`,
+      externalUrl: `/articles/${encodeURIComponent(ensurePostSlug(db, targetPostId as number) || String(targetPostId))}`,
       responseNote: `เผยแพร่ขึ้นฐานข้อมูลเว็บไซต์หลักจริงสำเร็จ (Post #${targetPostId})`,
       createdPostId: targetPostId,
     };
@@ -253,7 +254,7 @@ export async function dispatchSingleChannelReal(
     const messages: any[] = [
       {
         type: 'text',
-        text: `📌 ${input.title}\n\n${input.content.slice(0, 4500)}`,
+        text: `${input.title}\n\n${input.content.slice(0, 4500)}`,
       },
     ];
     if (input.coverImage && /^https:\/\//i.test(input.coverImage)) {

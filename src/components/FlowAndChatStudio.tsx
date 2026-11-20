@@ -29,7 +29,7 @@ import {
   UnifiedLiveModelsResponse,
 } from '../types';
 import { api } from '../api';
-import { renderRichMarkdown } from './ArticleReaderModal';
+import { renderRichMarkdown } from './RichContent';
 
 interface Props {
   onRefreshAll: () => Promise<void>;
@@ -481,7 +481,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
   return (
     <div className="space-y-5">
       {/* Sub-Navigation Header */}
-      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 ">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
             <h3 className="text-sm sm:text-base font-bold text-slate-900">
@@ -511,7 +511,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Clapperboard className="w-3.5 h-3.5 text-amber-400" />
+            <Clapperboard className="w-3.5 h-3.5 text-slate-500" />
             1. สตอรีบอร์ดและตัดต่อหลายฉาก
           </button>
           <button
@@ -523,7 +523,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Film className="w-3.5 h-3.5 text-amber-400" />
+            <Film className="w-3.5 h-3.5 text-slate-500" />
             2. สร้างวิดีโอ ภาพ และเสียงบรรยายโดยตรง
           </button>
           <button
@@ -535,7 +535,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Bot className="w-3.5 h-3.5 text-amber-400" />
+            <Bot className="w-3.5 h-3.5 text-slate-500" />
             3. เปรียบเทียบผลลัพธ์ 4 โมเดล (Multi-LLM Arena)
           </button>
         </div>
@@ -588,7 +588,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
         <div className="space-y-5">
           <form
             onSubmit={handleCreateFlowProject}
-            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4"
+            className="rounded-lg bg-white border border-slate-200 p-5 space-y-4"
           >
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
               สร้างโปรเจกต์สตอรีบอร์ดวิดีโอใหม่
@@ -698,7 +698,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   </>
                 ) : (
                   <>
-                    <PenLine className="w-3.5 h-3.5 text-amber-400" />
+                    <PenLine className="w-3.5 h-3.5 text-slate-500" />
                     สร้างสตอรีบอร์ด
                   </>
                 )}
@@ -708,7 +708,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
           {flowProjects.length > 0 && (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-              <div className="xl:col-span-3 rounded-lg bg-white border border-slate-200 p-4 space-y-2.5 shadow-2xs">
+              <div className="xl:col-span-3 rounded-lg bg-white border border-slate-200 p-4 space-y-2.5 ">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 pb-1 border-b border-slate-100">
                   รายการโปรเจกต์ ({flowProjects.length})
                 </h4>
@@ -723,7 +723,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">
+                      <span className="text-xs font-semibold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">
                         {fp.aspectRatio} • {fp.resolution}
                       </span>
                       <button
@@ -741,7 +741,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     <div className="mt-1.5 text-xs font-semibold text-slate-900 line-clamp-2">
                       {fp.title}
                     </div>
-                    <div className="mt-0.5 text-[11px] text-slate-500 truncate">
+                    <div className="mt-0.5 text-xs text-slate-500 truncate">
                       {fp.videoEngine}
                     </div>
                   </div>
@@ -750,10 +750,10 @@ export const FlowAndChatStudio: React.FC<Props> = ({
 
               {activeFlow && (
                 <div className="xl:col-span-9 space-y-4">
-                  <div className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-4">
+                  <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                       <div>
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                           PROJECT #{activeFlow.id} • {activeFlow.videoEngine}
                         </span>
                         <h3 className="text-base font-bold text-slate-900 mt-0.5">
@@ -769,7 +769,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                           disabled={generatingFlowVo}
                           className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                         >
-                          <Mic className="w-3.5 h-3.5 text-amber-600" />
+                          <Mic className="w-3.5 h-3.5 text-slate-700" />
                           {generatingFlowVo
                             ? 'กำลังสังเคราะห์เสียง...'
                             : '1. สร้างเสียงบรรยายรวม'}
@@ -790,7 +790,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                           onClick={() => handlePublishFlowVideoToWebsite(activeFlow)}
                           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
                         >
-                          <FilePlus2 className="w-3.5 h-3.5 text-amber-400" />
+                          <FilePlus2 className="w-3.5 h-3.5 text-slate-500" />
                           เผยแพร่ขึ้นหน้าเว็บ
                         </button>
                       </div>
@@ -840,10 +840,10 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     {activeFlow.scenes.map((sc, idx) => (
                       <div
                         key={sc.id || idx}
-                        className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-2xs space-y-3.5"
+                        className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-3.5"
                       >
                         <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
-                          <span className="rounded bg-slate-900 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+                          <span className="rounded bg-slate-900 px-2.5 py-0.5 text-xs font-semibold text-white">
                             ฉากที่ {sc.sceneNumber} ({sc.durationSec} วินาที)
                           </span>
                           <h4 className="font-bold text-xs sm:text-sm text-slate-900">
@@ -1101,7 +1101,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
           {/* Video Generator */}
           <form
             onSubmit={handleDirectVideoGen}
-            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+            className="rounded-lg bg-white border border-slate-200 p-5 space-y-3"
           >
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
               <Film className="w-4 h-4 text-slate-700" />
@@ -1183,7 +1183,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
           {/* Image Generator */}
           <form
             onSubmit={handleDirectImageGen}
-            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+            className="rounded-lg bg-white border border-slate-200 p-5 space-y-3"
           >
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
               <ImageIcon className="w-4 h-4 text-slate-700" />
@@ -1246,7 +1246,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
           {/* Audio TTS Generator */}
           <form
             onSubmit={handleDirectTtsGen}
-            className="rounded-lg bg-white border border-slate-200 p-5 shadow-2xs space-y-3"
+            className="rounded-lg bg-white border border-slate-200 p-5 space-y-3"
           >
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-2.5">
               <Mic className="w-4 h-4 text-slate-700" />
@@ -1302,7 +1302,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
       {/* TAB 3: MULTI-LLM ARENA */}
       {subTab === 'chat' && (
         <div className="space-y-4">
-          <div className="rounded-lg bg-white border border-slate-200 p-4 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+          <div className="rounded-lg bg-white border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5">
               {CHAT_PROVIDERS.map((p) => {
                 const active = chatProvider === p.id;
@@ -1374,10 +1374,10 @@ export const FlowAndChatStudio: React.FC<Props> = ({
           </div>
 
           {arenaResults.length > 0 && (
-            <div className="rounded-lg bg-white border border-slate-200 p-4 space-y-3 shadow-2xs">
+            <div className="rounded-lg bg-white border border-slate-200 p-4 space-y-3 ">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                 <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <BrainCircuit className="w-4 h-4 text-amber-600" />
+                  <BrainCircuit className="w-4 h-4 text-slate-700" />
                   ผลการเปรียบเทียบคำตอบจาก 4 ผู้ให้บริการ
                 </span>
                 <button
@@ -1397,7 +1397,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     <div className="flex items-center justify-between text-xs font-semibold text-slate-900">
                       <span>{ar.engineLabel}</span>
                       {ar.latencyMs && (
-                        <span className="text-[11px] text-slate-500">
+                        <span className="text-xs text-slate-500">
                           {ar.latencyMs} ms
                         </span>
                       )}
@@ -1414,7 +1414,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                           onClick={() =>
                             handlePublishTextToCrud(ar.reply, ar.engineLabel)
                           }
-                          className="rounded bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                          className="rounded bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
                         >
                           นำไปสร้างเนื้อหาบนเว็บไซต์
                         </button>
@@ -1426,7 +1426,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="rounded-lg bg-white border border-slate-200 shadow-2xs overflow-hidden flex flex-col h-[500px]">
+          <div className="rounded-lg bg-white border border-slate-200 overflow-hidden flex flex-col h-[500px]">
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-1.5">
@@ -1455,7 +1455,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                       }`}
                     >
                       {m.role === 'assistant' && (
-                        <div className="flex items-center justify-between gap-4 mb-1.5 text-[11px] font-semibold text-slate-500">
+                        <div className="flex items-center justify-between gap-4 mb-1.5 text-xs font-semibold text-slate-500">
                           <span>
                             {m.provider.toUpperCase()} ({m.model})
                           </span>
@@ -1491,7 +1491,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   onClick={handleRun4ModelArena}
                   className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                 >
-                  <ListChecks className="w-3.5 h-3.5 text-amber-600" />
+                  <ListChecks className="w-3.5 h-3.5 text-slate-700" />
                   {arenaRunning ? 'กำลังเปรียบเทียบ...' : 'เปรียบเทียบ 4 โมเดล'}
                 </button>
                 <button

@@ -4,12 +4,14 @@
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "dist/**"
     }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/uploads/(.*)", "destination": "/api/index" },
+    { "source": "/articles/(.*)", "destination": "/api/index" },
     { "source": "/robots.txt", "destination": "/api/index" },
     { "source": "/sitemap.xml", "destination": "/api/index" },
     { "source": "/((?!api/|uploads/|assets/|images/|favicon|robots\\.txt|sitemap\\.xml).*)", "destination": "/index.html" }

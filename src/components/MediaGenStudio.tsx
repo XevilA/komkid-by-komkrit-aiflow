@@ -25,7 +25,14 @@ import {
   Post,
 } from '../types';
 import { api, formatThaiDate } from '../api';
-import { MediaAgentHandoff } from './AiChatStudio';
+export interface MediaAgentHandoff {
+  target: 'image' | 'video';
+  fullPrompt: string;
+  thaiSummary: string;
+  assessmentThai: string;
+  aspectRatio: '16:9' | '9:16' | '1:1';
+  suggestedPostTitle?: string;
+}
 import { FlowAndChatStudio } from './FlowAndChatStudio';
 
 interface Props {
@@ -390,7 +397,7 @@ export const MediaGenStudio: React.FC<Props> = ({
   return (
     <div className="space-y-5">
       {/* Studio Header & Segmented Mode Navigation */}
-      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 shadow-2xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-4 ">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
           <div>
             <h2 className="text-sm sm:text-base font-bold text-slate-900">
@@ -420,7 +427,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <ImageIcon className="w-4 h-4 text-amber-400" />
+            <ImageIcon className="w-4 h-4 text-slate-500" />
             1. สร้างภาพนิ่ง (Image Generation)
           </button>
 
@@ -433,7 +440,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Film className="w-4 h-4 text-amber-400" />
+            <Film className="w-4 h-4 text-slate-500" />
             2. สร้างสื่อวิดีโอ (Video Production)
           </button>
 
@@ -446,7 +453,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
-            <Clapperboard className="w-4 h-4 text-amber-400" />
+            <Clapperboard className="w-4 h-4 text-slate-500" />
             3. สตอรีบอร์ดหลายฉาก (Multi-Scene Flow)
           </button>
         </div>
@@ -501,11 +508,11 @@ export const MediaGenStudio: React.FC<Props> = ({
       {/* ===================================================================== */}
       <div ref={recheckRef}>
         {activeRecheckAsset && (
-          <div className="rounded-lg border border-slate-300 bg-white p-5 shadow-xs space-y-4">
+          <div className="rounded-lg border border-slate-300 bg-white p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
               <div>
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                  <Eye className="w-3.5 h-3.5 text-amber-600" />
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <Eye className="w-3.5 h-3.5 text-slate-700" />
                   การตรวจสอบคุณภาพผลงาน (Quality Inspection)
                 </span>
                 <h3 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
@@ -517,11 +524,11 @@ export const MediaGenStudio: React.FC<Props> = ({
 
               <div className="flex items-center gap-2">
                 {activeRecheckAsset.reviewStatus === 'approved' ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                  <span className="inline-flex items-center gap-1 rounded bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
                     <CheckCircle2 className="w-3.5 h-3.5" /> อนุมัติเก็บในคลังแล้ว
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                  <span className="inline-flex items-center gap-1 rounded bg-slate-100 border border-slate-300 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
                     รอการตรวจสอบ
                   </span>
                 )}
@@ -588,7 +595,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                       </>
                     ) : (
                       <>
-                        <PenLine className="w-3.5 h-3.5 text-amber-400" />
+                        <PenLine className="w-3.5 h-3.5 text-slate-500" />
                         ให้ AI ร่างบทความพร้อมแนบสื่อนี้
                       </>
                     )}
@@ -648,9 +655,9 @@ export const MediaGenStudio: React.FC<Props> = ({
       {activeTab === 'image' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           {/* Step 1: Prompt Analysis */}
-          <div className="lg:col-span-5 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+          <div className="lg:col-span-5 rounded-lg bg-white border border-slate-200 p-5 space-y-4 ">
             <div className="border-b border-slate-100 pb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 ขั้นตอนที่ 1 • การวิเคราะห์แนวคิด
               </div>
               <h3 className="text-sm font-bold text-slate-900 mt-0.5">
@@ -684,7 +691,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <ListChecks className="w-3.5 h-3.5 text-amber-600" />
+                  <ListChecks className="w-3.5 h-3.5 text-slate-700" />
                   วิเคราะห์แนวคิดและสร้าง Full Prompt
                 </>
               )}
@@ -701,9 +708,9 @@ export const MediaGenStudio: React.FC<Props> = ({
           </div>
 
           {/* Step 2: Model Configuration & Execution */}
-          <div className="lg:col-span-7 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+          <div className="lg:col-span-7 rounded-lg bg-white border border-slate-200 p-5 space-y-4 ">
             <div className="border-b border-slate-100 pb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 ขั้นตอนที่ 2 • การตั้งค่าโมเดลและสั่งผลิตภาพ
               </div>
               <h3 className="text-sm font-bold text-slate-900 mt-0.5">
@@ -771,12 +778,12 @@ export const MediaGenStudio: React.FC<Props> = ({
             >
               {imgGenerating ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-500" />
                   กำลังประมวลผลและสร้างภาพ...
                 </>
               ) : (
                 <>
-                  <PenLine className="w-4 h-4 text-amber-400" />
+                  <PenLine className="w-4 h-4 text-slate-500" />
                   ดำเนินการสร้างภาพประกอบ
                 </>
               )}
@@ -791,9 +798,9 @@ export const MediaGenStudio: React.FC<Props> = ({
       {activeTab === 'video' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           {/* Step 1: Video Concept Analysis */}
-          <div className="lg:col-span-5 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+          <div className="lg:col-span-5 rounded-lg bg-white border border-slate-200 p-5 space-y-4 ">
             <div className="border-b border-slate-100 pb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 ขั้นตอนที่ 1 • การออกแบบฉากและมุมกล้อง
               </div>
               <h3 className="text-sm font-bold text-slate-900 mt-0.5">
@@ -827,7 +834,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <ListChecks className="w-3.5 h-3.5 text-amber-600" />
+                  <ListChecks className="w-3.5 h-3.5 text-slate-700" />
                   วิเคราะห์แนวคิดและสร้าง Video Prompt
                 </>
               )}
@@ -844,9 +851,9 @@ export const MediaGenStudio: React.FC<Props> = ({
           </div>
 
           {/* Step 2: Video Engine & Execution */}
-          <div className="lg:col-span-7 rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+          <div className="lg:col-span-7 rounded-lg bg-white border border-slate-200 p-5 space-y-4 ">
             <div className="border-b border-slate-100 pb-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 ขั้นตอนที่ 2 • การตั้งค่าโมเดลวิดีโอและเรนเดอร์
               </div>
               <h3 className="text-sm font-bold text-slate-900 mt-0.5">
@@ -956,12 +963,12 @@ export const MediaGenStudio: React.FC<Props> = ({
             >
               {vidGenerating ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-500" />
                   กำลังเรนเดอร์ไฟล์วิดีโอ .MP4 (ใช้เวลาประมาณ 20–60 วินาที)...
                 </>
               ) : (
                 <>
-                  <Film className="w-4 h-4 text-amber-400" />
+                  <Film className="w-4 h-4 text-slate-500" />
                   ดำเนินการเรนเดอร์วิดีโอ
                 </>
               )}
@@ -984,7 +991,7 @@ export const MediaGenStudio: React.FC<Props> = ({
       {/* ===================================================================== */}
       {/* MEDIA ASSET REGISTRY & ARCHIVE                                        */}
       {/* ===================================================================== */}
-      <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 shadow-2xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-5 space-y-4 ">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
           <div>
             <h3 className="text-sm sm:text-base font-bold text-slate-900">
@@ -1009,7 +1016,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                 onClick={() => setGalleryFilter(f.id as any)}
                 className={`rounded px-3 py-1 text-xs font-semibold transition cursor-pointer ${
                   galleryFilter === f.id
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-slate-900 '
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -1032,7 +1039,7 @@ export const MediaGenStudio: React.FC<Props> = ({
               return (
                 <div
                   key={item.id}
-                  className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col justify-between shadow-2xs"
+                  className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col justify-between "
                 >
                   <div>
                     <div className="relative aspect-video bg-slate-950 overflow-hidden">
@@ -1052,12 +1059,12 @@ export const MediaGenStudio: React.FC<Props> = ({
                         />
                       )}
                       <div className="absolute top-2 left-2 flex items-center gap-1.5">
-                        <span className="rounded bg-slate-900/85 px-2 py-0.5 text-[10px] font-semibold text-white">
+                        <span className="rounded bg-slate-900/85 px-2 py-0.5 text-xs font-semibold text-white">
                           {item.mediaType === 'video' ? 'VIDEO' : 'IMAGE'} •{' '}
                           {item.aspectRatio}
                         </span>
                         {isPending && (
-                          <span className="rounded bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-slate-950">
+                          <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-semibold text-slate-950">
                             รอตรวจสอบ
                           </span>
                         )}
@@ -1065,7 +1072,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                     </div>
 
                     <div className="p-3.5 space-y-1">
-                      <div className="text-[11px] text-slate-400">
+                      <div className="text-xs text-slate-400">
                         {item.engine} • {formatThaiDate(item.createdAt)}
                       </div>
                       <div className="text-xs font-semibold text-slate-900 line-clamp-2">
@@ -1104,9 +1111,9 @@ export const MediaGenStudio: React.FC<Props> = ({
                             type="button"
                             disabled={writingNewsForAssetId === item.id}
                             onClick={() => handleAiWriteNewsWithAsset(item)}
-                            className="inline-flex items-center justify-center gap-1 rounded bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center justify-center gap-1 rounded bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                           >
-                            <PenLine className="w-3 h-3 text-amber-400" />
+                            <PenLine className="w-3 h-3 text-slate-500" />
                             {writingNewsForAssetId === item.id
                               ? 'กำลังร่าง...'
                               : 'AI ร่างบทความ'}
@@ -1115,14 +1122,14 @@ export const MediaGenStudio: React.FC<Props> = ({
                           <button
                             type="button"
                             onClick={() => handleSendAssetToPostEditor(item)}
-                            className="inline-flex items-center justify-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                            className="inline-flex items-center justify-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                           >
                             <FilePlus2 className="w-3 h-3" />
                             แนบลงเนื้อหา
                           </button>
                         </div>
 
-                        <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[11px]">
+                        <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-xs">
                           <div className="flex items-center gap-2">
                             {isPending && (
                               <button

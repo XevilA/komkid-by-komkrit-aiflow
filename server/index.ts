@@ -15,6 +15,18 @@ import {
   MAX_BATCH_ITEMS,
 } from './batchRunner.ts';
 import { createWorkflowRecord } from './workflowStore.ts';
+import { deletePostCascade, deletePostRows } from './postsRepo.ts';
+import { registerWorkspaceRoutes } from './workspaceRoutes.ts';
+import { createLimiter } from './limits.ts';
+import { buildArticleShell, buildNotFoundShell } from './articleShell.ts';
+import {
+  validateSlug,
+  uniqueSlug,
+  isSlugTaken,
+  setPostSlug,
+  backfillPostSlugs,
+  findPostIdBySlug,
+} from './slug.ts';
 import { getHealthSnapshot, resetHealth } from './aiRouter.ts';
 import {
   configuredProviderSet,
@@ -43,6 +55,7 @@ import {
 import { dispatchSingleChannelReal } from './publishEngine.ts';
 import {
   verifyCredentials,
+  isAdminPasswordConfigured,
   createAdminToken,
   verifyAdminToken,
   extractBearerToken,
@@ -203,7 +216,14 @@ function syncSettingsFromRequestVault(
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '50mb' }));
+// Behind exactly one reverse proxy (Traefik / Vercel). `req.ip` then comes from the proxy, not from
+// a header the visitor could forge, which is what the login limiter relies on.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
+
+// Anonymous visitors may only send small JSON bodies; large imports are for signed-in admins.
+const smallJson = express.json({ limit: '256kb' });
+const largeJson = express.json({ limit: '50mb' });
+app.use((req, res, next) => (isRequestAdmin(req) ? largeJson(req, res, next) : smallJson(req, res, next)));
 
 // Global Security Headers & Error Secret-Redaction Shield
 app.use((_req, res, next) => {
@@ -211,6 +231,13 @@ app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  // Non-breaking CSP baseline: no plugins, no <base> hijack, only same-origin framing/forms.
+  res.setHeader('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'");
+  if (String(_req.headers['x-forwarded-proto'] || _req.protocol) === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
 
   const rawJson = res.json.bind(res);
   res.json = ((body: any) => {
@@ -290,6 +317,7 @@ app.use('/api', (req, res, next) => {
   if (m === 'GET' && p === '/health') return next();
   if (p === '/auth/login' || p === '/auth/me') return next();
   if (m === 'GET' && (p === '/posts' || /^\/posts\/\d+$/.test(p))) return next();
+  if (m === 'GET' && /^\/posts\/by-slug\/[^/]+$/.test(p)) return next();
   if (m === 'POST' && /^\/posts\/\d+\/comments$/.test(p)) return next();
   if (m === 'GET' && p === '/pillars') return next();
   if (m === 'GET' && (p === '/site-config' || p === '/projects')) return next();
@@ -316,6 +344,13 @@ app.post('/api/auth/login', (req, res) => {
     return;
   }
 
+  if (!isAdminPasswordConfigured()) {
+    res.status(503).json({
+      error:
+        'ยังไม่ได้ตั้งค่ารหัสผ่านผู้ดูแล กรุณากำหนด ADMIN_PASSWORD (และ ADMIN_USERNAME) ใน Environment Variables ของโฮสต์ แล้ว deploy ใหม่',
+    });
+    return;
+  }
   const { username = '', password = '' } = req.body || {};
   if (!verifyCredentials(String(username), String(password))) {
     recordLoginFailure(ip);
@@ -420,6 +455,7 @@ function mapPostRow(r: any) {
   }
   return {
     id: r.id,
+    slug: r.slug || '',
     title: r.title,
     subtitle: r.subtitle || '',
     excerpt: r.excerpt,
@@ -571,6 +607,7 @@ app.get('/api/stats', (_req, res) => {
 
 // --- Posts CRUD ---
 app.get('/api/posts', (req, res) => {
+  backfillPostSlugs(db);
   const { category, type, status, q } = req.query;
   const conditions: string[] = [];
   const params: any[] = [];
@@ -608,6 +645,52 @@ app.get('/api/posts', (req, res) => {
   `;
   const rows = db.prepare(sql).all(...params);
   res.json(rows.map(mapPostRow));
+});
+
+const POST_STATUSES = ['published', 'draft', 'archived'];
+
+app.get('/api/posts/by-slug/:slug', (req, res) => {
+  backfillPostSlugs(db);
+  let slug = '';
+  try {
+    slug = decodeURIComponent(String(req.params.slug || '')).normalize('NFC');
+  } catch {
+    res.status(400).json({ error: 'slug ไม่ถูกต้อง' });
+    return;
+  }
+  // numeric ids are accepted too (short links) and resolve to the canonical slug
+  const found = /^\d+$/.test(slug)
+    ? { postId: Number(slug), canonical: false }
+    : findPostIdBySlug(db, slug);
+  const row = found
+    ? (db
+        .prepare(
+          `SELECT p.*, (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments_count
+           FROM posts p WHERE p.id = ?`
+        )
+        .get(found.postId) as any)
+    : null;
+  if (!row || (!isRequestAdmin(req) && row.status !== 'published')) {
+    res.status(404).json({ error: 'ไม่พบบทความที่ต้องการ' });
+    return;
+  }
+  if (req.query.incrementView === '1') {
+    db.prepare('UPDATE posts SET views = views + 1 WHERE id = ?').run(row.id);
+    row.views = Number(row.views || 0) + 1;
+  }
+  const comments = db
+    .prepare('SELECT * FROM comments WHERE post_id = ? ORDER BY created_at DESC, id DESC')
+    .all(row.id)
+    .map((c: any) => ({
+      id: c.id,
+      postId: c.post_id,
+      authorName: c.author_name,
+      authorRole: c.author_role,
+      message: c.message,
+      rating: c.rating,
+      createdAt: c.created_at,
+    }));
+  res.json({ ...mapPostRow(row), canonical: row.slug === slug, comments });
 });
 
 app.get('/api/posts/:id', (req, res) => {
@@ -656,11 +739,28 @@ app.post('/api/posts', (req, res) => {
     author = 'คมกฤช (Komkrit)',
     status = 'published',
     isFeatured = false,
+    slug: slugInput = '',
   } = req.body;
 
   if (!title || !String(title).trim()) {
     res.status(400).json({ error: 'กรุณาระบุหัวข้อบทความ/โพสต์' });
     return;
+  }
+  if (!POST_STATUSES.includes(String(status))) {
+    res.status(400).json({ error: 'สถานะบทความไม่ถูกต้อง' });
+    return;
+  }
+  const wantedSlug = String(slugInput || '').trim().normalize('NFC').toLowerCase();
+  if (wantedSlug) {
+    const slugErr = validateSlug(wantedSlug);
+    if (slugErr) {
+      res.status(400).json({ error: slugErr });
+      return;
+    }
+    if (isSlugTaken(db, wantedSlug)) {
+      res.status(409).json({ error: `slug "${wantedSlug}" ถูกใช้แล้ว กรุณาใช้ชื่ออื่น` });
+      return;
+    }
   }
 
   if (isFeatured) {
@@ -703,9 +803,15 @@ app.post('/api/posts', (req, res) => {
       now
     );
 
+  const newPostId = Number(result.lastInsertRowid);
+  setPostSlug(
+    db,
+    newPostId,
+    wantedSlug || uniqueSlug(String(title), (c) => isSlugTaken(db, c, newPostId))
+  );
   const created = db
     .prepare(`SELECT p.*, 0 AS comments_count FROM posts p WHERE p.id = ?`)
-    .get(Number(result.lastInsertRowid));
+    .get(newPostId);
   res.status(201).json(mapPostRow(created));
 });
 
@@ -732,7 +838,32 @@ app.put('/api/posts/:id', (req, res) => {
     status = existing.status,
     isFeatured,
     views,
+    slug: slugInput,
   } = req.body;
+
+  if (!POST_STATUSES.includes(String(status))) {
+    res.status(400).json({ error: 'สถานะบทความไม่ถูกต้อง' });
+    return;
+  }
+  if (!String(title).trim()) {
+    res.status(400).json({ error: 'กรุณาระบุหัวข้อบทความ/โพสต์' });
+    return;
+  }
+  let nextSlug = '';
+  if (typeof slugInput === 'string' && slugInput.trim()) {
+    nextSlug = slugInput.trim().normalize('NFC').toLowerCase();
+    if (nextSlug !== existing.slug) {
+      const slugErr = validateSlug(nextSlug);
+      if (slugErr) {
+        res.status(400).json({ error: slugErr });
+        return;
+      }
+      if (isSlugTaken(db, nextSlug, id)) {
+        res.status(409).json({ error: `slug "${nextSlug}" ถูกใช้แล้ว กรุณาใช้ชื่ออื่น` });
+        return;
+      }
+    }
+  }
 
   const nextFeatured =
     typeof isFeatured === 'boolean' ? (isFeatured ? 1 : 0) : existing.is_featured;
@@ -773,6 +904,9 @@ app.put('/api/posts/:id', (req, res) => {
     id
   );
 
+  if (nextSlug && nextSlug !== existing.slug) {
+    setPostSlug(db, id, nextSlug);
+  }
   const updated = db
     .prepare(
       `SELECT p.*, (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments_count
@@ -848,12 +982,7 @@ app.post('/api/posts/bulk', (req, res) => {
         stmt.run(String(category), now, pid);
       }
     } else if (action === 'delete') {
-      const delComments = db.prepare('DELETE FROM comments WHERE post_id = ?');
-      const delPost = db.prepare('DELETE FROM posts WHERE id = ?');
-      for (const pid of cleanIds) {
-        delComments.run(pid);
-        delPost.run(pid);
-      }
+      for (const pid of cleanIds) deletePostRows(pid);
     } else {
       db.exec('ROLLBACK');
       res.status(400).json({ error: 'คำสั่งจัดการหลายรายการ (bulk action) ไม่ถูกต้อง' });
@@ -873,9 +1002,16 @@ app.post('/api/posts/bulk', (req, res) => {
 
 app.delete('/api/posts/:id', (req, res) => {
   const id = Number(req.params.id);
-  db.prepare('DELETE FROM comments WHERE post_id = ?').run(id);
-  db.prepare('DELETE FROM posts WHERE id = ?').run(id);
-  res.json({ ok: true });
+  try {
+    const out = deletePostCascade(id);
+    if (!out) {
+      res.status(404).json({ error: 'ไม่พบบทความที่ต้องการลบ (อาจถูกลบไปแล้ว)' });
+      return;
+    }
+    res.json({ ok: true, deletedId: id, title: out.title, removedComments: out.removedComments });
+  } catch {
+    res.status(500).json({ error: 'ลบบทความไม่สำเร็จ ข้อมูลยังคงอยู่ครบ กรุณาลองใหม่' });
+  }
 });
 
 // --- Comments & Audience Feedback ---
@@ -901,40 +1037,50 @@ app.get('/api/comments', (_req, res) => {
   res.json(rows);
 });
 
-app.post('/api/posts/:id/comments', (req, res) => {
+const publicWriteLimiter = createLimiter({
+  max: 12,
+  windowMs: 10 * 60 * 1000,
+  message: 'ส่งข้อมูลถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
+});
+const COMMENT_ROLES = ['ครู / บุคลากรทางการศึกษา', 'นักเรียน / นักศึกษา', 'นักเรียน', 'ผู้ปกครอง', 'ผู้สนใจทั่วไป'];
+
+app.post('/api/posts/:id/comments', publicWriteLimiter, (req, res) => {
   const postId = Number(req.params.id);
-  const {
-    authorName = 'ผู้ติดตามคมคิด',
-    authorRole = 'ผู้สนใจทั่วไป',
-    message = '',
-    rating = 5,
-  } = req.body;
-  if (!String(message).trim()) {
+  const post = db.prepare('SELECT id, status FROM posts WHERE id = ?').get(postId) as
+    | { id: number; status: string }
+    | undefined;
+  if (!post || (post.status !== 'published' && !isRequestAdmin(req))) {
+    res.status(404).json({ error: 'ไม่พบบทความที่ต้องการแสดงความคิดเห็น' });
+    return;
+  }
+  const { authorName = '', authorRole = '', message = '', rating = 5 } = req.body || {};
+  const name = String(authorName).replace(/\s+/g, ' ').trim().slice(0, 80) || 'ผู้อ่านทั่วไป';
+  const role = COMMENT_ROLES.includes(String(authorRole)) ? String(authorRole) : 'ผู้สนใจทั่วไป';
+  const text = String(message).trim();
+  if (!text) {
     res.status(400).json({ error: 'กรุณาพิมพ์ความคิดเห็น' });
     return;
   }
+  if (text.length > 1500) {
+    res.status(400).json({ error: 'ความคิดเห็นยาวเกิน 1,500 ตัวอักษร' });
+    return;
+  }
+  const stars = Math.min(5, Math.max(1, Math.floor(Number(rating)) || 5));
   const now = new Date().toISOString();
   const r = db
     .prepare(
       `INSERT INTO comments (post_id, author_name, author_role, message, rating, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(
-      postId,
-      String(authorName).trim() || 'ผู้ติดตามคมคิด',
-      String(authorRole),
-      String(message).trim(),
-      Math.min(5, Math.max(1, Number(rating) || 5)),
-      now
-    );
+    .run(postId, name, role, text, stars, now);
 
   res.status(201).json({
     id: Number(r.lastInsertRowid),
     postId,
-    authorName: String(authorName).trim() || 'ผู้ติดตามคมคิด',
-    authorRole,
-    message: String(message).trim(),
-    rating: Number(rating) || 5,
+    authorName: name,
+    authorRole: role,
+    message: text,
+    rating: stars,
     createdAt: now,
   });
 });
@@ -2196,7 +2342,7 @@ app.get('/api/subscribers', (_req, res) => {
   res.json(rows);
 });
 
-app.post('/api/subscribers', (req, res) => {
+app.post('/api/subscribers', publicWriteLimiter, (req, res) => {
   const { email, name = '', role = 'ผู้สนใจทั่วไป' } = req.body;
   if (!email || !String(email).includes('@')) {
     res.status(400).json({ error: 'กรุณากรอกอีเมลให้ถูกต้อง' });
@@ -2263,7 +2409,7 @@ app.get('/api/contacts', (_req, res) => {
   res.json(rows);
 });
 
-app.post('/api/contacts', (req, res) => {
+app.post('/api/contacts', publicWriteLimiter, (req, res) => {
   const { name, email, subject = 'ติดต่อทั่วไป', message } = req.body;
   if (!name || !email || !message) {
     res.status(400).json({ error: 'กรุณากรอกข้อมูลชื่อ อีเมล และข้อความให้ครบถ้วน' });
@@ -2898,7 +3044,7 @@ app.get('/api/surveys', (_req, res) => {
   res.json(rows);
 });
 
-app.post('/api/surveys', (req, res) => {
+app.post('/api/surveys', publicWriteLimiter, (req, res) => {
   const {
     respondentName = 'ผู้ร่วมตอบแบบสำรวจ',
     respondentRole = 'ครู / บุคลากรทางการศึกษา',
@@ -3116,6 +3262,8 @@ app.post('/api/admin/import-json', (req, res) => {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+registerWorkspaceRoutes(app);
 
 // ============================================================================
 // AI ROUTING HEALTH (automatic failover) & BATCH RUNS (economy mode)
@@ -3687,6 +3835,92 @@ function xmlEscape(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
+// --- Article page shell: real <head> (title/OG/canonical/JSON-LD), 404 and 301 for old slugs ---
+let indexTemplateCache = '';
+async function loadIndexTemplate(req: express.Request): Promise<string> {
+  if (indexTemplateCache) return indexTemplateCache;
+  const local = path.resolve(process.cwd(), 'dist', 'index.html');
+  try {
+    if (fs.existsSync(local)) {
+      indexTemplateCache = fs.readFileSync(local, 'utf8');
+      return indexTemplateCache;
+    }
+  } catch {
+    /* try the network fallback */
+  }
+  try {
+    // Serverless fallback: the static build is served from the same origin.
+    const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0];
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+    if (host) {
+      const r = await fetch(`${proto}://${host}/index.html`);
+      if (r.ok) {
+        const html = await r.text();
+        if (/<div id="root">/.test(html)) {
+          indexTemplateCache = html;
+          return html;
+        }
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return '';
+}
+
+app.get('/articles/:slug', async (req, res, next) => {
+  const template = await loadIndexTemplate(req);
+  if (!template) return next(); // dev server (Vite) renders the page itself
+  const cfg = readSiteConfigRecord();
+  const siteName = `${cfg.brandTitle} ${cfg.brandSub}`.trim();
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+  let slug = '';
+  try {
+    slug = decodeURIComponent(String(req.params.slug || '')).normalize('NFC');
+  } catch {
+    res.status(404).send(buildNotFoundShell(template, siteName));
+    return;
+  }
+  backfillPostSlugs(db);
+  const found = /^\d+$/.test(slug)
+    ? { postId: Number(slug), canonical: false }
+    : findPostIdBySlug(db, slug);
+  const row = found ? (db.prepare('SELECT * FROM posts WHERE id = ?').get(found.postId) as any) : null;
+  if (!row || row.status !== 'published') {
+    res.status(404).send(buildNotFoundShell(template, siteName));
+    return;
+  }
+  if (!found!.canonical) {
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(301, `/articles/${encodeURIComponent(row.slug)}${qs}`);
+    return;
+  }
+  const post = mapPostRow(row);
+  const base = `https://${cfg.primaryDomain}`;
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
+  res.status(200).send(
+    buildArticleShell(
+      template,
+      {
+        title: post.title,
+        subtitle: post.subtitle,
+        excerpt: post.excerpt,
+        content: post.content,
+        coverImage: post.coverImage,
+        slug: post.slug,
+        author: post.author,
+        category: post.category,
+        tags: post.tags,
+        createdAt: post.createdAt,
+        updatedAt: post.updatedAt,
+      },
+      base,
+      siteName
+    )
+  );
+});
+
 app.get('/robots.txt', (_req, res) => {
   const cfg = readSiteConfigRecord();
   const base = `https://${cfg.primaryDomain}`;
@@ -3698,14 +3932,15 @@ app.get('/robots.txt', (_req, res) => {
 app.get('/sitemap.xml', (_req, res) => {
   const cfg = readSiteConfigRecord();
   const base = `https://${cfg.primaryDomain}`;
+  backfillPostSlugs(db);
   const published = db
-    .prepare("SELECT id, updated_at FROM posts WHERE status = 'published' ORDER BY created_at DESC")
-    .all() as { id: number; updated_at: string }[];
+    .prepare("SELECT id, slug, updated_at FROM posts WHERE status = 'published' ORDER BY created_at DESC")
+    .all() as { id: number; slug: string; updated_at: string }[];
   const urls = [
     `<url><loc>${xmlEscape(base)}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
     ...published.map(
       (p) =>
-        `<url><loc>${xmlEscape(`${base}/?post=${p.id}`)}</loc><lastmod>${(p.updated_at || new Date().toISOString()).slice(0, 10)}</lastmod><priority>0.8</priority></url>`
+        `<url><loc>${xmlEscape(`${base}/articles/${encodeURIComponent(p.slug)}`)}</loc><lastmod>${(p.updated_at || new Date().toISOString()).slice(0, 10)}</lastmod><priority>0.8</priority></url>`
     ),
   ].join('\n');
   res
@@ -3738,7 +3973,7 @@ async function startServer() {
 
   app.listen(port, '0.0.0.0', () => {
     console.log(
-      `\n🚀 คมคิด by KOMKRIT WebApp & Real Multi-LLM + Google Veo/Flow Studio running at http://0.0.0.0:${port}\n`
+      `\nคมคิด by KOMKRIT WebApp & Real Multi-LLM + Google Veo/Flow Studio running at http://0.0.0.0:${port}\n`
     );
   });
 }
