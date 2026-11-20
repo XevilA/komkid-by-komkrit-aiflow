@@ -30,6 +30,10 @@ import {
   isRequestAdmin,
   requireAdminAuth,
   updateAdminCredentials,
+  getClientIp,
+  checkLoginRateLimit,
+  recordLoginFailure,
+  clearLoginFailures,
 } from './auth.ts';
 import {
   isCloudSyncEnabled,
@@ -46,6 +50,7 @@ import {
 } from './modelRegistry.ts';
 import {
   SECRET_SETTING_KEYS,
+  NEVER_EXPORT_SETTING_KEYS,
   decryptSecretValue,
   encryptSecretValue,
   isEncryptedSecret,
@@ -85,7 +90,7 @@ function exportEncryptedSettingsMap(): Record<string, string> {
   }[];
   const map: Record<string, string> = {};
   for (const r of rows) {
-    if (!r.key || r.key === 'dynamic_model_discovery_v1') continue;
+    if (!r.key || NEVER_EXPORT_SETTING_KEYS.has(r.key)) continue;
     const raw = String(r.value ?? '').trim();
     if (SECRET_SETTING_KEYS.has(r.key)) {
       map[r.key] = raw ? encryptSecretValue(raw, r.key) : '';
@@ -119,7 +124,8 @@ function writeSealedVaultCookie(
   res: express.Response,
   sealedToken: string
 ) {
-  if (!sealedToken) return;
+  // Only needed on stateless serverless runtimes; persistent Docker/VPS uses local encrypted SQLite
+  if (!IS_SERVERLESS || !sealedToken) return;
   const isHttps =
     req.secure ||
     req.headers['x-forwarded-proto'] === 'https' ||
@@ -128,7 +134,7 @@ function writeSealedVaultCookie(
     'Set-Cookie',
     `${VAULT_COOKIE_NAME}=${encodeURIComponent(
       sealedToken
-    )}; Path=/api; Max-Age=31536000; HttpOnly; SameSite=Lax${
+    )}; Path=/api; Max-Age=31536000; HttpOnly; SameSite=Strict${
       isHttps ? '; Secure' : ''
     }`
   );
@@ -136,42 +142,28 @@ function writeSealedVaultCookie(
 
 function syncSettingsFromRequestVault(
   req: express.Request,
-  res: express.Response
+  _res: express.Response
 ) {
-  const headerVal =
-    typeof req.headers['x-komkrit-sealed-vault'] === 'string'
-      ? req.headers['x-komkrit-sealed-vault'].trim()
-      : '';
+  if (!IS_SERVERLESS) return;
   const cookieVal = parseCookieToken(req.headers.cookie, VAULT_COOKIE_NAME);
-
-  const candidates = [
-    { source: 'header', raw: headerVal, parsed: unsealSettingsVaultWithMeta(headerVal) },
-    { source: 'cookie', raw: cookieVal, parsed: unsealSettingsVaultWithMeta(cookieVal) },
-  ].filter((c) => c.parsed !== null) as {
-    source: 'header' | 'cookie';
-    raw: string;
-    parsed: NonNullable<ReturnType<typeof unsealSettingsVaultWithMeta>>;
-  }[];
-
-  if (candidates.length === 0) return;
-  candidates.sort((a, b) => b.parsed.updatedAt - a.parsed.updatedAt);
-  const best = candidates[0];
+  const parsed = unsealSettingsVaultWithMeta(cookieVal);
+  if (!parsed) return;
 
   const localUpdatedAt = getLocalVaultUpdatedAt();
-  const bestHasAnySecret = Object.entries(best.parsed.rows).some(
+  const bestHasAnySecret = Object.entries(parsed.rows).some(
     ([k, v]) => SECRET_SETTING_KEYS.has(k) && Boolean(String(v || '').trim())
   );
 
-  // Hydrate or upgrade this serverless container whenever incoming vault is newer or local container has no secrets yet
+  // Hydrate or upgrade this serverless container whenever incoming HttpOnly vault cookie is newer
   if (
-    best.parsed.updatedAt > localUpdatedAt ||
+    parsed.updatedAt > localUpdatedAt ||
     (localUpdatedAt === 0 && !hasAnyStoredApiSecret() && bestHasAnySecret)
   ) {
     const setStmt = db.prepare(
       'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
     );
-    for (const [k, v] of Object.entries(best.parsed.rows)) {
-      if (!k || typeof v !== 'string') continue;
+    for (const [k, v] of Object.entries(parsed.rows)) {
+      if (!k || NEVER_EXPORT_SETTING_KEYS.has(k) || typeof v !== 'string') continue;
       const trimmed = v.trim();
       if (SECRET_SETTING_KEYS.has(k)) {
         const safeVal = trimmed
@@ -184,25 +176,46 @@ function syncSettingsFromRequestVault(
         setStmt.run(k, trimmed);
       }
     }
-    const effectiveTs = best.parsed.updatedAt || Date.now();
+    const effectiveTs = parsed.updatedAt || Date.now();
     setStmt.run(VAULT_UPDATED_AT_KEY, String(effectiveTs));
     invalidateModelCatalogCache();
-  }
-
-  // Ensure HttpOnly cookie stays synced if request arrived via header only or had a newer header token
-  if (!cookieVal || (best.source === 'header' && cookieVal !== best.raw)) {
-    writeSealedVaultCookie(req, res, best.raw);
   }
 }
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json({ limit: '50mb' }));
+
+// Global Security Headers & Error Secret-Redaction Shield
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+
+  const rawJson = res.json.bind(res);
+  res.json = ((body: any) => {
+    if (res.statusCode >= 400 && body && typeof body === 'object' && typeof body.error === 'string') {
+      body = { ...body, error: redactSecrets(body.error) };
+    }
+    return rawJson(body);
+  }) as any;
+  next();
+});
 
 const UPLOADS_DIR = UPLOADS_ROOT;
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
-app.use('/uploads', express.static(UPLOADS_DIR));
+app.use(
+  '/uploads',
+  (_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; media-src 'self'; img-src 'self'; sandbox");
+    next();
+  },
+  express.static(UPLOADS_DIR)
+);
 
 const handleHealthCheck = (_req: express.Request, res: express.Response) => {
   res.json({
@@ -235,7 +248,7 @@ app.use('/api', async (req, res, next) => {
       res.json = ((body: any) => {
         if (res.statusCode < 400) {
           persistDatabaseToCloud()
-            .catch((err) => console.error('Cloud DB persist error:', err))
+            .catch((err) => console.error('Cloud DB persist error:', redactSecrets(String(err))))
             .finally(() => origJson(body));
           return res;
         }
@@ -244,7 +257,7 @@ app.use('/api', async (req, res, next) => {
     }
     next();
   } catch (err) {
-    console.error('Cloud DB sync error:', err);
+    console.error('Cloud DB sync error:', redactSecrets(String(err)));
     next();
   }
 });
@@ -273,11 +286,23 @@ app.use('/api', (req, res, next) => {
 
 // --- Admin Authentication Endpoints ---
 app.post('/api/auth/login', (req, res) => {
+  const ip = getClientIp(req);
+  const rate = checkLoginRateLimit(ip);
+  if (!rate.allowed) {
+    res.setHeader('Retry-After', String(rate.retryAfterSec));
+    res.status(429).json({
+      error: `พยายามเข้าสู่ระบบหลายครั้งเกินไป กรุณารอ ${Math.ceil(rate.retryAfterSec / 60)} นาทีแล้วลองใหม่`,
+    });
+    return;
+  }
+
   const { username = '', password = '' } = req.body || {};
   if (!verifyCredentials(String(username), String(password))) {
+    recordLoginFailure(ip);
     res.status(401).json({ error: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
     return;
   }
+  clearLoginFailures(ip);
   const { token, expiresAt } = createAdminToken(String(username).trim());
   res.json({ ok: true, token, username: String(username).trim(), expiresAt });
 });
@@ -309,14 +334,58 @@ app.put('/api/auth/password', (req, res) => {
   res.json({ ok: true, token, expiresAt });
 });
 
+const ALLOWED_UPLOAD_EXTS = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.mp4',
+  '.webm',
+  '.mov',
+  '.mp3',
+  '.wav',
+  '.m4a',
+  '.ogg',
+]);
+
+const ALLOWED_UPLOAD_MIMES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/mp4',
+  'audio/ogg',
+]);
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '.jpg') || '.jpg';
-    cb(null, `komkrit-${Date.now()}-${Math.round(Math.random() * 1e5)}${ext}`);
+    const rawExt = path.extname(file.originalname || '.jpg').toLowerCase();
+    const safeExt = ALLOWED_UPLOAD_EXTS.has(rawExt) ? rawExt : '.bin';
+    cb(null, `komkrit-${Date.now()}-${Math.round(Math.random() * 1e5)}${safeExt}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    if (ALLOWED_UPLOAD_EXTS.has(ext) && ALLOWED_UPLOAD_MIMES.has(mime)) {
+      cb(null, true);
+    } else {
+      cb(new Error('ชนิดไฟล์ไม่ได้รับอนุญาต (รองรับเฉพาะภาพ JPG/PNG/WebP/GIF, วิดีโอ MP4/WebM และเสียง MP3/WAV เท่านั้น)'));
+    }
+  },
+});
 
 function maskSecret(val?: string): string {
   return maskSecretStrict(val);
@@ -2319,18 +2388,15 @@ app.get('/api/settings/ai', (req, res) => {
   const localUpdatedAt = getLocalVaultUpdatedAt();
   const hasAnyKey = hasAnyStoredApiSecret();
   const effectiveTs = localUpdatedAt || (hasAnyKey ? Date.now() : 0);
-  const sealedVault =
-    effectiveTs > 0
-      ? sealSettingsVaultToken(exportEncryptedSettingsMap(), effectiveTs)
-      : undefined;
-  if (sealedVault) {
+  if (IS_SERVERLESS && effectiveTs > 0) {
+    const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), effectiveTs);
     writeSealedVaultCookie(req, res, sealedVault);
   }
   res.json({
     provider: cfg.defaultProvider,
     encryptedAtRest: true,
     encryptionStandard: 'AES-256-GCM',
-    ...(sealedVault ? { sealedVault, vaultUpdatedAt: effectiveTs } : {}),
+    vaultUpdatedAt: effectiveTs,
     // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
@@ -2431,9 +2497,11 @@ app.put('/api/settings/ai', (req, res) => {
   set.run(VAULT_UPDATED_AT_KEY, String(updatedAt));
 
   invalidateModelCatalogCache();
-  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), updatedAt);
-  writeSealedVaultCookie(req, res, sealedVault);
-  res.json({ ok: true, encryptedAtRest: true, vaultUpdatedAt: updatedAt, sealedVault });
+  if (IS_SERVERLESS) {
+    const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), updatedAt);
+    writeSealedVaultCookie(req, res, sealedVault);
+  }
+  res.json({ ok: true, encryptedAtRest: true, vaultUpdatedAt: updatedAt });
 });
 
 app.post('/api/settings/test-provider', async (req, res) => {

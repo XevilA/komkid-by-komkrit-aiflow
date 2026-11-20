@@ -207,7 +207,7 @@ export const AdminLayout: React.FC<Props> = ({
     },
     {
       id: 'ai-command',
-      label: 'เวิร์กโฟลว์การผลิต (Agent 01–08)',
+      label: 'เวิร์กโฟลว์ Agent (01–08)',
       shortLabel: 'เวิร์กโฟลว์',
       sub: 'กระบวนการวิจัย เขียน และตรวจสอบคุณภาพ',
       icon: <Workflow className="w-4 h-4" />,
@@ -588,12 +588,12 @@ export const AdminLayout: React.FC<Props> = ({
             <>
               {/* Formal Executive Summary Bar */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                <div className="rounded-lg bg-white border border-slate-200 p-4 shadow-2xs">
-                  <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                    <span>เนื้อหาทั้งหมดในระบบ</span>
-                    <FileText className="w-4 h-4 text-slate-400" />
+                <div className="rounded-lg bg-white border border-slate-200 p-3.5 sm:p-4 shadow-2xs">
+                  <div className="flex items-center justify-between gap-1 text-xs font-medium text-slate-500">
+                    <span className="truncate">เนื้อหาทั้งหมดในระบบ</span>
+                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
                   </div>
-                  <div className="mt-2 flex items-baseline justify-between gap-2">
+                  <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-0.5 sm:gap-2">
                     <span className="text-xl sm:text-2xl font-bold text-slate-900">
                       {stats?.postsTotal ?? posts.length}
                     </span>
@@ -603,12 +603,12 @@ export const AdminLayout: React.FC<Props> = ({
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-white border border-slate-200 p-4 shadow-2xs">
-                  <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                    <span>จำนวนการเข้าชมสะสม</span>
-                    <Eye className="w-4 h-4 text-slate-400" />
+                <div className="rounded-lg bg-white border border-slate-200 p-3.5 sm:p-4 shadow-2xs">
+                  <div className="flex items-center justify-between gap-1 text-xs font-medium text-slate-500">
+                    <span className="truncate">จำนวนการเข้าชมสะสม</span>
+                    <Eye className="w-4 h-4 text-slate-400 shrink-0" />
                   </div>
-                  <div className="mt-2 flex items-baseline justify-between gap-2">
+                  <div className="mt-2 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-0.5 sm:gap-2">
                     <span className="text-xl sm:text-2xl font-bold text-slate-900">
                       {formatViews(stats?.totalViews ?? 0)}
                     </span>

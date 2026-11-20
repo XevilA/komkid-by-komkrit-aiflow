@@ -1278,105 +1278,13 @@ export const AiChatStudio: React.FC<Props> = ({
           isDark
             ? 'bg-[#242429] border border-white/12 focus-within:border-white/25 shadow-2xl shadow-black/40'
             : 'bg-white border border-zinc-300 focus-within:border-zinc-500 shadow-md shadow-zinc-200/60'
-        } ${isCenteredHero ? 'rounded-[30px] px-3.5 py-2.5' : 'rounded-[28px] px-3.5 py-2'}`}
+        } ${isCenteredHero ? 'rounded-3xl sm:rounded-[30px] px-3.5 py-2.5' : 'rounded-3xl sm:rounded-[28px] px-3.5 py-2'}`}
       >
-        <div className="flex items-end gap-2">
-          {/* Left '+' Quick-Tools Menu Button */}
-          <div ref={plusMenuRef} className="relative shrink-0 pb-0.5">
-            <button
-              type="button"
-              onClick={() => setPlusMenuOpen((v) => !v)}
-              title="คำสั่งทีม Agent: ทำครบชุด Content + รูป + VDO"
-              className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
-                isDark
-                  ? 'text-zinc-300 hover:bg-white/10 hover:text-white'
-                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
-              }`}
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-
-            {plusMenuOpen && (
-              <div
-                className={`absolute left-0 bottom-12 z-40 w-80 rounded-2xl p-2 shadow-2xl border ${
-                  isDark
-                    ? 'bg-[#1f1f24] border-white/15 text-zinc-100'
-                    : 'bg-white border-zinc-200 text-zinc-800'
-                }`}
-              >
-                <div
-                  className={`px-3 py-1.5 text-[11px] font-extrabold ${
-                    isDark ? 'text-zinc-400' : 'text-zinc-500'
-                  }`}
-                >
-                  สั่งทีม AI Agent ทำงานร่วมกัน
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleRunUnifiedAgentTeam()}
-                  className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-extrabold bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer mb-1"
-                >
-                  <Layers className="w-4 h-4 text-amber-300 shrink-0" />
-                  <span>ทีม Agent ทำครบชุด (Content + รูป + VDO)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDraftNewsFromChat('article')}
-                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                    isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
-                  }`}
-                >
-                  <Newspaper className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span>เขียนข่าว / บทความลงเว็บ</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleEvaluatePrompt('image')}
-                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                    isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
-                  }`}
-                >
-                  <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>ประเมิน & สร้างรูปภาพใส่ Content</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleEvaluatePrompt('video')}
-                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
-                    isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
-                  }`}
-                >
-                  <Film className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span>ประเมิน & สร้างวิดีโอใส่ Content</span>
-                </button>
-                <div
-                  className={`my-1 border-t ${
-                    isDark ? 'border-white/10' : 'border-zinc-100'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPlusMenuOpen(false);
-                    handleNewChat();
-                  }}
-                  className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold transition cursor-pointer ${
-                    isDark
-                      ? 'text-zinc-300 hover:bg-white/10'
-                      : 'text-zinc-600 hover:bg-zinc-100'
-                  }`}
-                >
-                  <SquarePen className="w-4 h-4 shrink-0" />
-                  <span>เริ่มบทสนทนาใหม่</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Auto-expanding Textarea */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-1.5 sm:gap-2">
+          {/* Auto-expanding Textarea (Full width on mobile, center on desktop) */}
           <textarea
             ref={textareaRef}
-            rows={1}
+            rows={2}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -1386,68 +1294,163 @@ export const AiChatStudio: React.FC<Props> = ({
               }
             }}
             placeholder="พิมพ์เรื่องที่ต้องการคุย หรือพิมพ์หัวข้อแล้วกด “ทีม Agent ทำครบชุด” ได้เลย..."
-            className={`flex-1 max-h-44 bg-transparent py-2 px-1 text-[15px] sm:text-base leading-relaxed focus:outline-none resize-none ${
+            className={`order-1 sm:order-2 w-full sm:flex-1 max-h-44 bg-transparent py-1.5 sm:py-2 px-1 text-sm sm:text-base leading-relaxed focus:outline-none resize-none ${
               isDark
                 ? 'text-zinc-100 placeholder:text-zinc-400'
                 : 'text-zinc-900 placeholder:text-zinc-400'
             }`}
           />
 
-          {/* Inline Provider Selector + Circular '↑' Send Button */}
-          <div className="flex items-center gap-1.5 shrink-0 pb-0.5">
-            <div className="relative">
-              <select
-                aria-label="เลือกค่าย AI"
-                value={provider}
-                onChange={(e) => {
-                  setProvider(e.target.value as LlmProviderId);
-                  setSelectedModel('');
-                  setErrorBanner(null);
-                }}
-                className={`appearance-none rounded-full pl-3 pr-7 py-1.5 text-xs sm:text-sm font-bold cursor-pointer focus:outline-none transition ${
+          {/* Mobile bottom toolbar / Desktop split left + right */}
+          <div className="order-2 sm:contents flex items-center justify-between gap-2 pt-1 sm:pt-0 border-t border-white/8 sm:border-0">
+            {/* Left '+' Quick-Tools Menu Button */}
+            <div ref={plusMenuRef} className="relative shrink-0 pb-0.5 sm:order-1">
+              <button
+                type="button"
+                onClick={() => setPlusMenuOpen((v) => !v)}
+                title="คำสั่งทีม Agent: ทำครบชุด Content + รูป + VDO"
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
                   isDark
-                    ? 'bg-transparent text-zinc-300 hover:bg-white/10'
-                    : 'bg-transparent text-zinc-600 hover:bg-zinc-100'
+                    ? 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                    : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                 }`}
               >
-                {PROVIDER_OPTIONS.map((p) => {
-                  const connected = isProviderConnected(p.id);
-                  return (
-                    <option
-                      key={p.id}
-                      value={p.id}
-                      className="bg-zinc-900 text-white"
-                    >
-                      {p.id === 'auto'
-                        ? 'Auto'
-                        : `${p.shortLabel}${connected ? ' ✓' : ''}`}
-                    </option>
-                  );
-                })}
-              </select>
-              <ChevronDown
-                className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${
-                  isDark ? 'text-zinc-400' : 'text-zinc-500'
-                }`}
-              />
+                <Plus className="w-5 h-5" />
+              </button>
+
+              {plusMenuOpen && (
+                <div
+                  className={`absolute left-0 bottom-12 z-40 w-72 sm:w-80 rounded-2xl p-2 shadow-2xl border ${
+                    isDark
+                      ? 'bg-[#1f1f24] border-white/15 text-zinc-100'
+                      : 'bg-white border-zinc-200 text-zinc-800'
+                  }`}
+                >
+                  <div
+                    className={`px-3 py-1.5 text-[11px] font-extrabold ${
+                      isDark ? 'text-zinc-400' : 'text-zinc-500'
+                    }`}
+                  >
+                    สั่งทีม AI Agent ทำงานร่วมกัน
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRunUnifiedAgentTeam()}
+                    className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-extrabold bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer mb-1"
+                  >
+                    <Layers className="w-4 h-4 text-amber-300 shrink-0" />
+                    <span>ทีม Agent ทำครบชุด (Content + รูป + VDO)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDraftNewsFromChat('article')}
+                    className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
+                      isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
+                    }`}
+                  >
+                    <Newspaper className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>เขียนข่าว / บทความลงเว็บ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleEvaluatePrompt('image')}
+                    className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
+                      isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
+                    }`}
+                  >
+                    <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>ประเมิน & สร้างรูปภาพใส่ Content</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleEvaluatePrompt('video')}
+                    className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition cursor-pointer ${
+                      isDark ? 'hover:bg-white/10' : 'hover:bg-zinc-100'
+                    }`}
+                  >
+                    <Film className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>ประเมิน & สร้างวิดีโอใส่ Content</span>
+                  </button>
+                  <div
+                    className={`my-1 border-t ${
+                      isDark ? 'border-white/10' : 'border-zinc-100'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlusMenuOpen(false);
+                      handleNewChat();
+                    }}
+                    className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold transition cursor-pointer ${
+                      isDark
+                        ? 'text-zinc-300 hover:bg-white/10'
+                        : 'text-zinc-600 hover:bg-zinc-100'
+                    }`}
+                  >
+                    <SquarePen className="w-4 h-4 shrink-0" />
+                    <span>เริ่มบทสนทนาใหม่</span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            <button
-              type="submit"
-              disabled={sending || !input.trim()}
-              title="ส่งข้อความแชท (Enter)"
-              className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer shrink-0 ${
-                isDark
-                  ? 'bg-white text-zinc-950 hover:bg-zinc-200 disabled:bg-zinc-700 disabled:text-zinc-500'
-                  : 'bg-zinc-900 text-white hover:bg-zinc-700 disabled:bg-zinc-200 disabled:text-zinc-400'
-              }`}
-            >
-              {sending ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <ArrowUp className="w-5 h-5 stroke-[2.5]" />
-              )}
-            </button>
+            {/* Inline Provider Selector + Circular '↑' Send Button */}
+            <div className="flex items-center gap-1.5 shrink-0 pb-0.5 sm:order-3">
+              <div className="relative">
+                <select
+                  aria-label="เลือกค่าย AI"
+                  value={provider}
+                  onChange={(e) => {
+                    setProvider(e.target.value as LlmProviderId);
+                    setSelectedModel('');
+                    setErrorBanner(null);
+                  }}
+                  className={`appearance-none rounded-full pl-3 pr-7 py-1.5 text-xs sm:text-sm font-bold cursor-pointer focus:outline-none transition ${
+                    isDark
+                      ? 'bg-transparent text-zinc-300 hover:bg-white/10'
+                      : 'bg-transparent text-zinc-600 hover:bg-zinc-100'
+                  }`}
+                >
+                  {PROVIDER_OPTIONS.map((p) => {
+                    const connected = isProviderConnected(p.id);
+                    return (
+                      <option
+                        key={p.id}
+                        value={p.id}
+                        className="bg-zinc-900 text-white"
+                      >
+                        {p.id === 'auto'
+                          ? 'Auto'
+                          : `${p.shortLabel}${connected ? ' ✓' : ''}`}
+                      </option>
+                    );
+                  })}
+                </select>
+                <ChevronDown
+                  className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${
+                    isDark ? 'text-zinc-400' : 'text-zinc-500'
+                  }`}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={sending || !input.trim()}
+                title="ส่งข้อความแชท (Enter)"
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer shrink-0 ${
+                  isDark
+                    ? 'bg-white text-zinc-950 hover:bg-zinc-200 disabled:bg-zinc-700 disabled:text-zinc-500'
+                    : 'bg-zinc-900 text-white hover:bg-zinc-700 disabled:bg-zinc-200 disabled:text-zinc-400'
+                }`}
+              >
+                {sending ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </form>
@@ -1746,18 +1749,18 @@ export const AiChatStudio: React.FC<Props> = ({
               </>
             )}
 
-            <div ref={modelDropdownRef} className="relative">
+            <div ref={modelDropdownRef} className="relative min-w-0 flex-1 sm:flex-initial">
               <button
                 type="button"
                 onClick={() => setModelPopoverOpen((v) => !v)}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm sm:text-base font-extrabold transition cursor-pointer max-w-[220px] sm:max-w-[340px] ${
+                className={`inline-flex items-center gap-1 rounded-xl px-2 sm:px-3 py-1.5 text-xs sm:text-base font-bold transition cursor-pointer max-w-full sm:max-w-[340px] ${
                   isDark
                     ? 'text-zinc-100 hover:bg-white/10'
                     : 'text-zinc-900 hover:bg-zinc-100'
                 }`}
               >
                 <span className="truncate">{topModelDisplayLabel}</span>
-                <ChevronDown className="w-4 h-4 opacity-70 shrink-0" />
+                <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 opacity-70 shrink-0" />
               </button>
 
               {modelPopoverOpen && (
@@ -2029,11 +2032,11 @@ export const AiChatStudio: React.FC<Props> = ({
         {/* BODY: HERO EMPTY STATE vs CONVERSATION + COLLABORATIVE WORKBENCH  */}
         {/* ================================================================= */}
         {isHeroEmpty ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 pb-10 overflow-y-auto">
-            <div className="w-full max-w-3xl space-y-6">
+          <div className="flex-1 flex flex-col items-center justify-start sm:justify-center px-4 sm:px-6 pt-5 sm:pt-8 pb-24 sm:pb-10 overflow-y-auto">
+            <div className="w-full max-w-3xl space-y-5 sm:space-y-6">
               <div className="text-center space-y-1.5">
                 <h2
-                  className={`text-2xl sm:text-3xl font-semibold tracking-tight ${
+                  className={`text-xl sm:text-3xl font-semibold tracking-tight leading-snug ${
                     isDark ? 'text-zinc-100' : 'text-zinc-900'
                   }`}
                 >

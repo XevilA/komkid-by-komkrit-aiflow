@@ -8,10 +8,11 @@
   },
   "description": "คมคิด by KOMKRIT - Responsive CRUD WebApp & Multi-Agent AI Content Creation Ecosystem",
   "scripts": {
-    "dev": "node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts",
+    "dev": "TMPDIR=/tmp node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts",
     "build:api": "esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=api/index.js",
     "build": "vite build && npm run build:api",
-    "start": "NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts"
+    "preview": "TMPDIR=/tmp PORT=4173 NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts",
+    "start": "TMPDIR=/tmp NODE_ENV=production node --no-warnings ./node_modules/tsx/dist/cli.mjs server/index.ts"
   },
   "dependencies": {
     "@google/genai": "^2.29.1",

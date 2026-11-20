@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
 
 const ENC_PREFIX = 'enc:v1:';
@@ -15,23 +17,95 @@ export const SECRET_SETTING_KEYS = new Set<string>([
   'local_api_key',
 ]);
 
+export const NEVER_EXPORT_SETTING_KEYS = new Set<string>([
+  'admin_password',
+  'admin_auth_secret',
+  'dynamic_model_discovery_v1',
+]);
+
 export interface UnsealedVaultPayload {
   updatedAt: number;
   rows: Record<string, string>;
 }
 
+const IS_SERVERLESS_RUNTIME = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+);
+
+let cachedGeneratedMasterKey: string | null = null;
+
+function getPersistentKeyFilePath(): string {
+  const baseDir = IS_SERVERLESS_RUNTIME
+    ? '/tmp/komkrit-data'
+    : process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+  try {
+    if (!fs.existsSync(baseDir)) {
+      fs.mkdirSync(baseDir, { recursive: true });
+    }
+  } catch {
+    // ignore
+  }
+  return path.join(baseDir, '.vault_master.key');
+}
+
+function getOrCreateLocalMasterKey(): string {
+  if (cachedGeneratedMasterKey) return cachedGeneratedMasterKey;
+  const keyFile = getPersistentKeyFilePath();
+  try {
+    if (fs.existsSync(keyFile)) {
+      const existing = fs.readFileSync(keyFile, 'utf8').trim();
+      if (existing.length >= 32) {
+        cachedGeneratedMasterKey = existing;
+        return existing;
+      }
+    }
+    const fresh = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(keyFile, fresh, { encoding: 'utf8', mode: 0o600 });
+    try {
+      fs.chmodSync(keyFile, 0o600);
+    } catch {
+      // exFAT / non-POSIX filesystems ignore chmod
+    }
+    cachedGeneratedMasterKey = fresh;
+    return fresh;
+  } catch {
+    // Ephemeral fallback if filesystem is strictly read-only
+    const ephemeral = crypto.randomBytes(32).toString('hex');
+    cachedGeneratedMasterKey = ephemeral;
+    return ephemeral;
+  }
+}
+
 function getMasterSeedMaterial(): string {
-  const parts = [
-    process.env.VAULT_MASTER_KEY || '',
+  const envSeedParts = [
+    process.env.VAULT_MASTER_KEY || process.env.KOMKRIT_VAULT_SECRET || '',
     process.env.BLOB_READ_WRITE_TOKEN || '',
     process.env.ADMIN_AUTH_SECRET || '',
-    'komkid-by-komkrit-aes256gcm-vault-v1',
-  ];
-  return parts.join('|');
+  ].filter((v) => v.trim().length > 0);
+
+  if (envSeedParts.length > 0) {
+    return [...envSeedParts, 'komkid-vault-v2'].join('|');
+  }
+
+  // Never fall back to a publicly hardcoded repository string: use per-installation random keyfile
+  return `${getOrCreateLocalMasterKey()}|komkid-vault-v2`;
 }
 
 function deriveSubkey(purpose: string): Buffer {
   const ikm = Buffer.from(getMasterSeedMaterial(), 'utf8');
+  const salt = Buffer.from('komkid-by-komkrit-hkdf-salt-2026', 'utf8');
+  const info = Buffer.from(`komkid:${purpose}`, 'utf8');
+  return Buffer.from(crypto.hkdfSync('sha256', ikm, salt, info, 32));
+}
+
+function deriveLegacySubkey(purpose: string): Buffer {
+  const legacySeed = [
+    process.env.VAULT_MASTER_KEY || '',
+    process.env.BLOB_READ_WRITE_TOKEN || '',
+    process.env.ADMIN_AUTH_SECRET || '',
+    'komkid-by-komkrit-aes256gcm-vault-v1',
+  ].join('|');
+  const ikm = Buffer.from(legacySeed, 'utf8');
   const salt = Buffer.from('komkid-by-komkrit-hkdf-salt-2026', 'utf8');
   const info = Buffer.from(`komkid:${purpose}`, 'utf8');
   return Buffer.from(crypto.hkdfSync('sha256', ikm, salt, info, 32));
@@ -63,7 +137,7 @@ export function encryptSecretValue(plain: string, fieldName: string): string {
 
 /**
  * Decrypts an enc:v1:... value in memory only when needed to call an upstream AI API.
- * Gracefully handles legacy plaintext values prior to automatic DB migration.
+ * Supports seamless decryption of legacy v1 rows during key migration.
  */
 export function decryptSecretValue(stored: string | undefined | null, fieldName: string): string {
   const raw = (stored || '').trim();
@@ -76,37 +150,48 @@ export function decryptSecretValue(stored: string | undefined | null, fieldName:
   const parts = body.split(':');
   if (parts.length !== 3) return '';
 
-  try {
-    const iv = Buffer.from(parts[0], 'base64url');
-    const tag = Buffer.from(parts[1], 'base64url');
-    const ciphertext = Buffer.from(parts[2], 'base64url');
+  const iv = Buffer.from(parts[0], 'base64url');
+  const tag = Buffer.from(parts[1], 'base64url');
+  const ciphertext = Buffer.from(parts[2], 'base64url');
 
-    const key = deriveSubkey('field-encryption-v1');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAAD(Buffer.from(`field:${fieldName}`, 'utf8'));
-    decipher.setAuthTag(tag);
+  const tryDecrypt = (key: Buffer): string | null => {
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAAD(Buffer.from(`field:${fieldName}`, 'utf8'));
+      decipher.setAuthTag(tag);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return decrypted.toString('utf8');
+    } catch {
+      return null;
+    }
+  };
 
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return decrypted.toString('utf8');
-  } catch {
-    return '';
-  }
+  return (
+    tryDecrypt(deriveSubkey('field-encryption-v1')) ??
+    tryDecrypt(deriveLegacySubkey('field-encryption-v1')) ??
+    ''
+  );
 }
 
 /**
- * Creates a server-sealed, versioned, gzipped AES-256-GCM encrypted backup token containing
- * encrypted settings rows. Indecipherable outside the server (requires server secret material).
- * Guarantees multi-container serverless consistency & cold-start persistence.
+ * Creates a server-sealed, versioned, gzipped AES-256-GCM encrypted token for HttpOnly cookie
+ * transport on stateless serverless deployments ONLY (never sent in JSON or localStorage).
  */
 export function sealSettingsVaultToken(
   settingsRows: Record<string, string>,
   updatedAt = Date.now()
 ): string {
+  const filteredRows: Record<string, string> = {};
+  for (const [k, v] of Object.entries(settingsRows)) {
+    if (!k || NEVER_EXPORT_SETTING_KEYS.has(k)) continue;
+    filteredRows[k] = v;
+  }
+
   const payload = JSON.stringify({
     v: 1,
     iat: updatedAt,
     updatedAt,
-    rows: settingsRows,
+    rows: filteredRows,
   });
   const compressed = zlib.gzipSync(Buffer.from(payload, 'utf8'));
   const key = deriveSubkey('stateless-sealed-vault-v1');
@@ -129,30 +214,36 @@ export function unsealSettingsVaultWithMeta(
   const parts = raw.slice(SEALED_VAULT_PREFIX.length).split('.');
   if (parts.length !== 3) return null;
 
-  try {
-    const iv = Buffer.from(parts[0], 'base64url');
-    const tag = Buffer.from(parts[1], 'base64url');
-    const ciphertext = Buffer.from(parts[2], 'base64url');
+  const iv = Buffer.from(parts[0], 'base64url');
+  const tag = Buffer.from(parts[1], 'base64url');
+  const ciphertext = Buffer.from(parts[2], 'base64url');
 
-    const key = deriveSubkey('stateless-sealed-vault-v1');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAAD(Buffer.from('komkid-sealed-vault-v1', 'utf8'));
-    decipher.setAuthTag(tag);
+  const tryUnseal = (key: Buffer): UnsealedVaultPayload | null => {
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAAD(Buffer.from('komkid-sealed-vault-v1', 'utf8'));
+      decipher.setAuthTag(tag);
 
-    const compressed = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const jsonStr = zlib.gunzipSync(compressed).toString('utf8');
-    const parsed = JSON.parse(jsonStr);
-    if (parsed && typeof parsed.rows === 'object' && parsed.rows !== null) {
-      const ts = Number(parsed.updatedAt || parsed.iat || 0);
-      return {
-        updatedAt: Number.isFinite(ts) ? ts : 0,
-        rows: parsed.rows as Record<string, string>,
-      };
+      const compressed = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      const jsonStr = zlib.gunzipSync(compressed).toString('utf8');
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && typeof parsed.rows === 'object' && parsed.rows !== null) {
+        const ts = Number(parsed.updatedAt || parsed.iat || 0);
+        return {
+          updatedAt: Number.isFinite(ts) ? ts : 0,
+          rows: parsed.rows as Record<string, string>,
+        };
+      }
+      return null;
+    } catch {
+      return null;
     }
-    return null;
-  } catch {
-    return null;
-  }
+  };
+
+  return (
+    tryUnseal(deriveSubkey('stateless-sealed-vault-v1')) ??
+    tryUnseal(deriveLegacySubkey('stateless-sealed-vault-v1'))
+  );
 }
 
 export function unsealSettingsVaultToken(
@@ -173,7 +264,7 @@ export function maskSecretStrict(val?: string | null): string {
 }
 
 /**
- * Redacts any API keys or bearer tokens from error strings / logs so secrets never leak.
+ * Redacts any API keys, bearer tokens, or encrypted vault strings from error messages / logs.
  */
 export function redactSecrets(message: string, knownSecrets: (string | undefined)[] = []): string {
   let out = String(message || '');
@@ -187,5 +278,9 @@ export function redactSecrets(message: string, knownSecrets: (string | undefined
   out = out.replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, 'AIza••••••••[REDACTED]');
   out = out.replace(/\bre_[A-Za-z0-9_]{12,}\b/g, 're_••••••••[REDACTED]');
   out = out.replace(/\bvercel_blob_rw_[A-Za-z0-9_]{10,}\b/g, '[REDACTED_BLOB_TOKEN]');
+  out = out.replace(/\bkvault1\.[A-Za-z0-9_.-]+\b/g, '[REDACTED_VAULT]');
+  out = out.replace(/\benc:v1:[A-Za-z0-9_:-]+\b/g, '[REDACTED_SECRET]');
+  out = out.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, '$1[REDACTED_TOKEN]');
+  out = out.replace(/([?&]key=)[^&\s]+/gi, '$1[REDACTED_KEY]');
   return out;
 }

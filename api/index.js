@@ -1,16 +1,18 @@
 // server/index.ts
 import express from "express";
-import path4 from "node:path";
-import fs4 from "node:fs";
+import path6 from "node:path";
+import fs6 from "node:fs";
 import multer from "multer";
 
 // server/db.ts
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
-import fs from "node:fs";
+import path2 from "node:path";
+import fs2 from "node:fs";
 
 // server/secretVault.ts
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import zlib from "node:zlib";
 var ENC_PREFIX = "enc:v1:";
 var SEALED_VAULT_PREFIX = "kvault1.";
@@ -24,17 +26,75 @@ var SECRET_SETTING_KEYS = /* @__PURE__ */ new Set([
   "resend_api_key",
   "local_api_key"
 ]);
+var NEVER_EXPORT_SETTING_KEYS = /* @__PURE__ */ new Set([
+  "admin_password",
+  "admin_auth_secret",
+  "dynamic_model_discovery_v1"
+]);
+var IS_SERVERLESS_RUNTIME = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+);
+var cachedGeneratedMasterKey = null;
+function getPersistentKeyFilePath() {
+  const baseDir = IS_SERVERLESS_RUNTIME ? "/tmp/komkrit-data" : process.env.DATA_DIR || path.resolve(process.cwd(), "data");
+  try {
+    if (!fs.existsSync(baseDir)) {
+      fs.mkdirSync(baseDir, { recursive: true });
+    }
+  } catch {
+  }
+  return path.join(baseDir, ".vault_master.key");
+}
+function getOrCreateLocalMasterKey() {
+  if (cachedGeneratedMasterKey) return cachedGeneratedMasterKey;
+  const keyFile = getPersistentKeyFilePath();
+  try {
+    if (fs.existsSync(keyFile)) {
+      const existing = fs.readFileSync(keyFile, "utf8").trim();
+      if (existing.length >= 32) {
+        cachedGeneratedMasterKey = existing;
+        return existing;
+      }
+    }
+    const fresh = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(keyFile, fresh, { encoding: "utf8", mode: 384 });
+    try {
+      fs.chmodSync(keyFile, 384);
+    } catch {
+    }
+    cachedGeneratedMasterKey = fresh;
+    return fresh;
+  } catch {
+    const ephemeral = crypto.randomBytes(32).toString("hex");
+    cachedGeneratedMasterKey = ephemeral;
+    return ephemeral;
+  }
+}
 function getMasterSeedMaterial() {
-  const parts = [
+  const envSeedParts = [
+    process.env.VAULT_MASTER_KEY || process.env.KOMKRIT_VAULT_SECRET || "",
+    process.env.BLOB_READ_WRITE_TOKEN || "",
+    process.env.ADMIN_AUTH_SECRET || ""
+  ].filter((v) => v.trim().length > 0);
+  if (envSeedParts.length > 0) {
+    return [...envSeedParts, "komkid-vault-v2"].join("|");
+  }
+  return `${getOrCreateLocalMasterKey()}|komkid-vault-v2`;
+}
+function deriveSubkey(purpose) {
+  const ikm = Buffer.from(getMasterSeedMaterial(), "utf8");
+  const salt = Buffer.from("komkid-by-komkrit-hkdf-salt-2026", "utf8");
+  const info = Buffer.from(`komkid:${purpose}`, "utf8");
+  return Buffer.from(crypto.hkdfSync("sha256", ikm, salt, info, 32));
+}
+function deriveLegacySubkey(purpose) {
+  const legacySeed = [
     process.env.VAULT_MASTER_KEY || "",
     process.env.BLOB_READ_WRITE_TOKEN || "",
     process.env.ADMIN_AUTH_SECRET || "",
     "komkid-by-komkrit-aes256gcm-vault-v1"
-  ];
-  return parts.join("|");
-}
-function deriveSubkey(purpose) {
-  const ikm = Buffer.from(getMasterSeedMaterial(), "utf8");
+  ].join("|");
+  const ikm = Buffer.from(legacySeed, "utf8");
   const salt = Buffer.from("komkid-by-komkrit-hkdf-salt-2026", "utf8");
   const info = Buffer.from(`komkid:${purpose}`, "utf8");
   return Buffer.from(crypto.hkdfSync("sha256", ikm, salt, info, 32));
@@ -63,26 +123,33 @@ function decryptSecretValue(stored, fieldName) {
   const body = raw.slice(ENC_PREFIX.length);
   const parts = body.split(":");
   if (parts.length !== 3) return "";
-  try {
-    const iv = Buffer.from(parts[0], "base64url");
-    const tag = Buffer.from(parts[1], "base64url");
-    const ciphertext = Buffer.from(parts[2], "base64url");
-    const key = deriveSubkey("field-encryption-v1");
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAAD(Buffer.from(`field:${fieldName}`, "utf8"));
-    decipher.setAuthTag(tag);
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return decrypted.toString("utf8");
-  } catch {
-    return "";
-  }
+  const iv = Buffer.from(parts[0], "base64url");
+  const tag = Buffer.from(parts[1], "base64url");
+  const ciphertext = Buffer.from(parts[2], "base64url");
+  const tryDecrypt = (key) => {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAAD(Buffer.from(`field:${fieldName}`, "utf8"));
+      decipher.setAuthTag(tag);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return decrypted.toString("utf8");
+    } catch {
+      return null;
+    }
+  };
+  return tryDecrypt(deriveSubkey("field-encryption-v1")) ?? tryDecrypt(deriveLegacySubkey("field-encryption-v1")) ?? "";
 }
 function sealSettingsVaultToken(settingsRows, updatedAt = Date.now()) {
+  const filteredRows = {};
+  for (const [k, v] of Object.entries(settingsRows)) {
+    if (!k || NEVER_EXPORT_SETTING_KEYS.has(k)) continue;
+    filteredRows[k] = v;
+  }
   const payload = JSON.stringify({
     v: 1,
     iat: updatedAt,
     updatedAt,
-    rows: settingsRows
+    rows: filteredRows
   });
   const compressed = zlib.gzipSync(Buffer.from(payload, "utf8"));
   const key = deriveSubkey("stateless-sealed-vault-v1");
@@ -98,28 +165,30 @@ function unsealSettingsVaultWithMeta(token) {
   if (!raw || !raw.startsWith(SEALED_VAULT_PREFIX)) return null;
   const parts = raw.slice(SEALED_VAULT_PREFIX.length).split(".");
   if (parts.length !== 3) return null;
-  try {
-    const iv = Buffer.from(parts[0], "base64url");
-    const tag = Buffer.from(parts[1], "base64url");
-    const ciphertext = Buffer.from(parts[2], "base64url");
-    const key = deriveSubkey("stateless-sealed-vault-v1");
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAAD(Buffer.from("komkid-sealed-vault-v1", "utf8"));
-    decipher.setAuthTag(tag);
-    const compressed = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const jsonStr = zlib.gunzipSync(compressed).toString("utf8");
-    const parsed = JSON.parse(jsonStr);
-    if (parsed && typeof parsed.rows === "object" && parsed.rows !== null) {
-      const ts = Number(parsed.updatedAt || parsed.iat || 0);
-      return {
-        updatedAt: Number.isFinite(ts) ? ts : 0,
-        rows: parsed.rows
-      };
+  const iv = Buffer.from(parts[0], "base64url");
+  const tag = Buffer.from(parts[1], "base64url");
+  const ciphertext = Buffer.from(parts[2], "base64url");
+  const tryUnseal = (key) => {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAAD(Buffer.from("komkid-sealed-vault-v1", "utf8"));
+      decipher.setAuthTag(tag);
+      const compressed = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      const jsonStr = zlib.gunzipSync(compressed).toString("utf8");
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && typeof parsed.rows === "object" && parsed.rows !== null) {
+        const ts = Number(parsed.updatedAt || parsed.iat || 0);
+        return {
+          updatedAt: Number.isFinite(ts) ? ts : 0,
+          rows: parsed.rows
+        };
+      }
+      return null;
+    } catch {
+      return null;
     }
-    return null;
-  } catch {
-    return null;
-  }
+  };
+  return tryUnseal(deriveSubkey("stateless-sealed-vault-v1")) ?? tryUnseal(deriveLegacySubkey("stateless-sealed-vault-v1"));
 }
 function maskSecretStrict(val) {
   const s = (val || "").trim();
@@ -139,12 +208,16 @@ function redactSecrets(message, knownSecrets = []) {
   out = out.replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, "AIza\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022[REDACTED]");
   out = out.replace(/\bre_[A-Za-z0-9_]{12,}\b/g, "re_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022[REDACTED]");
   out = out.replace(/\bvercel_blob_rw_[A-Za-z0-9_]{10,}\b/g, "[REDACTED_BLOB_TOKEN]");
+  out = out.replace(/\bkvault1\.[A-Za-z0-9_.-]+\b/g, "[REDACTED_VAULT]");
+  out = out.replace(/\benc:v1:[A-Za-z0-9_:-]+\b/g, "[REDACTED_SECRET]");
+  out = out.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, "$1[REDACTED_TOKEN]");
+  out = out.replace(/([?&]key=)[^&\s]+/gi, "$1[REDACTED_KEY]");
   return out;
 }
 
 // server/db.ts
-var ENV_PATH = path.resolve(process.cwd(), ".env");
-if (fs.existsSync(ENV_PATH) && typeof process.loadEnvFile === "function") {
+var ENV_PATH = path2.resolve(process.cwd(), ".env");
+if (fs2.existsSync(ENV_PATH) && typeof process.loadEnvFile === "function") {
   try {
     process.loadEnvFile(ENV_PATH);
   } catch {
@@ -153,11 +226,11 @@ if (fs.existsSync(ENV_PATH) && typeof process.loadEnvFile === "function") {
 var IS_SERVERLESS = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
 );
-var DATA_DIR = IS_SERVERLESS ? "/tmp/komkrit-data" : path.resolve(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+var DATA_DIR = IS_SERVERLESS ? "/tmp/komkrit-data" : process.env.DATA_DIR || path2.resolve(process.cwd(), "data");
+if (!fs2.existsSync(DATA_DIR)) {
+  fs2.mkdirSync(DATA_DIR, { recursive: true });
 }
-var DB_PATH = path.join(DATA_DIR, "komkrit.db");
+var DB_PATH = path2.join(DATA_DIR, "komkrit.db");
 var db = new DatabaseSync(DB_PATH);
 function applyPragmas(database) {
   database.exec(`
@@ -168,15 +241,15 @@ function applyPragmas(database) {
 }
 applyPragmas(db);
 function exportDatabaseSnapshotBuffer() {
-  const snapPath = path.join(DATA_DIR, `snap-${Date.now()}-${Math.round(Math.random() * 1e5)}.db`);
+  const snapPath = path2.join(DATA_DIR, `snap-${Date.now()}-${Math.round(Math.random() * 1e5)}.db`);
   try {
-    if (fs.existsSync(snapPath)) fs.unlinkSync(snapPath);
+    if (fs2.existsSync(snapPath)) fs2.unlinkSync(snapPath);
     const escaped = snapPath.replace(/'/g, "''");
     db.exec(`VACUUM INTO '${escaped}'`);
-    return fs.readFileSync(snapPath);
+    return fs2.readFileSync(snapPath);
   } finally {
     try {
-      if (fs.existsSync(snapPath)) fs.unlinkSync(snapPath);
+      if (fs2.existsSync(snapPath)) fs2.unlinkSync(snapPath);
     } catch {
     }
   }
@@ -186,7 +259,7 @@ function reloadDatabaseFromSnapshotBuffer(sqliteBytes) {
     db.close();
   } catch {
   }
-  fs.writeFileSync(DB_PATH, sqliteBytes);
+  fs2.writeFileSync(DB_PATH, sqliteBytes);
   db = new DatabaseSync(DB_PATH);
   applyPragmas(db);
   initDatabase();
@@ -1120,8 +1193,8 @@ function seedIfEmpty() {
 import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 
 // server/mediaEngine.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
+import fs3 from "node:fs";
+import path3 from "node:path";
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 import { GoogleGenAI } from "@google/genai";
@@ -1994,13 +2067,13 @@ async function resolveLatestElevenLabsVoice(requestedVoiceId, apiKeyOverride) {
 
 // server/mediaEngine.ts
 var execFileAsync2 = promisify2(execFile2);
-var UPLOADS_ROOT = IS_SERVERLESS ? "/tmp/komkrit-uploads" : path2.resolve(process.cwd(), "uploads");
-var IMAGES_DIR = path2.join(UPLOADS_ROOT, "images");
-var VIDEOS_DIR = path2.join(UPLOADS_ROOT, "videos");
-var AUDIO_DIR = path2.join(UPLOADS_ROOT, "audio");
+var UPLOADS_ROOT = IS_SERVERLESS ? "/tmp/komkrit-uploads" : path3.resolve(process.cwd(), "uploads");
+var IMAGES_DIR = path3.join(UPLOADS_ROOT, "images");
+var VIDEOS_DIR = path3.join(UPLOADS_ROOT, "videos");
+var AUDIO_DIR = path3.join(UPLOADS_ROOT, "audio");
 for (const dir of [UPLOADS_ROOT, IMAGES_DIR, VIDEOS_DIR, AUDIO_DIR]) {
-  if (!fs2.existsSync(dir)) {
-    fs2.mkdirSync(dir, { recursive: true });
+  if (!fs3.existsSync(dir)) {
+    fs3.mkdirSync(dir, { recursive: true });
   }
 }
 function getSettingValue(key, envFallback) {
@@ -2024,21 +2097,21 @@ async function resolveLocalAssetPath(urlOrPath) {
     if (match) {
       const mime = match[1];
       const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
-      const tmpPath = path2.join(IMAGES_DIR, `inline-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`);
-      fs2.writeFileSync(tmpPath, Buffer.from(match[2], "base64"));
+      const tmpPath = path3.join(IMAGES_DIR, `inline-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`);
+      fs3.writeFileSync(tmpPath, Buffer.from(match[2], "base64"));
       return tmpPath;
     }
   }
   if (clean.startsWith("https://") || clean.startsWith("http://")) {
     try {
       const parsed = new URL(clean);
-      const base = path2.basename(parsed.pathname) || `remote-${Date.now()}.bin`;
+      const base = path3.basename(parsed.pathname) || `remote-${Date.now()}.bin`;
       const targetDir = base.endsWith(".mp4") || base.endsWith(".mov") ? VIDEOS_DIR : base.endsWith(".mp3") || base.endsWith(".wav") ? AUDIO_DIR : IMAGES_DIR;
-      const cachedPath = path2.join(targetDir, base);
-      if (fs2.existsSync(cachedPath)) return cachedPath;
+      const cachedPath = path3.join(targetDir, base);
+      if (fs3.existsSync(cachedPath)) return cachedPath;
       const dl = await fetch(clean);
       if (dl.ok) {
-        fs2.writeFileSync(cachedPath, Buffer.from(await dl.arrayBuffer()));
+        fs3.writeFileSync(cachedPath, Buffer.from(await dl.arrayBuffer()));
         return cachedPath;
       }
     } catch {
@@ -2046,22 +2119,22 @@ async function resolveLocalAssetPath(urlOrPath) {
     }
   }
   if (clean.startsWith("/uploads/")) {
-    const abs = path2.join(UPLOADS_ROOT, clean.replace(/^\/uploads\//, ""));
-    if (fs2.existsSync(abs)) return abs;
+    const abs = path3.join(UPLOADS_ROOT, clean.replace(/^\/uploads\//, ""));
+    if (fs3.existsSync(abs)) return abs;
   }
   if (clean.startsWith("/images/")) {
-    const pubAbs = path2.resolve(process.cwd(), "public", clean.replace(/^\//, ""));
-    if (fs2.existsSync(pubAbs)) return pubAbs;
-    const distAbs = path2.resolve(process.cwd(), "dist", clean.replace(/^\//, ""));
-    if (fs2.existsSync(distAbs)) return distAbs;
+    const pubAbs = path3.resolve(process.cwd(), "public", clean.replace(/^\//, ""));
+    if (fs3.existsSync(pubAbs)) return pubAbs;
+    const distAbs = path3.resolve(process.cwd(), "dist", clean.replace(/^\//, ""));
+    if (fs3.existsSync(distAbs)) return distAbs;
   }
-  if (fs2.existsSync(clean)) {
+  if (fs3.existsSync(clean)) {
     return clean;
   }
   return null;
 }
 function guessMimeType(filePath, fallback) {
-  const ext = path2.extname(filePath).toLowerCase();
+  const ext = path3.extname(filePath).toLowerCase();
   if (ext === ".png") return "image/png";
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
   if (ext === ".webp") return "image/webp";
@@ -2094,7 +2167,7 @@ async function uploadLocalFileToGemini(ai, localPath, defaultMime) {
     attempts++;
   }
   if (uploaded.state === "FAILED") {
-    throw new Error(`\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07\u0E44\u0E1B\u0E22\u0E31\u0E07 Gemini Files API \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (${path2.basename(localPath)})`);
+    throw new Error(`\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E2D\u0E49\u0E32\u0E07\u0E2D\u0E34\u0E07\u0E44\u0E1B\u0E22\u0E31\u0E07 Gemini Files API \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (${path3.basename(localPath)})`);
   }
   const uri = normalizeGeminiFileUri(uploaded.uri);
   if (!uri) {
@@ -2105,10 +2178,10 @@ async function uploadLocalFileToGemini(ai, localPath, defaultMime) {
 async function recordMediaAsset(params) {
   let finalFileUrl = params.fileUrl;
   if (IS_SERVERLESS && finalFileUrl.startsWith("/uploads/")) {
-    const abs = path2.join(UPLOADS_ROOT, finalFileUrl.replace(/^\/uploads\//, ""));
-    if (fs2.existsSync(abs)) {
-      const buf = fs2.readFileSync(abs);
-      const cloudUrl = await uploadMediaToCloudBlob(buf, path2.basename(abs), params.mimeType);
+    const abs = path3.join(UPLOADS_ROOT, finalFileUrl.replace(/^\/uploads\//, ""));
+    if (fs3.existsSync(abs)) {
+      const buf = fs3.readFileSync(abs);
+      const cloudUrl = await uploadMediaToCloudBlob(buf, path3.basename(abs), params.mimeType);
       if (cloudUrl) {
         finalFileUrl = cloudUrl;
       } else if (params.mediaType === "image" && buf.length <= 4 * 1024 * 1024) {
@@ -2254,8 +2327,8 @@ async function generateRealImage(params) {
       );
     }
     const filename2 = `gemini-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.${ext}`;
-    const absPath = path2.join(IMAGES_DIR, filename2);
-    fs2.writeFileSync(absPath, imgBuffer2);
+    const absPath = path3.join(IMAGES_DIR, filename2);
+    fs3.writeFileSync(absPath, imgBuffer2);
     const fileUrl2 = `/uploads/images/${filename2}`;
     return await recordMediaAsset({
       mediaType: "image",
@@ -2328,7 +2401,7 @@ async function generateRealImage(params) {
     throw new Error("\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E23\u0E31\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E23\u0E39\u0E1B\u0E20\u0E32\u0E1E\u0E08\u0E32\u0E01 OpenAI Images API");
   }
   const filename = `openai-img-${Date.now()}-${Math.round(Math.random() * 1e4)}.png`;
-  fs2.writeFileSync(path2.join(IMAGES_DIR, filename), imgBuffer);
+  fs3.writeFileSync(path3.join(IMAGES_DIR, filename), imgBuffer);
   const fileUrl = `/uploads/images/${filename}`;
   return await recordMediaAsset({
     mediaType: "image",
@@ -2419,7 +2492,7 @@ async function generateRealVideo(params) {
       const sourcePayload = { prompt };
       if (firstAbs3) {
         sourcePayload.image = {
-          imageBytes: fs2.readFileSync(firstAbs3).toString("base64"),
+          imageBytes: fs3.readFileSync(firstAbs3).toString("base64"),
           mimeType: guessMimeType(firstAbs3, "image/png")
         };
       }
@@ -2429,7 +2502,7 @@ async function generateRealVideo(params) {
       };
       if (lastAbs3) {
         configPayload.lastFrame = {
-          imageBytes: fs2.readFileSync(lastAbs3).toString("base64"),
+          imageBytes: fs3.readFileSync(lastAbs3).toString("base64"),
           mimeType: guessMimeType(lastAbs3, "image/png")
         };
       }
@@ -2457,9 +2530,9 @@ async function generateRealVideo(params) {
         throw new Error("Google Veo \u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E41\u0E15\u0E48\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E43\u0E19\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C");
       }
       const filename3 = `veo-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`;
-      const outAbsPath3 = path2.join(VIDEOS_DIR, filename3);
+      const outAbsPath3 = path3.join(VIDEOS_DIR, filename3);
       if (genVid.videoBytes) {
-        fs2.writeFileSync(outAbsPath3, Buffer.from(genVid.videoBytes, "base64"));
+        fs3.writeFileSync(outAbsPath3, Buffer.from(genVid.videoBytes, "base64"));
       } else if (genVid.uri) {
         const dl = await fetch(genVid.uri, {
           headers: { "x-goog-api-key": geminiKeyForVeo }
@@ -2467,7 +2540,7 @@ async function generateRealVideo(params) {
         if (!dl.ok) {
           throw new Error(`\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D Veo \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (HTTP ${dl.status})`);
         }
-        fs2.writeFileSync(outAbsPath3, Buffer.from(await dl.arrayBuffer()));
+        fs3.writeFileSync(outAbsPath3, Buffer.from(await dl.arrayBuffer()));
       } else {
         throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E32\u0E01 Google Veo API");
       }
@@ -2496,14 +2569,14 @@ async function generateRealVideo(params) {
     const firstAbs2 = await resolveLocalAssetPath(params.firstFrameUrl);
     if (firstAbs2) {
       instance.image = {
-        bytesBase64Encoded: fs2.readFileSync(firstAbs2).toString("base64"),
+        bytesBase64Encoded: fs3.readFileSync(firstAbs2).toString("base64"),
         mimeType: guessMimeType(firstAbs2, "image/png")
       };
     }
     const lastAbs2 = await resolveLocalAssetPath(params.lastFrameUrl);
     if (lastAbs2) {
       instance.lastFrame = {
-        bytesBase64Encoded: fs2.readFileSync(lastAbs2).toString("base64"),
+        bytesBase64Encoded: fs3.readFileSync(lastAbs2).toString("base64"),
         mimeType: guessMimeType(lastAbs2, "image/png")
       };
     }
@@ -2570,9 +2643,9 @@ async function generateRealVideo(params) {
       throw new Error("Google Veo \u0E1B\u0E23\u0E30\u0E21\u0E27\u0E25\u0E1C\u0E25\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E41\u0E15\u0E48\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E43\u0E19\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C");
     }
     const filename2 = `veo-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`;
-    const outAbsPath2 = path2.join(VIDEOS_DIR, filename2);
+    const outAbsPath2 = path3.join(VIDEOS_DIR, filename2);
     if (vidObj.bytesBase64Encoded) {
-      fs2.writeFileSync(outAbsPath2, Buffer.from(vidObj.bytesBase64Encoded, "base64"));
+      fs3.writeFileSync(outAbsPath2, Buffer.from(vidObj.bytesBase64Encoded, "base64"));
     } else if (vidObj.gcsUri || vidObj.uri) {
       const rawUri = vidObj.gcsUri || vidObj.uri;
       const httpUrl = rawUri.startsWith("gs://") ? `https://storage.googleapis.com/${rawUri.slice(5)}` : rawUri;
@@ -2582,7 +2655,7 @@ async function generateRealVideo(params) {
       if (!dl.ok) {
         throw new Error(`\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D Veo \u0E08\u0E32\u0E01 ${rawUri} \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (HTTP ${dl.status})`);
       }
-      fs2.writeFileSync(outAbsPath2, Buffer.from(await dl.arrayBuffer()));
+      fs3.writeFileSync(outAbsPath2, Buffer.from(await dl.arrayBuffer()));
     } else {
       throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A bytesBase64Encoded \u0E2B\u0E23\u0E37\u0E2D URI \u0E43\u0E19\u0E1C\u0E25\u0E25\u0E31\u0E1E\u0E18\u0E4C\u0E08\u0E32\u0E01 Google Veo");
     }
@@ -2662,7 +2735,7 @@ async function generateRealVideo(params) {
     if (extendAbs) {
       let targetVideoPath = extendAbs;
       if (params.stripAudio) {
-        tempStrippedVideo = path2.join(
+        tempStrippedVideo = path3.join(
           VIDEOS_DIR,
           `temp-stripped-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`
         );
@@ -2685,9 +2758,9 @@ async function generateRealVideo(params) {
       });
     }
   } finally {
-    if (tempStrippedVideo && fs2.existsSync(tempStrippedVideo)) {
+    if (tempStrippedVideo && fs3.existsSync(tempStrippedVideo)) {
       try {
-        fs2.unlinkSync(tempStrippedVideo);
+        fs3.unlinkSync(tempStrippedVideo);
       } catch {
       }
     }
@@ -2742,9 +2815,9 @@ async function generateRealVideo(params) {
     );
   }
   const filename = `omni-flow-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`;
-  const outAbsPath = path2.join(VIDEOS_DIR, filename);
+  const outAbsPath = path3.join(VIDEOS_DIR, filename);
   if (outVid.data) {
-    fs2.writeFileSync(outAbsPath, Buffer.from(outVid.data, "base64"));
+    fs3.writeFileSync(outAbsPath, Buffer.from(outVid.data, "base64"));
   } else if (outVid.uri) {
     try {
       await ai.files.download({
@@ -2758,7 +2831,7 @@ async function generateRealVideo(params) {
       if (!dlResp.ok) {
         throw new Error(`\u0E14\u0E32\u0E27\u0E19\u0E4C\u0E42\u0E2B\u0E25\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E08\u0E32\u0E01 Gemini API \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (HTTP ${dlResp.status})`);
       }
-      fs2.writeFileSync(outAbsPath, Buffer.from(await dlResp.arrayBuffer()));
+      fs3.writeFileSync(outAbsPath, Buffer.from(await dlResp.arrayBuffer()));
     }
   }
   return recordMediaAsset({
@@ -2781,7 +2854,7 @@ async function stitchFlowScenesWithFfmpeg(params) {
   const resolvedList = await Promise.all(
     params.sceneVideoUrls.map((u) => resolveLocalAssetPath(u))
   );
-  const localPaths = resolvedList.filter((p) => Boolean(p && fs2.existsSync(p)));
+  const localPaths = resolvedList.filter((p) => Boolean(p && fs3.existsSync(p)));
   if (localPaths.length === 0) {
     throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E25\u0E34\u0E1B\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E09\u0E32\u0E01\u0E17\u0E35\u0E48\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E19\u0E33\u0E21\u0E32\u0E15\u0E31\u0E14\u0E15\u0E48\u0E2D\u0E23\u0E27\u0E21 (Assemble Film)");
   }
@@ -2796,14 +2869,14 @@ async function stitchFlowScenesWithFfmpeg(params) {
   const targetW = isPortrait ? 720 : 1280;
   const targetH = isPortrait ? 1280 : 720;
   const normalizedFiles = [];
-  const concatListPath = path2.join(VIDEOS_DIR, `concat-list-${Date.now()}.txt`);
-  const stitchedRawPath = path2.join(VIDEOS_DIR, `flow-stitched-${Date.now()}.mp4`);
+  const concatListPath = path3.join(VIDEOS_DIR, `concat-list-${Date.now()}.txt`);
+  const stitchedRawPath = path3.join(VIDEOS_DIR, `flow-stitched-${Date.now()}.mp4`);
   const finalFilename = `flow-master-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp4`;
-  const finalOutPath = path2.join(VIDEOS_DIR, finalFilename);
+  const finalOutPath = path3.join(VIDEOS_DIR, finalFilename);
   try {
     for (let i = 0; i < localPaths.length; i++) {
       const src = localPaths[i];
-      const normPath = path2.join(VIDEOS_DIR, `temp-norm-${Date.now()}-${i}.mp4`);
+      const normPath = path3.join(VIDEOS_DIR, `temp-norm-${Date.now()}-${i}.mp4`);
       let hasAudio = false;
       try {
         const { stdout } = await execFileAsync2("ffprobe", [
@@ -2873,9 +2946,9 @@ async function stitchFlowScenesWithFfmpeg(params) {
       normalizedFiles.push(normPath);
     }
     const listBody = normalizedFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n");
-    fs2.writeFileSync(concatListPath, listBody, "utf-8");
+    fs3.writeFileSync(concatListPath, listBody, "utf-8");
     const voiceoverAbs = await resolveLocalAssetPath(params.voiceoverAudioUrl);
-    if (voiceoverAbs && fs2.existsSync(voiceoverAbs)) {
+    if (voiceoverAbs && fs3.existsSync(voiceoverAbs)) {
       await execFileAsync2("ffmpeg", [
         "-y",
         "-f",
@@ -2936,9 +3009,9 @@ async function stitchFlowScenesWithFfmpeg(params) {
     };
   } finally {
     for (const f of [...normalizedFiles, concatListPath, stitchedRawPath]) {
-      if (fs2.existsSync(f)) {
+      if (fs3.existsSync(f)) {
         try {
-          fs2.unlinkSync(f);
+          fs3.unlinkSync(f);
         } catch {
         }
       }
@@ -3056,7 +3129,7 @@ async function generateRealAudio(params) {
       throw new Error(`Google Gemini TTS (${ttsModel2}) \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E2A\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E40\u0E2A\u0E35\u0E22\u0E07\u0E01\u0E25\u0E31\u0E1A\u0E21\u0E32`);
     }
     const filename2 = `tts-gemini-${Date.now()}-${Math.round(Math.random() * 1e4)}.wav`;
-    fs2.writeFileSync(path2.join(AUDIO_DIR, filename2), audioBuffer2);
+    fs3.writeFileSync(path3.join(AUDIO_DIR, filename2), audioBuffer2);
     const fileUrl2 = `/uploads/audio/${filename2}`;
     return recordMediaAsset({
       mediaType: "audio",
@@ -3102,7 +3175,7 @@ async function generateRealAudio(params) {
     }
     const audioBuffer2 = Buffer.from(await resp2.arrayBuffer());
     const filename2 = `tts-eleven-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp3`;
-    fs2.writeFileSync(path2.join(AUDIO_DIR, filename2), audioBuffer2);
+    fs3.writeFileSync(path3.join(AUDIO_DIR, filename2), audioBuffer2);
     const fileUrl2 = `/uploads/audio/${filename2}`;
     return recordMediaAsset({
       mediaType: "audio",
@@ -3145,7 +3218,7 @@ async function generateRealAudio(params) {
   }
   const audioBuffer = Buffer.from(await resp.arrayBuffer());
   const filename = `tts-openai-${Date.now()}-${Math.round(Math.random() * 1e4)}.mp3`;
-  fs2.writeFileSync(path2.join(AUDIO_DIR, filename), audioBuffer);
+  fs3.writeFileSync(path3.join(AUDIO_DIR, filename), audioBuffer);
   const fileUrl = `/uploads/audio/${filename}`;
   return recordMediaAsset({
     mediaType: "audio",
@@ -4236,15 +4309,15 @@ ${idea}` : "",
 }
 
 // server/publishEngine.ts
-import fs3 from "node:fs";
-import path3 from "node:path";
+import fs4 from "node:fs";
+import path4 from "node:path";
 async function resolveVideoBytes(videoUrl) {
   if (!videoUrl) return null;
   const clean = videoUrl.trim();
   if (!clean) return null;
   if (clean.startsWith("/uploads/")) {
-    const abs = path3.join(UPLOADS_ROOT, clean.replace(/^\/uploads\//, ""));
-    if (fs3.existsSync(abs)) return fs3.readFileSync(abs);
+    const abs = path4.join(UPLOADS_ROOT, clean.replace(/^\/uploads\//, ""));
+    if (fs4.existsSync(abs)) return fs4.readFileSync(abs);
   }
   if (/^https?:\/\//i.test(clean)) {
     try {
@@ -4876,11 +4949,68 @@ ${input.content}`.slice(0, 275);
 
 // server/auth.ts
 import crypto3 from "node:crypto";
+import fs5 from "node:fs";
+import path5 from "node:path";
 var TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+var SCRYPT_PREFIX = "scrypt:v1:";
+var LOGIN_WINDOW_MS = 15 * 60 * 1e3;
+var MAX_LOGIN_ATTEMPTS = 10;
+var loginAttemptsMap = /* @__PURE__ */ new Map();
+var cachedAuthSecret = null;
+function getOrCreateLocalAuthSecret() {
+  if (cachedAuthSecret) return cachedAuthSecret;
+  const keyFile = path5.join(DATA_DIR, ".admin_auth.key");
+  try {
+    if (fs5.existsSync(keyFile)) {
+      const existing = fs5.readFileSync(keyFile, "utf8").trim();
+      if (existing.length >= 32) {
+        cachedAuthSecret = existing;
+        return existing;
+      }
+    }
+    const fresh = crypto3.randomBytes(32).toString("hex");
+    fs5.writeFileSync(keyFile, fresh, { encoding: "utf8", mode: 384 });
+    try {
+      fs5.chmodSync(keyFile, 384);
+    } catch {
+    }
+    cachedAuthSecret = fresh;
+    return fresh;
+  } catch {
+    const ephemeral = crypto3.randomBytes(32).toString("hex");
+    cachedAuthSecret = ephemeral;
+    return ephemeral;
+  }
+}
 function getAuthSecret() {
-  const configured = getSettingValue("admin_auth_secret", "ADMIN_AUTH_SECRET");
-  if (configured) return configured;
-  return `komkrit-admin-hmac-${process.env.VERCEL_PROJECT_ID || "local-secret-key-2026"}`;
+  const configured = getSettingValue("admin_auth_secret", "ADMIN_AUTH_SECRET") || (process.env.VAULT_MASTER_KEY || process.env.KOMKRIT_VAULT_SECRET || "").trim() || (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
+  if (configured) {
+    return crypto3.createHash("sha256").update(`komkrit-hmac-v2:${configured}`).digest("hex");
+  }
+  if (IS_SERVERLESS && process.env.VERCEL_PROJECT_ID) {
+    return crypto3.createHash("sha256").update(`komkrit-vercel-hmac:${process.env.VERCEL_PROJECT_ID}:${process.env.VERCEL_URL || ""}`).digest("hex");
+  }
+  return getOrCreateLocalAuthSecret();
+}
+function hashPasswordScrypt(plain) {
+  const salt = crypto3.randomBytes(16).toString("base64url");
+  const derived = crypto3.scryptSync(plain, salt, 32).toString("base64url");
+  return `${SCRYPT_PREFIX}${salt}:${derived}`;
+}
+function verifyPasswordHash(input, stored) {
+  if (!stored) return false;
+  if (stored.startsWith(SCRYPT_PREFIX)) {
+    const rest = stored.slice(SCRYPT_PREFIX.length);
+    const [salt, hashB64] = rest.split(":");
+    if (!salt || !hashB64) return false;
+    try {
+      const derived = crypto3.scryptSync(input, salt, 32).toString("base64url");
+      return safeEqual(derived, hashB64);
+    } catch {
+      return false;
+    }
+  }
+  return safeEqual(input, stored);
 }
 function getAdminCredentials() {
   const rawUser = getSettingValue("admin_username", "ADMIN_USERNAME");
@@ -4895,9 +5025,51 @@ function safeEqual(a, b) {
   if (bufA.length !== bufB.length) return false;
   return crypto3.timingSafeEqual(bufA, bufB);
 }
+function getClientIp(req) {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) {
+    return xff.split(",")[0].trim();
+  }
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
+function checkLoginRateLimit(ip) {
+  const now = Date.now();
+  const prev = (loginAttemptsMap.get(ip) || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
+  loginAttemptsMap.set(ip, prev);
+  if (prev.length >= MAX_LOGIN_ATTEMPTS) {
+    const oldest = prev[0];
+    const retryAfterSec = Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (now - oldest)) / 1e3));
+    return { allowed: false, retryAfterSec };
+  }
+  return { allowed: true, retryAfterSec: 0 };
+}
+function recordLoginFailure(ip) {
+  const now = Date.now();
+  const prev = (loginAttemptsMap.get(ip) || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
+  prev.push(now);
+  loginAttemptsMap.set(ip, prev);
+}
+function clearLoginFailures(ip) {
+  loginAttemptsMap.delete(ip);
+}
 function verifyCredentials(usernameInput, passwordInput) {
   const { username, password } = getAdminCredentials();
-  return safeEqual(usernameInput.trim(), username) && safeEqual(passwordInput, password);
+  const userOk = safeEqual(usernameInput.trim(), username);
+  const passOk = verifyPasswordHash(passwordInput, password);
+  if (userOk && passOk) {
+    const dbRow = db.prepare("SELECT value FROM settings WHERE key = ?").get("admin_password");
+    if (dbRow?.value && !dbRow.value.startsWith(SCRYPT_PREFIX)) {
+      try {
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
+          "admin_password",
+          hashPasswordScrypt(passwordInput)
+        );
+      } catch {
+      }
+    }
+    return true;
+  }
+  return false;
 }
 function createAdminToken(username) {
   const expiresAt = Date.now() + TOKEN_TTL_MS;
@@ -4956,7 +5128,7 @@ function updateAdminCredentials(newUsername, newPassword) {
     upsert.run("admin_username", newUsername.trim());
   }
   if (newPassword.trim()) {
-    upsert.run("admin_password", newPassword.trim());
+    upsert.run("admin_password", hashPasswordScrypt(newPassword.trim()));
   }
 }
 
@@ -4979,7 +5151,7 @@ function exportEncryptedSettingsMap() {
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const map = {};
   for (const r of rows) {
-    if (!r.key || r.key === "dynamic_model_discovery_v1") continue;
+    if (!r.key || NEVER_EXPORT_SETTING_KEYS.has(r.key)) continue;
     const raw = String(r.value ?? "").trim();
     if (SECRET_SETTING_KEYS.has(r.key)) {
       map[r.key] = raw ? encryptSecretValue(raw, r.key) : "";
@@ -5007,35 +5179,30 @@ function parseCookieToken(cookieHeader, name) {
   return "";
 }
 function writeSealedVaultCookie(req, res, sealedToken) {
-  if (!sealedToken) return;
+  if (!IS_SERVERLESS || !sealedToken) return;
   const isHttps = req.secure || req.headers["x-forwarded-proto"] === "https" || IS_SERVERLESS;
   res.setHeader(
     "Set-Cookie",
     `${VAULT_COOKIE_NAME}=${encodeURIComponent(
       sealedToken
-    )}; Path=/api; Max-Age=31536000; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`
+    )}; Path=/api; Max-Age=31536000; HttpOnly; SameSite=Strict${isHttps ? "; Secure" : ""}`
   );
 }
-function syncSettingsFromRequestVault(req, res) {
-  const headerVal = typeof req.headers["x-komkrit-sealed-vault"] === "string" ? req.headers["x-komkrit-sealed-vault"].trim() : "";
+function syncSettingsFromRequestVault(req, _res) {
+  if (!IS_SERVERLESS) return;
   const cookieVal = parseCookieToken(req.headers.cookie, VAULT_COOKIE_NAME);
-  const candidates = [
-    { source: "header", raw: headerVal, parsed: unsealSettingsVaultWithMeta(headerVal) },
-    { source: "cookie", raw: cookieVal, parsed: unsealSettingsVaultWithMeta(cookieVal) }
-  ].filter((c) => c.parsed !== null);
-  if (candidates.length === 0) return;
-  candidates.sort((a, b) => b.parsed.updatedAt - a.parsed.updatedAt);
-  const best = candidates[0];
+  const parsed = unsealSettingsVaultWithMeta(cookieVal);
+  if (!parsed) return;
   const localUpdatedAt = getLocalVaultUpdatedAt();
-  const bestHasAnySecret = Object.entries(best.parsed.rows).some(
+  const bestHasAnySecret = Object.entries(parsed.rows).some(
     ([k, v]) => SECRET_SETTING_KEYS.has(k) && Boolean(String(v || "").trim())
   );
-  if (best.parsed.updatedAt > localUpdatedAt || localUpdatedAt === 0 && !hasAnyStoredApiSecret() && bestHasAnySecret) {
+  if (parsed.updatedAt > localUpdatedAt || localUpdatedAt === 0 && !hasAnyStoredApiSecret() && bestHasAnySecret) {
     const setStmt = db.prepare(
       "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
     );
-    for (const [k, v] of Object.entries(best.parsed.rows)) {
-      if (!k || typeof v !== "string") continue;
+    for (const [k, v] of Object.entries(parsed.rows)) {
+      if (!k || NEVER_EXPORT_SETTING_KEYS.has(k) || typeof v !== "string") continue;
       const trimmed = v.trim();
       if (SECRET_SETTING_KEYS.has(k)) {
         const safeVal = trimmed ? isEncryptedSecret(trimmed) ? trimmed : encryptSecretValue(trimmed, k) : "";
@@ -5044,21 +5211,41 @@ function syncSettingsFromRequestVault(req, res) {
         setStmt.run(k, trimmed);
       }
     }
-    const effectiveTs = best.parsed.updatedAt || Date.now();
+    const effectiveTs = parsed.updatedAt || Date.now();
     setStmt.run(VAULT_UPDATED_AT_KEY, String(effectiveTs));
     invalidateModelCatalogCache();
   }
-  if (!cookieVal || best.source === "header" && cookieVal !== best.raw) {
-    writeSealedVaultCookie(req, res, best.raw);
-  }
 }
 var app = express();
+app.disable("x-powered-by");
 app.use(express.json({ limit: "50mb" }));
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
+  const rawJson = res.json.bind(res);
+  res.json = ((body) => {
+    if (res.statusCode >= 400 && body && typeof body === "object" && typeof body.error === "string") {
+      body = { ...body, error: redactSecrets(body.error) };
+    }
+    return rawJson(body);
+  });
+  next();
+});
 var UPLOADS_DIR = UPLOADS_ROOT;
-if (!fs4.existsSync(UPLOADS_DIR)) {
-  fs4.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (!fs6.existsSync(UPLOADS_DIR)) {
+  fs6.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
-app.use("/uploads", express.static(UPLOADS_DIR));
+app.use(
+  "/uploads",
+  (_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; media-src 'self'; img-src 'self'; sandbox");
+    next();
+  },
+  express.static(UPLOADS_DIR)
+);
 var handleHealthCheck = (_req, res) => {
   res.json({
     ok: true,
@@ -5080,7 +5267,7 @@ app.use("/api", async (req, res, next) => {
       const origJson = res.json.bind(res);
       res.json = ((body) => {
         if (res.statusCode < 400) {
-          persistDatabaseToCloud().catch((err) => console.error("Cloud DB persist error:", err)).finally(() => origJson(body));
+          persistDatabaseToCloud().catch((err) => console.error("Cloud DB persist error:", redactSecrets(String(err)))).finally(() => origJson(body));
           return res;
         }
         return origJson(body);
@@ -5088,7 +5275,7 @@ app.use("/api", async (req, res, next) => {
     }
     next();
   } catch (err) {
-    console.error("Cloud DB sync error:", err);
+    console.error("Cloud DB sync error:", redactSecrets(String(err)));
     next();
   }
 });
@@ -5109,11 +5296,22 @@ app.use("/api", (req, res, next) => {
   });
 });
 app.post("/api/auth/login", (req, res) => {
+  const ip = getClientIp(req);
+  const rate = checkLoginRateLimit(ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(rate.retryAfterSec));
+    res.status(429).json({
+      error: `\u0E1E\u0E22\u0E32\u0E22\u0E32\u0E21\u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A\u0E2B\u0E25\u0E32\u0E22\u0E04\u0E23\u0E31\u0E49\u0E07\u0E40\u0E01\u0E34\u0E19\u0E44\u0E1B \u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E2D ${Math.ceil(rate.retryAfterSec / 60)} \u0E19\u0E32\u0E17\u0E35\u0E41\u0E25\u0E49\u0E27\u0E25\u0E2D\u0E07\u0E43\u0E2B\u0E21\u0E48`
+    });
+    return;
+  }
   const { username = "", password = "" } = req.body || {};
   if (!verifyCredentials(String(username), String(password))) {
+    recordLoginFailure(ip);
     res.status(401).json({ error: "\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E2B\u0E23\u0E37\u0E2D\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07" });
     return;
   }
+  clearLoginFailures(ip);
   const { token, expiresAt } = createAdminToken(String(username).trim());
   res.json({ ok: true, token, username: String(username).trim(), expiresAt });
 });
@@ -5142,14 +5340,56 @@ app.put("/api/auth/password", (req, res) => {
   );
   res.json({ ok: true, token, expiresAt });
 });
+var ALLOWED_UPLOAD_EXTS = /* @__PURE__ */ new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".mp4",
+  ".webm",
+  ".mov",
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".ogg"
+]);
+var ALLOWED_UPLOAD_MIMES = /* @__PURE__ */ new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/mp4",
+  "audio/ogg"
+]);
 var storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
-    const ext = path4.extname(file.originalname || ".jpg") || ".jpg";
-    cb(null, `komkrit-${Date.now()}-${Math.round(Math.random() * 1e5)}${ext}`);
+    const rawExt = path6.extname(file.originalname || ".jpg").toLowerCase();
+    const safeExt = ALLOWED_UPLOAD_EXTS.has(rawExt) ? rawExt : ".bin";
+    cb(null, `komkrit-${Date.now()}-${Math.round(Math.random() * 1e5)}${safeExt}`);
   }
 });
-var upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+var upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path6.extname(file.originalname || "").toLowerCase();
+    const mime = (file.mimetype || "").toLowerCase();
+    if (ALLOWED_UPLOAD_EXTS.has(ext) && ALLOWED_UPLOAD_MIMES.has(mime)) {
+      cb(null, true);
+    } else {
+      cb(new Error("\u0E0A\u0E19\u0E34\u0E14\u0E44\u0E1F\u0E25\u0E4C\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E23\u0E31\u0E1A\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15 (\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E20\u0E32\u0E1E JPG/PNG/WebP/GIF, \u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D MP4/WebM \u0E41\u0E25\u0E30\u0E40\u0E2A\u0E35\u0E22\u0E07 MP3/WAV \u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19)"));
+    }
+  }
+});
 function maskSecret(val) {
   return maskSecretStrict(val);
 }
@@ -5242,7 +5482,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     res.status(400).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E44\u0E1F\u0E25\u0E4C\u0E17\u0E35\u0E48\u0E2D\u0E31\u0E1B\u0E42\u0E2B\u0E25\u0E14" });
     return;
   }
-  const fileBuffer = fs4.readFileSync(req.file.path);
+  const fileBuffer = fs6.readFileSync(req.file.path);
   const cloudUrl = await uploadMediaToCloudBlob(
     fileBuffer,
     req.file.filename,
@@ -5973,10 +6213,10 @@ app.delete("/api/ai/media/:id", async (req, res) => {
     if (existing.file_url.includes("blob.vercel-storage.com")) {
       await deleteMediaFromCloudBlob(existing.file_url);
     } else if (existing.file_url.startsWith("/uploads/")) {
-      const abs = path4.join(UPLOADS_ROOT, existing.file_url.replace(/^\/uploads\//, ""));
-      if (fs4.existsSync(abs)) {
+      const abs = path6.join(UPLOADS_ROOT, existing.file_url.replace(/^\/uploads\//, ""));
+      if (fs6.existsSync(abs)) {
         try {
-          fs4.unlinkSync(abs);
+          fs6.unlinkSync(abs);
         } catch {
         }
       }
@@ -6825,15 +7065,15 @@ app.get("/api/settings/ai", (req, res) => {
   const localUpdatedAt = getLocalVaultUpdatedAt();
   const hasAnyKey = hasAnyStoredApiSecret();
   const effectiveTs = localUpdatedAt || (hasAnyKey ? Date.now() : 0);
-  const sealedVault = effectiveTs > 0 ? sealSettingsVaultToken(exportEncryptedSettingsMap(), effectiveTs) : void 0;
-  if (sealedVault) {
+  if (IS_SERVERLESS && effectiveTs > 0) {
+    const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), effectiveTs);
     writeSealedVaultCookie(req, res, sealedVault);
   }
   res.json({
     provider: cfg.defaultProvider,
     encryptedAtRest: true,
     encryptionStandard: "AES-256-GCM",
-    ...sealedVault ? { sealedVault, vaultUpdatedAt: effectiveTs } : {},
+    vaultUpdatedAt: effectiveTs,
     // Google Gemini + Image + Video + TTS (All Live API Model Discovery)
     geminiModel: cfg.gemini.model,
     geminiImageModel: cfg.gemini.imageModel,
@@ -6922,9 +7162,11 @@ app.put("/api/settings/ai", (req, res) => {
   const updatedAt = Date.now();
   set.run(VAULT_UPDATED_AT_KEY, String(updatedAt));
   invalidateModelCatalogCache();
-  const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), updatedAt);
-  writeSealedVaultCookie(req, res, sealedVault);
-  res.json({ ok: true, encryptedAtRest: true, vaultUpdatedAt: updatedAt, sealedVault });
+  if (IS_SERVERLESS) {
+    const sealedVault = sealSettingsVaultToken(exportEncryptedSettingsMap(), updatedAt);
+    writeSealedVaultCookie(req, res, sealedVault);
+  }
+  res.json({ ok: true, encryptedAtRest: true, vaultUpdatedAt: updatedAt });
 });
 app.post("/api/settings/test-provider", async (req, res) => {
   const { provider, model, apiKey } = req.body || {};
@@ -7476,10 +7718,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path4.resolve(process.cwd(), "dist");
+    const distDir = path6.resolve(process.cwd(), "dist");
     app.use(express.static(distDir));
     app.get("/{*splat}", (_req, res) => {
-      res.sendFile(path4.join(distDir, "index.html"));
+      res.sendFile(path6.join(distDir, "index.html"));
     });
   }
   app.listen(port, "0.0.0.0", () => {

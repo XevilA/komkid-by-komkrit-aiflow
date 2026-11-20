@@ -741,7 +741,7 @@ export const MediaGenStudio: React.FC<Props> = ({
                     {settings?.hasGeminiKey ? '(เชื่อมต่อแล้ว)' : '(ยังไม่ตั้งค่าคีย์)'}
                   </option>
                   <option value="openai">
-                    OpenAI Image (gpt-image-1){' '}
+                    OpenAI Image (Live API){' '}
                     {settings?.hasOpenaiKey ? '(เชื่อมต่อแล้ว)' : '(ยังไม่ตั้งค่าคีย์)'}
                   </option>
                 </select>

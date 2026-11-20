@@ -411,16 +411,16 @@ export const PublicWebsite: React.FC<Props> = ({
               </div>
 
               {/* Center-Right Komkrit Portrait & Phuket Bay */}
-              <div className="col-span-5 sm:col-span-6 lg:col-span-4 relative h-full min-h-[225px] sm:min-h-[275px] lg:min-h-[305px] flex items-end justify-center overflow-hidden">
+              <div className="col-span-5 sm:col-span-6 lg:col-span-4 relative h-full min-h-[215px] sm:min-h-[275px] lg:min-h-[305px] flex items-end justify-center overflow-hidden">
                 <img
                   src="/images/hero-komkrit.jpg"
                   alt="Komkrit"
-                  className="h-full w-full object-cover object-top scale-[1.03]"
+                  className="h-full w-full object-cover object-[62%_18%] sm:object-top"
                   style={{
                     maskImage:
-                      'linear-gradient(to right, transparent 0%, black 14%, black 88%, transparent 100%)',
+                      'linear-gradient(to right, transparent 0%, black 16%, black 92%, transparent 100%)',
                     WebkitMaskImage:
-                      'linear-gradient(to right, transparent 0%, black 14%, black 88%, transparent 100%)',
+                      'linear-gradient(to right, transparent 0%, black 16%, black 92%, transparent 100%)',
                   }}
                 />
               </div>
@@ -482,11 +482,11 @@ export const PublicWebsite: React.FC<Props> = ({
               })}
             </div>
 
-            {/* Mobile Horizontal Swipeable Cards (Exact match to Image 3!) */}
+            {/* Mobile Horizontal Swipeable Cards */}
             <div className="relative lg:hidden">
               <div
                 ref={catScrollRef}
-                className="flex items-stretch gap-2.5 overflow-x-auto no-scrollbar pr-9"
+                className="flex items-stretch gap-2.5 overflow-x-auto no-scrollbar snap-x snap-mandatory pb-0.5"
               >
                 {CATEGORIES.map((cat) => {
                   const isSelected = selectedCategory === cat.id;
@@ -494,7 +494,7 @@ export const PublicWebsite: React.FC<Props> = ({
                     <button
                       key={cat.id}
                       onClick={() => handleCategoryClick(cat.id)}
-                      className={`flex flex-col items-center justify-center shrink-0 w-[96px] rounded-2xl border p-2.5 text-center transition cursor-pointer ${
+                      className={`snap-start flex flex-col items-center justify-center shrink-0 w-[96px] rounded-2xl border p-2.5 text-center transition cursor-pointer ${
                         isSelected
                           ? 'border-[#f59e0b] bg-amber-50 shadow-xs'
                           : 'border-slate-200/90 bg-white'
@@ -516,15 +516,6 @@ export const PublicWebsite: React.FC<Props> = ({
                   );
                 })}
               </div>
-              <button
-                onClick={() =>
-                  catScrollRef.current?.scrollBy({ left: 180, behavior: 'smooth' })
-                }
-                className="absolute right-0 top-1/2 -translate-y-1/2 flex h-9 w-7 items-center justify-center rounded-l-xl bg-white/95 border border-slate-200 shadow-sm text-slate-600"
-                aria-label="เลื่อนหมวดหมู่"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
             </div>
           </div>
         </section>

@@ -24,8 +24,14 @@ import {
 } from './types';
 
 const ADMIN_TOKEN_KEY = 'komkrit_admin_token';
-const SEALED_VAULT_KEY = 'komkrit_sealed_vault_v1';
-const SEALED_VAULT_TS_KEY = 'komkrit_sealed_vault_ts_v1';
+
+// Proactively purge any legacy client-side vault copies from localStorage
+try {
+  localStorage.removeItem('komkrit_sealed_vault_v1');
+  localStorage.removeItem('komkrit_sealed_vault_ts_v1');
+} catch {
+  // ignore
+}
 
 export function getStoredAdminToken(): string {
   try {
@@ -47,41 +53,11 @@ export function setStoredAdminToken(token: string): void {
   }
 }
 
-function getStoredSealedVault(): string {
-  try {
-    return localStorage.getItem(SEALED_VAULT_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-function setStoredSealedVault(sealed: string, updatedAt?: number): void {
-  try {
-    if (!sealed || !sealed.startsWith('kvault1.')) return;
-    const prevTs = Number(localStorage.getItem(SEALED_VAULT_TS_KEY) || '0') || 0;
-    const nextTs = typeof updatedAt === 'number' && Number.isFinite(updatedAt) ? updatedAt : 0;
-    // Never overwrite a newer non-empty vault with an older or unversioned cold-start response
-    if (prevTs > 0 && nextTs < prevTs) {
-      return;
-    }
-    localStorage.setItem(SEALED_VAULT_KEY, sealed);
-    if (nextTs > 0) {
-      localStorage.setItem(SEALED_VAULT_TS_KEY, String(nextTs));
-    }
-  } catch {
-    // ignore storage errors
-  }
-}
-
 function buildAuthHeaders(extra?: HeadersInit): Record<string, string> {
   const token = getStoredAdminToken();
   const base: Record<string, string> = {};
   if (token) {
     base.Authorization = `Bearer ${token}`;
-    const sealed = getStoredSealedVault();
-    if (sealed) {
-      base['X-Komkrit-Sealed-Vault'] = sealed;
-    }
   }
   if (extra) {
     Object.assign(base, extra);
@@ -101,12 +77,6 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data?.error || `HTTP Error ${res.status}`);
-  }
-  if (data && typeof data.sealedVault === 'string' && data.sealedVault.startsWith('kvault1.')) {
-    setStoredSealedVault(
-      data.sealedVault,
-      typeof data.vaultUpdatedAt === 'number' ? data.vaultUpdatedAt : undefined
-    );
   }
   return data as T;
 }

@@ -23,7 +23,7 @@ export const IS_SERVERLESS = Boolean(
 
 export const DATA_DIR = IS_SERVERLESS
   ? '/tmp/komkrit-data'
-  : path.resolve(process.cwd(), 'data');
+  : process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }

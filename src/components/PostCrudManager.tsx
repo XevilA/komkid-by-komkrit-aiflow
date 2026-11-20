@@ -1319,7 +1319,7 @@ export const PostCrudManager: React.FC<Props> = ({
             />
           </div>
 
-          <div className="md:col-span-4 flex items-center gap-1 overflow-x-auto no-scrollbar">
+          <div className="md:col-span-4 flex flex-wrap items-center gap-1.5">
             {[
               { id: 'all', label: `ทั้งหมด (${posts.length})` },
               { id: 'published', label: `เผยแพร่ (${publishedCount})` },
@@ -1333,7 +1333,7 @@ export const PostCrudManager: React.FC<Props> = ({
                   setQuickFilter(tab.id as any);
                   setCurrentPage(1);
                 }}
-                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold shrink-0 transition cursor-pointer ${
+                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
                   quickFilter === tab.id
                     ? 'bg-slate-900 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
@@ -1489,8 +1489,8 @@ export const PostCrudManager: React.FC<Props> = ({
                     </th>
                     <th className="py-3 px-3">เนื้อหา / หัวข้อ</th>
                     <th className="py-3 px-3 w-36">หมวดหมู่</th>
-                    <th className="py-3 px-3 w-28">สถานะ</th>
-                    <th className="py-3 px-3 w-28">สถิติ / วันที่</th>
+                    <th className="py-3 px-3 w-32">สถานะ</th>
+                    <th className="py-3 px-3 w-32">สถิติ / วันที่</th>
                     <th className="py-3 pl-3 pr-4 text-right w-56">การจัดการ</th>
                   </tr>
                 </thead>
@@ -1550,28 +1550,28 @@ export const PostCrudManager: React.FC<Props> = ({
                           </div>
                         </td>
                         <td className="py-3 px-3 align-middle">
-                          <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                          <span className="inline-block whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
                             {cat?.nameTh || 'ทั่วไป'}
                           </span>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
+                          <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
                             {CONTENT_TYPES.find((c) => c.id === p.contentType)
                               ?.label || p.contentType}
                           </div>
                         </td>
-                        <td className="py-3 px-3 align-middle">
+                        <td className="py-3 px-3 align-middle whitespace-nowrap">
                           <button
                             type="button"
                             disabled={busyId === p.id}
                             onClick={() => handleToggleStatus(p)}
                             title="คลิกเพื่อสลับสถานะ"
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer ${
+                            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer ${
                               isPublished
                                 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                                 : 'bg-slate-100 text-slate-600 border border-slate-200'
                             }`}
                           >
                             <span
-                              className={`h-1.5 w-1.5 rounded-full ${
+                              className={`h-1.5 w-1.5 rounded-full shrink-0 ${
                                 isPublished ? 'bg-emerald-600' : 'bg-slate-400'
                               }`}
                             />
