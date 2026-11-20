@@ -118,6 +118,7 @@ export const AdminLayout: React.FC<Props> = ({
     new URLSearchParams(window.location.search).get('connect') ? 'channels' : 'inbox'
   );
   const [aiStatus, setAiStatus] = useState<AiEngineSettings | null>(null);
+  const [storageProblem, setStorageProblem] = useState('');
   const [blueprintOpen, setBlueprintOpen] = useState(false);
 
   const [mediaHandoff, setMediaHandoff] = useState<MediaAgentHandoff | null>(null);
@@ -160,6 +161,14 @@ export const AdminLayout: React.FC<Props> = ({
   useEffect(() => {
     refreshAiStatus();
   }, [refreshAiStatus]);
+
+  // Is what the admin saves going to survive a restart on this host?
+  useEffect(() => {
+    api
+      .getStorageStatus()
+      .then((s) => setStorageProblem(s.persistent ? '' : s.reason || 'ที่เก็บข้อมูลของเว็บไซต์นี้ไม่รับการบันทึก'))
+      .catch(() => undefined);
+  }, []);
 
   const connectedProvidersCount = aiStatus
     ? [
@@ -465,6 +474,14 @@ export const AdminLayout: React.FC<Props> = ({
         </header>
 
         <main className="mx-auto w-full max-w-[1400px] flex-1 space-y-6 p-4 sm:p-6">
+          {storageProblem && (
+            <div role="alert" className="rounded-md border border-rose-300 bg-rose-50 p-4">
+              <div className="text-sm font-semibold text-rose-900">ข้อมูลที่คุณบันทึกบนเว็บนี้จะไม่คงอยู่</div>
+              <p className="mt-0.5 text-sm text-rose-800">
+                {storageProblem} ระบบจะปฏิเสธการบันทึกแทนการแสดงว่าสำเร็จ แก้ได้โดยปลดระงับที่เก็บข้อมูลใน Vercel Dashboard หรือย้ายไปใช้งานบนเซิร์ฟเวอร์ VPS ซึ่งเก็บข้อมูลถาวรบนดิสก์
+              </p>
+            </div>
+          )}
           {aiStatus &&
             connectedProvidersCount === 0 &&
             (normalizedMenu === 'media-gen' || normalizedMenu === 'ai-command') && (

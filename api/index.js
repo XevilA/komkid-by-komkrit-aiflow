@@ -1032,6 +1032,7 @@ var lastCheckAt = 0;
 var blobWriteSuspended = false;
 var blobSuspendedRetryAfter = 0;
 var hasUnsyncedLocalMutations = false;
+var lastPersistError = "";
 function getBlobToken() {
   return (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
 }
@@ -1187,7 +1188,55 @@ async function persistDatabaseToCloud() {
   }
   blobWriteSuspended = true;
   blobSuspendedRetryAfter = Date.now() + 5 * 60 * 1e3;
+  try {
+    const body = await putRes.json();
+    lastPersistError = String(body?.error?.code || body?.error?.message || `HTTP ${putRes.status}`);
+  } catch {
+    lastPersistError = `HTTP ${putRes.status}`;
+  }
   return false;
+}
+var probeCache = null;
+async function getStorageStatus() {
+  if (!isCloudSyncEnabled()) {
+    return IS_SERVERLESS ? { persistent: false, runtime: "vercel-blob", reason: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 BLOB_READ_WRITE_TOKEN \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E08\u0E30\u0E2B\u0E32\u0E22\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E23\u0E30\u0E1A\u0E1A\u0E23\u0E35\u0E2A\u0E15\u0E32\u0E23\u0E4C\u0E15" } : { persistent: true, runtime: "disk", reason: "" };
+  }
+  const now = Date.now();
+  if (probeCache && now - probeCache.at < 6e4) return probeCache.value;
+  let value;
+  try {
+    const token = getBlobToken();
+    const path8 = `probe/write-check-${now}.txt`;
+    const res = await fetch(`${BLOB_API_BASE}/${path8}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-api-version": "7",
+        "x-content-type": "text/plain",
+        "x-add-random-suffix": "0"
+      },
+      body: "ok",
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.url) await deleteMediaFromCloudBlob(data.url);
+      blobWriteSuspended = false;
+      value = { persistent: true, runtime: "vercel-blob", reason: "" };
+    } else {
+      const body = await res.json().catch(() => ({}));
+      const code = String(body?.error?.code || res.status);
+      value = {
+        persistent: false,
+        runtime: "vercel-blob",
+        reason: code === "store_suspended" ? "\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 Vercel Blob \u0E16\u0E39\u0E01\u0E23\u0E30\u0E07\u0E31\u0E1A \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E1A\u0E19 Vercel \u0E08\u0E30\u0E2B\u0E32\u0E22\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E23\u0E30\u0E1A\u0E1A\u0E23\u0E35\u0E2A\u0E15\u0E32\u0E23\u0E4C\u0E15" : `\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 Vercel Blob \u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18\u0E01\u0E32\u0E23\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01 (${code})`
+      };
+    }
+  } catch (err) {
+    value = { persistent: false, runtime: "vercel-blob", reason: `\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08: ${err.message}` };
+  }
+  probeCache = { at: now, value };
+  return value;
 }
 async function uploadMediaToCloudBlob(buffer, filename, mimeType) {
   const token = getBlobToken();
@@ -8486,9 +8535,22 @@ app.use("/api", async (req, res, next) => {
     await syncDatabaseBeforeRequest(isMutation);
     if (isMutation && req.path !== "/auth/login") {
       const origJson = res.json.bind(res);
+      const isRealWrite = req.method !== "GET";
       res.json = ((body) => {
         if (res.statusCode < 400) {
-          persistDatabaseToCloud().catch((err) => console.error("Cloud DB persist error:", redactSecrets(String(err)))).finally(() => origJson(body));
+          persistDatabaseToCloud().catch((err) => {
+            console.error("Cloud DB persist error:", redactSecrets(String(err)));
+            return false;
+          }).then((saved) => {
+            if (saved === false && isRealWrite) {
+              res.status(503);
+              return origJson({
+                error: "\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08: \u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E02\u0E2D\u0E07\u0E40\u0E27\u0E47\u0E1A\u0E44\u0E0B\u0E15\u0E4C\u0E19\u0E35\u0E49 (Vercel Blob) \u0E44\u0E21\u0E48\u0E23\u0E31\u0E1A\u0E01\u0E32\u0E23\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01 \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E30\u0E44\u0E21\u0E48\u0E04\u0E07\u0E2D\u0E22\u0E39\u0E48 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E1B\u0E25\u0E14\u0E23\u0E30\u0E07\u0E31\u0E1A\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E43\u0E19 Vercel Dashboard \u0E2B\u0E23\u0E37\u0E2D\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19\u0E1C\u0E48\u0E32\u0E19\u0E40\u0E0B\u0E34\u0E23\u0E4C\u0E1F\u0E40\u0E27\u0E2D\u0E23\u0E4C VPS",
+                code: "storage_unavailable"
+              });
+            }
+            return origJson(body);
+          });
           return res;
         }
         return origJson(body);
@@ -11008,6 +11070,10 @@ app.post("/api/admin/import-json", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.get("/api/storage/status", async (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(await getStorageStatus());
+});
 app.get("/api/admin/sample-data", (_req, res) => {
   res.json(detectSampleData());
 });
@@ -11585,7 +11651,7 @@ app.get("/articles/:slug", async (req, res, next) => {
   }
   const post = mapPostRow(row2);
   const base = `https://${cfg.primaryDomain}`;
-  res.setHeader("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=300");
+  res.setHeader("Cache-Control", "public, max-age=0, s-maxage=10");
   res.status(200).send(
     buildArticleShell(
       template,

@@ -20,6 +20,7 @@ import { registerWorkspaceRoutes } from './workspaceRoutes.ts';
 import { createLimiter } from './limits.ts';
 import { registerChannelRoutes } from './channelRoutes.ts';
 import { connectionStatus } from './channelConnect.ts';
+import { getStorageStatus } from './cloudSync.ts';
 import { detectSampleData, removeSampleData } from './sampleData.ts';
 import { buildArticleShell, buildNotFoundShell } from './articleShell.ts';
 import {
@@ -294,11 +295,26 @@ app.use('/api', async (req, res, next) => {
 
     if (isMutation && req.path !== '/auth/login') {
       const origJson = res.json.bind(res);
+      const isRealWrite = req.method !== 'GET';
       res.json = ((body: any) => {
         if (res.statusCode < 400) {
           persistDatabaseToCloud()
-            .catch((err) => console.error('Cloud DB persist error:', redactSecrets(String(err))))
-            .finally(() => origJson(body));
+            .catch((err) => {
+              console.error('Cloud DB persist error:', redactSecrets(String(err)));
+              return false;
+            })
+            .then((saved) => {
+              if (saved === false && isRealWrite) {
+                // Never say "saved" when the data will not survive: tell the truth instead.
+                res.status(503);
+                return origJson({
+                  error:
+                    'บันทึกไม่สำเร็จ: ที่เก็บข้อมูลของเว็บไซต์นี้ (Vercel Blob) ไม่รับการบันทึก ข้อมูลจะไม่คงอยู่ กรุณาปลดระงับที่เก็บข้อมูลใน Vercel Dashboard หรือใช้งานผ่านเซิร์ฟเวอร์ VPS',
+                  code: 'storage_unavailable',
+                });
+              }
+              return origJson(body);
+            });
           return res;
         }
         return origJson(body);
@@ -3273,6 +3289,11 @@ app.post('/api/admin/import-json', (req, res) => {
   }
 });
 
+app.get('/api/storage/status', async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(await getStorageStatus());
+});
+
 // Sample data that older installs were pre-filled with (admin reviews, then removes on request)
 app.get('/api/admin/sample-data', (_req, res) => {
   res.json(detectSampleData());
@@ -3924,7 +3945,7 @@ app.get('/articles/:slug', async (req, res, next) => {
   }
   const post = mapPostRow(row);
   const base = `https://${cfg.primaryDomain}`;
-  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=10');
   res.status(200).send(
     buildArticleShell(
       template,

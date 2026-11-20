@@ -814,6 +814,8 @@ export const api = {
   disconnectChannel: (key: string) =>
     request<{ ok: boolean }>(`/api/channels/${key}/disconnect`, { method: 'POST' }),
 
+  getStorageStatus: () =>
+    request<{ persistent: boolean; runtime: string; reason: string }>('/api/storage/status'),
   getSampleData: () => request<import('./types').SampleDataReport>('/api/admin/sample-data'),
   removeSampleData: () =>
     request<{ ok: boolean; removed: import('./types').SampleDataReport }>('/api/admin/sample-data/remove', {

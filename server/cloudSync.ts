@@ -14,6 +14,7 @@ let lastCheckAt = 0;
 let blobWriteSuspended = false;
 let blobSuspendedRetryAfter = 0;
 let hasUnsyncedLocalMutations = false;
+let lastPersistError = '';
 
 function getBlobToken(): string {
   return (process.env.BLOB_READ_WRITE_TOKEN || '').trim();
@@ -213,7 +214,81 @@ export async function persistDatabaseToCloud(): Promise<boolean> {
 
   blobWriteSuspended = true;
   blobSuspendedRetryAfter = Date.now() + 5 * 60 * 1000;
+  try {
+    const body = (await putRes.json()) as any;
+    lastPersistError = String(body?.error?.code || body?.error?.message || `HTTP ${putRes.status}`);
+  } catch {
+    lastPersistError = `HTTP ${putRes.status}`;
+  }
   return false;
+}
+
+export interface StorageStatus {
+  persistent: boolean;
+  runtime: 'disk' | 'vercel-blob';
+  reason: string;
+}
+
+let probeCache: { at: number; value: StorageStatus } | null = null;
+
+/**
+ * Can data written now survive a restart? A long-lived server writes to its own disk (yes).
+ * On Vercel the database lives in a Blob store; if that store refuses writes (suspended, quota,
+ * bad token) everything saved is lost on the next cold start, so say so instead of pretending.
+ */
+export async function getStorageStatus(): Promise<StorageStatus> {
+  if (!isCloudSyncEnabled()) {
+    return IS_SERVERLESS
+      ? { persistent: false, runtime: 'vercel-blob', reason: 'ยังไม่ได้ตั้งค่า BLOB_READ_WRITE_TOKEN ข้อมูลที่บันทึกจะหายเมื่อระบบรีสตาร์ต' }
+      : { persistent: true, runtime: 'disk', reason: '' };
+  }
+  const now = Date.now();
+  if (probeCache && now - probeCache.at < 60_000) return probeCache.value;
+  let value: StorageStatus;
+  try {
+    const token = getBlobToken();
+    const path = `probe/write-check-${now}.txt`;
+    const res = await fetch(`${BLOB_API_BASE}/${path}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-api-version': '7',
+        'x-content-type': 'text/plain',
+        'x-add-random-suffix': '0',
+      },
+      body: 'ok',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { url?: string };
+      if (data.url) await deleteMediaFromCloudBlob(data.url);
+      blobWriteSuspended = false;
+      value = { persistent: true, runtime: 'vercel-blob', reason: '' };
+    } else {
+      const body = (await res.json().catch(() => ({}))) as any;
+      const code = String(body?.error?.code || res.status);
+      value = {
+        persistent: false,
+        runtime: 'vercel-blob',
+        reason:
+          code === 'store_suspended'
+            ? 'ที่เก็บข้อมูล Vercel Blob ถูกระงับ ข้อมูลที่บันทึกบน Vercel จะหายเมื่อระบบรีสตาร์ต'
+            : `ที่เก็บข้อมูล Vercel Blob ปฏิเสธการบันทึก (${code})`,
+      };
+    }
+  } catch (err) {
+    value = { persistent: false, runtime: 'vercel-blob', reason: `ตรวจสอบที่เก็บข้อมูลไม่สำเร็จ: ${(err as Error).message}` };
+  }
+  probeCache = { at: now, value };
+  return value;
+}
+
+export function getLastPersistError(): string {
+  return lastPersistError;
+}
+
+export function resetStorageProbeCache() {
+  probeCache = null;
 }
 
 export async function uploadMediaToCloudBlob(
