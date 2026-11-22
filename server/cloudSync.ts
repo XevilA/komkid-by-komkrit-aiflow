@@ -7,7 +7,6 @@ import {
 } from './db.ts';
 
 const BLOB_API_BASE = 'https://blob.vercel-storage.com';
-const STATE_PREFIX = 'state/komkrit-db-';
 
 let currentLoadedBlobPath = '';
 let lastCheckAt = 0;
@@ -51,79 +50,60 @@ function decryptBuffer(packed: Buffer, token: string): Buffer {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
 
-interface BlobListItem {
-  url: string;
-  pathname: string;
-  uploadedAt: string;
-  size: number;
+/**
+ * Blob billing counts uploads, copies and listings as "advanced operations" (a very small monthly
+ * allowance on the free plan) and plain downloads as "simple operations". So the database snapshot
+ * lives at ONE fixed path: saving is a single overwrite (no list, no cleanup delete, no new file
+ * per save) and checking for newer data is a plain conditional download.
+ */
+const STATE_PATH = 'state/komkrit-db.enc';
+/** Minimum seconds between "is there newer data?" checks on one warm instance. */
+const CHECK_INTERVAL_MS = 45_000;
+
+let loadedEtag = '';
+let lastWriteOk: boolean | null = null;
+
+/** `vercel_blob_rw_<storeId>_<secret>` -> https://<storeid>.public.blob.vercel-storage.com */
+function blobBaseUrl(token: string): string {
+  const m = /^vercel_blob_rw_([a-z0-9]+)_/i.exec(token);
+  return m ? `https://${m[1].toLowerCase()}.public.blob.vercel-storage.com` : '';
 }
 
-async function listStateBlobs(token: string): Promise<BlobListItem[]> {
-  const res = await fetch(
-    `${BLOB_API_BASE}?prefix=${encodeURIComponent(STATE_PREFIX)}&limit=20`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'x-api-version': '7',
-      },
-      cache: 'no-store',
-    }
-  );
-  if (!res.ok) return [];
-  const data = (await res.json()) as { blobs?: BlobListItem[] };
-  const blobs = Array.isArray(data.blobs) ? data.blobs : [];
-  // Sort newest first by pathname (which embeds epoch ms)
-  blobs.sort((a, b) => (b.pathname > a.pathname ? 1 : -1));
-  return blobs;
-}
-
-async function deleteOldStateBlobs(token: string, urlsToDelete: string[]): Promise<void> {
-  if (urlsToDelete.length === 0) return;
-  try {
-    await fetch(`${BLOB_API_BASE}/delete`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'x-api-version': '7',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ urls: urlsToDelete }),
-    });
-  } catch {
-    // ignore cleanup errors
-  }
+function stateUrl(token: string): string {
+  const base = blobBaseUrl(token);
+  return base ? `${base}/${STATE_PATH}` : '';
 }
 
 export async function syncDatabaseBeforeRequest(forceCheck = false): Promise<void> {
   if (!isCloudSyncEnabled()) return;
-  // Never overwrite newer local encrypted writes when the cloud blob store is suspended
-  if (hasUnsyncedLocalMutations && blobWriteSuspended) {
-    return;
-  }
+  // Never overwrite newer local writes with an older cloud copy while the store refuses writes
+  if (hasUnsyncedLocalMutations && blobWriteSuspended) return;
   const token = getBlobToken();
+  const url = stateUrl(token);
+  if (!url) return;
   const now = Date.now();
-  // Throttle read-only checks to 30s so Hobby Blob advanced-ops quota is preserved
-  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 30000) {
-    return;
-  }
+  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < CHECK_INTERVAL_MS) return;
   lastCheckAt = now;
 
-  const blobs = await listStateBlobs(token);
-  if (blobs.length === 0) {
-    if (!currentLoadedBlobPath && !blobWriteSuspended) {
-      await persistDatabaseToCloud();
-    }
+  // The random query keeps the CDN from answering with a copy that predates the last overwrite.
+  const headers: Record<string, string> = {};
+  if (loadedEtag) headers['If-None-Match'] = loadedEtag;
+  let dl: Response;
+  try {
+    dl = await fetch(`${url}?v=${now}`, { cache: 'no-store', headers, signal: AbortSignal.timeout(10_000) });
+  } catch {
     return;
   }
-
-  const newest = blobs[0];
-  if (newest.pathname === currentLoadedBlobPath) {
+  if (dl.status === 304) return;
+  if (dl.status === 404) {
+    // First run on an empty store: publish the current database once.
+    if (!currentLoadedBlobPath && !blobWriteSuspended) await persistDatabaseToCloud();
     return;
   }
-
-  const dl = await fetch(newest.url, { cache: 'no-store' });
   if (!dl.ok) return;
+  const etag = dl.headers.get('etag') || '';
   const encryptedBytes = Buffer.from(await dl.arrayBuffer());
+  if (etag && etag === loadedEtag) return;
   const sqliteBytes = decryptBuffer(encryptedBytes, token);
 
   // Preserve any newer in-memory encrypted settings before reloading an older cloud snapshot
@@ -164,7 +144,8 @@ export async function syncDatabaseBeforeRequest(forceCheck = false): Promise<voi
     }
   }
 
-  currentLoadedBlobPath = newest.pathname;
+  loadedEtag = etag;
+  currentLoadedBlobPath = STATE_PATH;
   hasUnsyncedLocalMutations = false;
 }
 
@@ -173,7 +154,7 @@ export async function persistDatabaseToCloud(): Promise<boolean> {
   const now = Date.now();
   hasUnsyncedLocalMutations = true;
 
-  // Back off 5 minutes when Vercel Blob store is suspended so requests stay fast
+  // Back off 5 minutes when the store refuses writes so requests stay fast
   if (blobWriteSuspended && now < blobSuspendedRetryAfter) {
     return false;
   }
@@ -181,45 +162,51 @@ export async function persistDatabaseToCloud(): Promise<boolean> {
   const token = getBlobToken();
   const sqliteBytes = exportDatabaseSnapshotBuffer();
   const encryptedBytes = encryptBuffer(sqliteBytes, token);
-  const ts = String(now).padStart(15, '0');
-  const rand = crypto.randomBytes(3).toString('hex');
-  const pathname = `${STATE_PREFIX}${ts}-${rand}.enc`;
 
-  const putRes = await fetch(`${BLOB_API_BASE}/${pathname}`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'x-api-version': '7',
-      'x-content-type': 'application/octet-stream',
-      'x-add-random-suffix': '0',
-      'x-cache-control-max-age': '0',
-    },
-    body: new Uint8Array(encryptedBytes),
-  });
+  let putRes: Response;
+  try {
+    putRes = await fetch(`${BLOB_API_BASE}/${STATE_PATH}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-api-version': '7',
+        'x-content-type': 'application/octet-stream',
+        'x-add-random-suffix': '0',
+        'x-allow-overwrite': '1',
+        'x-cache-control-max-age': '60',
+      },
+      body: new Uint8Array(encryptedBytes),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (err) {
+    lastPersistError = (err as Error).message;
+    lastWriteOk = false;
+    return false;
+  }
 
   if (putRes.ok) {
     blobWriteSuspended = false;
     blobSuspendedRetryAfter = 0;
     hasUnsyncedLocalMutations = false;
-    currentLoadedBlobPath = pathname;
+    currentLoadedBlobPath = STATE_PATH;
+    loadedEtag = ''; // next check re-validates once; nothing else to clean up
     lastCheckAt = Date.now();
-
-    const blobs = await listStateBlobs(token);
-    if (blobs.length > 2) {
-      const oldUrls = blobs.slice(2).map((b) => b.url);
-      await deleteOldStateBlobs(token, oldUrls);
-    }
+    lastWriteOk = true;
+    lastPersistError = '';
+    probeCache = null;
     return true;
   }
 
   blobWriteSuspended = true;
   blobSuspendedRetryAfter = Date.now() + 5 * 60 * 1000;
+  lastWriteOk = false;
   try {
     const body = (await putRes.json()) as any;
     lastPersistError = String(body?.error?.code || body?.error?.message || `HTTP ${putRes.status}`);
   } catch {
     lastPersistError = `HTTP ${putRes.status}`;
   }
+  probeCache = null;
   return false;
 }
 
@@ -231,10 +218,18 @@ export interface StorageStatus {
 
 let probeCache: { at: number; value: StorageStatus } | null = null;
 
+function describeStoreError(code: string): string {
+  return code === 'store_suspended'
+    ? 'ที่เก็บข้อมูล Vercel Blob ถูกระงับ ข้อมูลที่บันทึกบน Vercel จะหายเมื่อระบบรีสตาร์ต'
+    : `ที่เก็บข้อมูล Vercel Blob ปฏิเสธการบันทึก (${code})`;
+}
+
 /**
  * Can data written now survive a restart? A long-lived server writes to its own disk (yes).
  * On Vercel the database lives in a Blob store; if that store refuses writes (suspended, quota,
  * bad token) everything saved is lost on the next cold start, so say so instead of pretending.
+ * The answer comes from the outcome of the last real save plus a free download check, so
+ * polling this endpoint never costs billable write operations.
  */
 export async function getStorageStatus(): Promise<StorageStatus> {
   if (!isCloudSyncEnabled()) {
@@ -242,42 +237,32 @@ export async function getStorageStatus(): Promise<StorageStatus> {
       ? { persistent: false, runtime: 'vercel-blob', reason: 'ยังไม่ได้ตั้งค่า BLOB_READ_WRITE_TOKEN ข้อมูลที่บันทึกจะหายเมื่อระบบรีสตาร์ต' }
       : { persistent: true, runtime: 'disk', reason: '' };
   }
+  if (lastWriteOk === false) {
+    return { persistent: false, runtime: 'vercel-blob', reason: describeStoreError(lastPersistError) };
+  }
   const now = Date.now();
   if (probeCache && now - probeCache.at < 60_000) return probeCache.value;
-  let value: StorageStatus;
-  try {
-    const token = getBlobToken();
-    const path = `probe/write-check-${now}.txt`;
-    const res = await fetch(`${BLOB_API_BASE}/${path}`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'x-api-version': '7',
-        'x-content-type': 'text/plain',
-        'x-add-random-suffix': '0',
-      },
-      body: 'ok',
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { url?: string };
-      if (data.url) await deleteMediaFromCloudBlob(data.url);
-      blobWriteSuspended = false;
-      value = { persistent: true, runtime: 'vercel-blob', reason: '' };
-    } else {
-      const body = (await res.json().catch(() => ({}))) as any;
-      const code = String(body?.error?.code || res.status);
-      value = {
-        persistent: false,
-        runtime: 'vercel-blob',
-        reason:
-          code === 'store_suspended'
-            ? 'ที่เก็บข้อมูล Vercel Blob ถูกระงับ ข้อมูลที่บันทึกบน Vercel จะหายเมื่อระบบรีสตาร์ต'
-            : `ที่เก็บข้อมูล Vercel Blob ปฏิเสธการบันทึก (${code})`,
-      };
+  let value: StorageStatus = { persistent: true, runtime: 'vercel-blob', reason: '' };
+  if (lastWriteOk === null) {
+    // Nothing saved yet by this instance: a download (a free "simple" operation) tells us whether
+    // the store is reachable; a suspended store answers every request with an error.
+    try {
+      const url = stateUrl(getBlobToken());
+      const res = await fetch(`${url}?v=${now}`, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status !== 404 && !res.ok) {
+        value = {
+          persistent: false,
+          runtime: 'vercel-blob',
+          reason: describeStoreError(String(res.status)),
+        };
+      }
+    } catch (err) {
+      value = { persistent: false, runtime: 'vercel-blob', reason: `ตรวจสอบที่เก็บข้อมูลไม่สำเร็จ: ${(err as Error).message}` };
     }
-  } catch (err) {
-    value = { persistent: false, runtime: 'vercel-blob', reason: `ตรวจสอบที่เก็บข้อมูลไม่สำเร็จ: ${(err as Error).message}` };
   }
   probeCache = { at: now, value };
   return value;
@@ -287,8 +272,13 @@ export function getLastPersistError(): string {
   return lastPersistError;
 }
 
+/** Forget cached storage health (used when the operator fixes the store, and by tests). */
 export function resetStorageProbeCache() {
   probeCache = null;
+  lastWriteOk = null;
+  lastPersistError = '';
+  blobWriteSuspended = false;
+  blobSuspendedRetryAfter = 0;
 }
 
 export async function uploadMediaToCloudBlob(

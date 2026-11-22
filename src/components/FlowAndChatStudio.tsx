@@ -507,7 +507,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             onClick={() => setSubTab('flow')}
             className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold border transition cursor-pointer ${
               subTab === 'flow'
-                ? 'bg-slate-900 text-white border-slate-900'
+                ? 'bg-slate-900 text-white border-brand-700'
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
@@ -519,7 +519,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             onClick={() => setSubTab('direct_media')}
             className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold border transition cursor-pointer ${
               subTab === 'direct_media'
-                ? 'bg-slate-900 text-white border-slate-900'
+                ? 'bg-slate-900 text-white border-brand-700'
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
@@ -531,7 +531,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
             onClick={() => setSubTab('chat')}
             className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold border transition cursor-pointer ${
               subTab === 'chat'
-                ? 'bg-slate-900 text-white border-slate-900'
+                ? 'bg-slate-900 text-white border-brand-700'
                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
@@ -605,7 +605,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   value={flowTitle}
                   onChange={(e) => setFlowTitle(e.target.value)}
                   placeholder="เช่น การประยุกต์ใช้ AI ในห้องเรียนยุคใหม่"
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-brand-700 focus:outline-none"
                 />
               </div>
               <div className="md:col-span-7">
@@ -618,7 +618,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   value={flowConcept}
                   onChange={(e) => setFlowConcept(e.target.value)}
                   placeholder="ระบุโครงเรื่องเพื่อให้ AI แบ่งฉากและเขียนบทบรรยาย"
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-brand-700 focus:outline-none"
                 />
               </div>
             </div>
@@ -689,7 +689,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
               <button
                 type="submit"
                 disabled={creatingFlow}
-                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 py-2 px-4 text-xs font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-700 py-2 px-4 text-xs font-semibold text-white hover:bg-brand-800 transition cursor-pointer disabled:opacity-60"
               >
                 {creatingFlow ? (
                   <>
@@ -718,7 +718,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     onClick={() => setSelectedFlowId(fp.id)}
                     className={`rounded-md border p-3 cursor-pointer transition ${
                       activeFlow?.id === fp.id
-                        ? 'border-slate-900 bg-slate-50'
+                        ? 'border-brand-700 bg-slate-50'
                         : 'border-slate-200 hover:bg-slate-50/60'
                     }`}
                   >
@@ -788,7 +788,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                         <button
                           type="button"
                           onClick={() => handlePublishFlowVideoToWebsite(activeFlow)}
-                          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                         >
                           <FilePlus2 className="w-3.5 h-3.5 text-slate-500" />
                           เผยแพร่ขึ้นหน้าเว็บ
@@ -843,7 +843,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                         className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 space-y-3.5"
                       >
                         <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
-                          <span className="rounded bg-slate-900 px-2.5 py-0.5 text-xs font-semibold text-white">
+                          <span className="rounded bg-brand-700 px-2.5 py-0.5 text-xs font-semibold text-white">
                             ฉากที่ {sc.sceneNumber} ({sc.durationSec} วินาที)
                           </span>
                           <h4 className="font-bold text-xs sm:text-sm text-slate-900">
@@ -1047,7 +1047,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                                     sc.videoMotionPrompt
                                   )
                                 }
-                                className="flex-1 rounded bg-slate-900 py-1.5 px-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                                className="flex-1 rounded bg-brand-700 py-1.5 px-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                               >
                                 {busySceneKey === `video-${idx}-keyframes` ||
                                 busySceneKey === `video-${idx}-text_only`
@@ -1318,7 +1318,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                     onClick={() => setChatProvider(p.id)}
                     className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold border transition cursor-pointer ${
                       active
-                        ? 'bg-slate-900 text-white border-slate-900'
+                        ? 'bg-slate-900 text-white border-brand-700'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
@@ -1354,7 +1354,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                   type="checkbox"
                   checked={useKb}
                   onChange={(e) => setUseKb(e.target.checked)}
-                  className="accent-slate-900"
+                  className="accent-brand-600"
                 />
                 อ้างอิงคลังความรู้ (RAG)
               </label>
@@ -1414,7 +1414,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                           onClick={() =>
                             handlePublishTextToCrud(ar.reply, ar.engineLabel)
                           }
-                          className="rounded bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                          className="rounded bg-brand-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                         >
                           นำไปสร้างเนื้อหาบนเว็บไซต์
                         </button>
@@ -1482,7 +1482,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="พิมพ์คำถามหรือหัวข้อที่ต้องการวิเคราะห์..."
-                className="flex-1 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+                className="flex-1 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm focus:border-brand-700 focus:outline-none"
               />
               <div className="flex gap-2">
                 <button
@@ -1497,7 +1497,7 @@ export const FlowAndChatStudio: React.FC<Props> = ({
                 <button
                   type="submit"
                   disabled={chatSending || arenaRunning}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                 >
                   <Send className="w-3.5 h-3.5" />
                   {chatSending ? 'กำลังส่ง...' : 'ส่งคำสั่ง'}

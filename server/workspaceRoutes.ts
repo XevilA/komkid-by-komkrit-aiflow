@@ -15,7 +15,7 @@ import {
   saveProject,
   type Category,
 } from './workspaces.ts';
-import { confirmAction, isProjectRunning, publishProject, runCeo, hasPublishIntent } from './ceoAgent.ts';
+import { confirmAction, isProjectRunning, publishProject, runCeo, runAutopilot, hasPublishIntent } from './ceoAgent.ts';
 import { getCapabilities } from './agentTools.ts';
 import { validateSlug } from './slug.ts';
 import type { LlmProviderId } from './aiEngine.ts';
@@ -174,6 +174,29 @@ export function registerWorkspaceRoutes(app: Express) {
         provider: providerOf(req.body?.provider),
         model: typeof req.body?.model === 'string' ? req.body.model.slice(0, 120) : undefined,
         publishAllowed: hasPublishIntent(message),
+      })
+    );
+  });
+
+  // One instruction -> the CEO runs the whole workflow by itself.
+  app.post('/api/workspaces/:id/autopilot', async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!getProject(id)) return void res.status(404).json({ error: 'ไม่พบโปรเจกต์' });
+    const brief = String(req.body?.brief ?? '').trim();
+    if (!brief) return void res.status(400).json({ error: 'กรุณาพิมพ์โจทย์' });
+    if (brief.length > 4000) return void res.status(400).json({ error: 'โจทย์ยาวเกิน 4000 ตัวอักษร' });
+    if (isProjectRunning(id)) return void res.status(409).json({ error: 'ทีมกำลังทำงานอยู่ กรุณารอให้เสร็จก่อน' });
+    const ch = req.body?.channels;
+    await kickOff(res, id, () =>
+      runAutopilot({
+        projectId: id,
+        brief,
+        provider: providerOf(req.body?.provider),
+        cover: req.body?.cover !== false,
+        video: req.body?.video === true,
+        publish: req.body?.publish !== false,
+        requireApproval: req.body?.requireApproval === true,
+        channels: ch === 'all' ? 'all' : Array.isArray(ch) ? ch.map(String).slice(0, 12) : undefined,
       })
     );
   });

@@ -754,7 +754,7 @@ export const AiCommandCenter: React.FC<Props> = ({
   return (
     <div className="space-y-6">
       {toastMsg && (
-        <div className="fixed bottom-5 right-5 z-50 rounded-md bg-[#0a101d] text-white border border-slate-300 px-4 py-3 text-xs font-semibold flex items-center gap-2">
+        <div className="fixed bottom-5 right-5 z-50 rounded-md bg-brand-700 text-white border border-brand-700 px-4 py-3 text-xs font-semibold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-slate-200 shrink-0" />
           <span>{toastMsg}</span>
         </div>
@@ -818,7 +818,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                     }}
                     className={`rounded-md border px-3.5 py-2.5 text-left transition cursor-pointer flex items-start gap-2.5 ${
                       active
-                        ? 'border-[#0a101d] bg-slate-900/[0.03] ring-1 ring-[#0a101d]/10'
+                        ? 'border-brand-700 bg-brand-50 ring-1 ring-[#0a101d]/10'
                         : 'border-slate-200/80 bg-white hover:bg-slate-50/70'
                     }`}
                   >
@@ -851,7 +851,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                   onClick={() => setInputSource(src.label)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition cursor-pointer ${
                     selected
-                      ? 'bg-[#0a101d] text-slate-200 font-semibold'
+                      ? 'bg-brand-900 text-slate-200 font-semibold'
                       : 'bg-slate-100/90 text-slate-600 hover:bg-slate-200/70'
                   }`}
                 >
@@ -869,12 +869,12 @@ export const AiCommandCenter: React.FC<Props> = ({
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               placeholder="สั่งงาน AGENT CEO เช่น วิเคราะห์แนวทางใช้ AI ลดงานเอกสารครูไทย พร้อมสร้างภาพปกประกอบบทความ..."
-              className="flex-1 rounded-md border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-[#0a101d] focus:bg-white focus:outline-none transition"
+              className="flex-1 rounded-md border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:border-brand-700 focus:bg-white focus:outline-none transition"
             />
             <button
               type="submit"
               disabled={running}
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-[#0a101d] px-6 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 transition cursor-pointer disabled:opacity-60 shrink-0 "
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-800 transition cursor-pointer disabled:opacity-60 shrink-0 "
             >
               <PenLine className="w-4 h-4" />
               {running ? 'ทีม Agent กำลังทำงาน...' : 'สั่งงาน AGENT CEO'}
@@ -902,7 +902,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                 type="checkbox"
                 checked={autoGenerateCoverImage}
                 onChange={(e) => setAutoGenerateCoverImage(e.target.checked)}
-                className="accent-[#0a101d] rounded"
+                className="accent-brand-600 rounded"
               />
               สั่ง 04 Visual วาดรูปปก & แทรกในบทความอัตโนมัติ
             </label>
@@ -976,7 +976,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={onOpenSettings}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer shrink-0"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer shrink-0"
                 >
                   <KeyRound className="w-3.5 h-3.5" /> ตั้งค่า API Vault
                 </button>
@@ -985,7 +985,7 @@ export const AiCommandCenter: React.FC<Props> = ({
           )}
 
           {running && (
-            <div className="rounded-md bg-[#0a101d] text-white p-4 flex items-center gap-3.5">
+            <div className="rounded-md bg-brand-900 text-white p-4 flex items-center gap-3.5">
               <RefreshCw className="w-4 h-4 text-slate-200 animate-spin shrink-0" />
               <div className="flex-1">
                 <div className="text-xs font-semibold text-slate-200">
@@ -1033,7 +1033,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                   onClick={() => setActiveAgentTab(node.id)}
                   className={`group relative rounded-md border p-2.5 text-left transition cursor-pointer flex flex-col justify-between min-h-[72px] ${
                     isSelected
-                      ? 'bg-[#0a101d] border-[#0a101d] text-white '
+                      ? 'bg-brand-900 border-brand-700 text-white '
                       : 'bg-slate-50/60 border-slate-200/80 text-slate-800 hover:bg-white hover:border-slate-300'
                   }`}
                 >
@@ -1041,7 +1041,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                     <span
                       className={`text-xs font-extrabold px-1.5 py-0.5 rounded ${
                         isSelected
-                          ? 'bg-slate-200 text-[#0a101d]'
+                          ? 'bg-slate-200 text-brand-900'
                           : 'bg-slate-200/80 text-slate-700'
                       }`}
                     >
@@ -1094,7 +1094,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                   onClick={() => setSelectedId(wf.id)}
                   className={`rounded-md border p-3 cursor-pointer transition ${
                     active
-                      ? 'border-[#0a101d] bg-slate-900/[0.03] '
+                      ? 'border-brand-700 bg-brand-50 '
                       : 'border-slate-200/70 bg-white hover:bg-slate-50/80'
                   }`}
                 >
@@ -1198,7 +1198,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           <button
                             onClick={handleApproveAndPublish}
                             disabled={publishing}
-                            className="inline-flex items-center gap-2 rounded-md bg-[#0a101d] px-5 py-2.5 text-xs sm:text-sm font-bold text-slate-200 hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-md bg-brand-700 px-5 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-brand-800 transition cursor-pointer disabled:opacity-50"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             {publishing
@@ -1279,7 +1279,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           }}
                           className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold transition cursor-pointer ${
                             showMediaVault
-                              ? 'bg-[#0a101d] text-slate-200'
+                              ? 'bg-brand-900 text-slate-200'
                               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                           }`}
                         >
@@ -1344,7 +1344,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                                         onClick={() =>
                                           handleAttachSharedAsset(asset, 'both')
                                         }
-                                        className="rounded-lg bg-[#0a101d] px-2 py-1 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer"
+                                        className="rounded-lg bg-brand-700 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                                       >
                                         {asset.mediaType === 'video'
                                           ? 'ใช้วิดีโอ + แทรก'
@@ -1377,7 +1377,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           value={revisionNote}
                           onChange={(e) => setRevisionNote(e.target.value)}
                           placeholder="สั่ง CEO ปรับแก้เนื้อหาเพิ่มเติม เช่น ขอเพิ่มกรณีศึกษาโรงเรียนไทย หรือปรับภาษาให้กระชับขึ้น..."
-                          className="flex-1 rounded-md border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-800 focus:border-[#0a101d] focus:outline-none"
+                          className="flex-1 rounded-md border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-800 focus:border-brand-700 focus:outline-none"
                         />
                         <button
                           onClick={handleRequestRevision}
@@ -1397,7 +1397,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                             type="checkbox"
                             checked={publishAsFeatured}
                             onChange={(e) => setPublishAsFeatured(e.target.checked)}
-                            className="accent-[#0a101d] rounded"
+                            className="accent-brand-600 rounded"
                           />
                           ปักหมุดเป็นบทความเด่นหน้าแรก
                         </label>
@@ -1415,7 +1415,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           </span>
                           <button
                             onClick={handleSaveInlineEdit}
-                            className="rounded-md bg-[#0a101d] px-4 py-2 text-xs font-semibold text-slate-200 cursor-pointer"
+                            className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
                           >
                             บันทึกการแก้ไข
                           </button>
@@ -1424,13 +1424,13 @@ export const AiCommandCenter: React.FC<Props> = ({
                           type="text"
                           value={editTitle}
                           onChange={(e) => setEditTitle(e.target.value)}
-                          className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-[#0a101d] focus:outline-none"
+                          className="w-full rounded-md border border-slate-200 px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-brand-700 focus:outline-none"
                         />
                         <textarea
                           rows={12}
                           value={editArticle}
                           onChange={(e) => setEditArticle(e.target.value)}
-                          className="w-full rounded-md border border-slate-200 px-4 py-3 text-sm font-body text-slate-800 focus:border-[#0a101d] focus:outline-none"
+                          className="w-full rounded-md border border-slate-200 px-4 py-3 text-sm font-body text-slate-800 focus:border-brand-700 focus:outline-none"
                         />
                       </div>
                     ) : (
@@ -1621,7 +1621,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           onClick={() => setEditTitle(t)}
                           className={`w-full text-left rounded-md border px-3.5 py-2.5 text-xs font-semibold transition cursor-pointer ${
                             editTitle === t
-                              ? 'border-[#0a101d] bg-slate-900/[0.04] text-slate-900'
+                              ? 'border-brand-700 bg-brand-50 text-slate-900'
                               : 'border-slate-200/80 hover:bg-slate-50 text-slate-700'
                           }`}
                         >
@@ -1642,7 +1642,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                     </ul>
                   </div>
 
-                  <div className="rounded-md bg-[#0a101d] text-slate-100 p-4">
+                  <div className="rounded-md bg-brand-900 text-slate-100 p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-slate-200">
                         สคริปต์บทพูดวิดีโอสั้น (Video / Reels / TikTok Script)
@@ -1681,7 +1681,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                       แผนผังความคิด (Mind Map Structure)
                     </div>
                     <div className="flex flex-col items-center">
-                      <div className="rounded bg-[#0a101d] px-6 py-2 text-xs sm:text-sm font-bold text-slate-200">
+                      <div className="rounded bg-brand-700 px-6 py-2 text-xs sm:text-sm font-bold text-white">
                         {activeWf.designOutput?.mindMapNodes?.center || activeWf.topic}
                       </div>
                       <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
@@ -1716,7 +1716,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           key={i}
                           className="rounded-md border border-slate-200/80 p-3.5 bg-white"
                         >
-                          <span className="rounded bg-[#0a101d] px-2 py-0.5 text-xs font-bold text-slate-200">
+                          <span className="rounded bg-brand-700 px-2 py-0.5 text-xs font-bold text-white">
                             SLIDE {s.slide}
                           </span>
                           <div className="mt-2 font-bold text-xs text-slate-900">
@@ -1750,7 +1750,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                         type="button"
                         disabled={mediaBusy === 'image'}
                         onClick={() => handleGenerateRealVisual(undefined, true)}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                       >
                         {mediaBusy === 'image' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1807,7 +1807,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                             type="button"
                             disabled={mediaBusy === 'image'}
                             onClick={() => handleGenerateRealVisual(ip.prompt, true)}
-                            className="rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                            className="rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                           >
                             วาด & แทรกเข้า Content
                           </button>
@@ -1880,7 +1880,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                         type="button"
                         disabled={mediaBusy === 'video'}
                         onClick={() => handleGenerateRealVideo(true)}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                       >
                         {mediaBusy === 'video' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1902,7 +1902,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                           <a
                             href={selectedVideoUrl}
                             download
-                            className="inline-flex items-center gap-1 rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-white"
+                            className="inline-flex items-center gap-1 rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white"
                           >
                             <Download className="w-3.5 h-3.5" /> ดาวน์โหลด .MP4
                           </a>
@@ -1963,7 +1963,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                         type="button"
                         disabled={mediaBusy === 'audio'}
                         onClick={handleGenerateRealAudio}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-[#0a101d] px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                       >
                         {mediaBusy === 'audio' ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -2005,7 +2005,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                         <a
                           href={selectedAudioUrl}
                           download
-                          className="inline-flex items-center gap-1 rounded-lg bg-[#0a101d] px-3 py-1 text-xs font-semibold text-white"
+                          className="inline-flex items-center gap-1 rounded-lg bg-brand-700 px-3 py-1 text-xs font-semibold text-white"
                         >
                           <Download className="w-3.5 h-3.5" /> ดาวน์โหลดเสียง
                         </a>
@@ -2025,7 +2025,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  <div className="rounded-md bg-[#0a101d] text-white p-4">
+                  <div className="rounded-md bg-brand-900 text-white p-4">
                     <div className="text-xs font-semibold text-slate-200 mb-2">
                       บทพากย์พร้อมจุดเน้นจังหวะเสียง:
                     </div>
@@ -2093,7 +2093,7 @@ export const AiCommandCenter: React.FC<Props> = ({
                     {activeWf.status !== 'published' && (
                       <button
                         onClick={handleApproveAndPublish}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-[#0a101d] px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                       >
                         <Send className="w-3.5 h-3.5" /> อนุมัติ & เผยแพร่ทุกช่องทาง
                       </button>

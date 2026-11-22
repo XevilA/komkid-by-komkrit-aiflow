@@ -481,7 +481,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
             <select
               value={selectedSource}
               onChange={(e) => handleSelectSource(e.target.value)}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 focus:border-slate-900 focus:outline-none"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 focus:border-brand-700 focus:outline-none"
             >
               <option value="">-- กำหนดเนื้อหาเองด้านล่าง หรือเลือกจากรายการ --</option>
               <optgroup label="แคมเปญจากระบบเวิร์กโฟลว์ AI">
@@ -511,7 +511,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="ระบุหัวข้อที่ต้องการเผยแพร่"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs sm:text-sm focus:border-brand-700 focus:outline-none"
             />
           </div>
 
@@ -524,7 +524,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="พิมพ์เนื้อหาที่ต้องการส่งออกไปยังช่องทางที่เลือก..."
-              className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+              className="w-full rounded-md border border-slate-300 p-3 text-xs sm:text-sm focus:border-brand-700 focus:outline-none"
             />
           </div>
 
@@ -551,7 +551,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
               placeholder="URL วิดีโอ หรือไฟล์ /uploads/..."
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-slate-900 focus:outline-none"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-700 focus:outline-none"
             />
           </div>
 
@@ -570,7 +570,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                     onClick={() => toggleSelectChannel(ch.channelKey)}
                     className={`rounded-md px-2.5 py-1.5 text-xs font-semibold border transition cursor-pointer ${
                       active
-                        ? 'bg-slate-900 text-white border-slate-900'
+                        ? 'bg-slate-900 text-white border-brand-700'
                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
@@ -589,7 +589,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   type="radio"
                   checked={scheduleMode === 'now'}
                   onChange={() => setScheduleMode('now')}
-                  className="accent-slate-900"
+                  className="accent-brand-600"
                 />
                 เผยแพร่ทันที
               </label>
@@ -598,7 +598,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   type="radio"
                   checked={scheduleMode === 'schedule'}
                   onChange={() => setScheduleMode('schedule')}
-                  className="accent-slate-900"
+                  className="accent-brand-600"
                 />
                 กำหนดเวลาเผยแพร่ล่วงหน้า
               </label>
@@ -679,7 +679,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">
+                        <span className="rounded bg-brand-700 px-2 py-0.5 text-xs font-semibold text-white">
                           {lg.channelName}
                         </span>
                         <span
@@ -795,7 +795,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
               });
               setSurveyModalOpen(true);
             }}
-            className="rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+            className="rounded-md bg-brand-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
           >
             + บันทึกข้อมูลสำรวจใหม่
           </button>
@@ -834,7 +834,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                     type="button"
                     disabled={triggeringTopic === sv.requestedTopic}
                     onClick={() => handleAiProduceFromSurvey(sv)}
-                    className="inline-flex items-center gap-1 rounded bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded bg-brand-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-50"
                   >
                     <PenLine className="w-3 h-3 text-slate-500" />
                     {triggeringTopic === sv.requestedTopic
@@ -984,7 +984,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                         enabled: e.target.checked,
                       })
                     }
-                    className="accent-slate-900"
+                    className="accent-brand-600"
                   />
                   เปิดใช้งานช่องทางนี้
                 </label>
@@ -999,7 +999,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                         autoPublishOnApprove: e.target.checked,
                       })
                     }
-                    className="accent-slate-900"
+                    className="accent-brand-600"
                   />
                   เผยแพร่อัตโนมัติเมื่ออนุมัติแคมเปญจากระบบเวิร์กโฟลว์ AI
                 </label>
@@ -1074,7 +1074,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                   </button>
                   <button
                     type="submit"
-                    className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                    className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                   >
                     บันทึกการตั้งค่า
                   </button>
@@ -1166,7 +1166,7 @@ export const OmnichannelPublishHub: React.FC<Props> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                  className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                 >
                   บันทึกข้อมูล
                 </button>

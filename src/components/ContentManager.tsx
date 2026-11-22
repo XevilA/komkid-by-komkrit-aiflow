@@ -462,7 +462,7 @@ export const ContentManager: React.FC<Props> = ({
                 <Input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} />
               </Field>
               <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" className="accent-slate-900" checked={form.isFeatured} onChange={(e) => setForm({ ...form, isFeatured: e.target.checked })} />
+                <input type="checkbox" className="accent-brand-600" checked={form.isFeatured} onChange={(e) => setForm({ ...form, isFeatured: e.target.checked })} />
                 ปักหมุดเป็นบทความเด่นหน้าแรก
               </label>
             </Card>
@@ -630,7 +630,7 @@ export const ContentManager: React.FC<Props> = ({
 
       <Card className="overflow-hidden">
         <div className="hidden grid-cols-[2rem_minmax(0,1fr)_7rem_6rem_6.5rem_4.5rem_15rem] items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 xl:grid">
-          <input type="checkbox" aria-label="เลือกทั้งหมดในหน้านี้" className="accent-slate-900" checked={allOnPage} onChange={(e) => setSelected(e.target.checked ? Array.from(new Set([...selected, ...rows.map((r) => r.id)])) : selected.filter((id) => !rows.some((r) => r.id === id)))} />
+          <input type="checkbox" aria-label="เลือกทั้งหมดในหน้านี้" className="accent-brand-600" checked={allOnPage} onChange={(e) => setSelected(e.target.checked ? Array.from(new Set([...selected, ...rows.map((r) => r.id)])) : selected.filter((id) => !rows.some((r) => r.id === id)))} />
           <span>เรื่อง</span>
           <span>หมวดหมู่</span>
           <span>สถานะ</span>
@@ -642,7 +642,7 @@ export const ContentManager: React.FC<Props> = ({
         <ul className="divide-y divide-slate-100">
           {rows.map((p) => (
             <li key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3 xl:grid xl:grid-cols-[2rem_minmax(0,1fr)_7rem_6rem_6.5rem_4.5rem_15rem] xl:gap-3">
-              <input type="checkbox" aria-label={`เลือก ${p.title}`} className="accent-slate-900" checked={selected.includes(p.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, p.id] : selected.filter((x) => x !== p.id))} />
+              <input type="checkbox" aria-label={`เลือก ${p.title}`} className="accent-brand-600" checked={selected.includes(p.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, p.id] : selected.filter((x) => x !== p.id))} />
               <div className="min-w-0 flex-1 basis-[12rem]">
                 <button onClick={() => openEdit(p)} className="block max-w-full truncate text-left text-sm font-medium text-slate-900 hover:underline cursor-pointer">
                   {p.title}

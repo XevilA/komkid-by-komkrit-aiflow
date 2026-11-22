@@ -350,3 +350,88 @@ test('Analytics & Learning uses only REAL data, refuses when there is none, and 
   await say(id2, 'ช่วยเขียนบทความเรื่อง ต่อยอดเรื่องห้องเรียน');
   assert.match(log(), /ceo-saw-learning/);
 });
+
+// ============================== Autopilot: one instruction, no forms ==============================
+async function auto(id: number, body: Record<string, unknown>) {
+  const r = await srv.api('POST', `/api/workspaces/${id}/autopilot`, body);
+  assert.ok(r.status === 202 || r.status === 200, r.text);
+  return settle(id);
+}
+const toolsRun = (s: any) => s.events.filter((e: any) => e.kind === 'action').map((e: any) => e.data?.tool).filter(Boolean);
+
+test('AUTOPILOT: a single sentence takes the work all the way to a published article — nobody fills anything in', async () => {
+  const id = await newWs();
+  const before = await postsCount();
+  const s = await auto(id, { brief: 'เขียนเรื่อง การเรียนรู้ผ่านโครงงาน สำหรับครูประถม' });
+  const tools = toolsRun(s);
+  for (const t of ['research', 'write_draft', 'fact_check', 'generate_cover', 'qa_check', 'save_post']) assert.ok(tools.includes(t), `${t} in ${tools}`);
+  assert.ok(tools.indexOf('fact_check') < tools.indexOf('generate_cover'), 'ordered like the workflow');
+  assert.equal(s.project.status, 'published');
+  assert.equal(await postsCount(), before + 1);
+  assert.match(s.project.media.cover.url, /^\/uploads\/images\//);
+  assert.ok(s.project.approvals.article && s.project.approvals.release, 'the gates were passed automatically');
+  const flow = await flowOf(id);
+  for (const k of ['research', 'writer', 'factcheck', 'approve_article', 'publish']) assert.equal(step(flow, k).status, 'done', k);
+  const pub = (await srv.api('GET', `/api/posts/by-slug/${s.project.draft.slug}`, undefined, { auth: false })).json;
+  assert.equal(pub.status, 'published');
+  assert.equal(pub.coverImage, s.project.media.cover.url);
+  assert.ok(s.events.some((e: any) => e.role === 'ceo' && /รับงานแล้ว ทีมจะทำให้ครบโดยอัตโนมัติ/.test(e.content)), 'the CEO announces the plan');
+  assert.ok(s.events.some((e: any) => /^เผยแพร่เรียบร้อย/.test(e.content)));
+});
+
+test('AUTOPILOT options: save as draft instead of publishing; owner-approval mode stops at the gate', async () => {
+  const before = await postsCount();
+  const id = await newWs();
+  let s = await auto(id, { brief: 'เขียนเรื่อง การจัดการชั้นเรียน', publish: false });
+  assert.equal(s.project.status, 'drafting');
+  assert.ok(s.project.postId, 'saved as a draft post');
+  assert.equal((await srv.api('GET', `/api/posts/by-slug/${s.project.draft.slug}`, undefined, { auth: false })).status, 404, 'a draft is not public');
+
+  const id2 = await newWs();
+  s = await auto(id2, { brief: 'เขียนเรื่อง การสอนแบบร่วมมือ', requireApproval: true });
+  assert.equal(s.project.approvals.article, undefined);
+  assert.equal(s.project.postId, null);
+  assert.ok(s.events.some((e: any) => /รอเจ้าของช่องกด/.test(e.content)));
+  assert.equal(await postsCount(), before + 1, 'only the draft from the first run exists');
+});
+
+test('AUTOPILOT repairs what it can (unsupported claim removed) and refuses to publish what it cannot (blocking fact-check)', async () => {
+  fs.writeFileSync(srv.ctrlFile, 'fc-revise');
+  const id = await newWs();
+  let s = await auto(id, { brief: 'เขียนเรื่อง การให้ข้อมูลย้อนกลับ' });
+  const tools = toolsRun(s);
+  assert.ok(tools.indexOf('fact_check') < tools.indexOf('revise_draft'), 'repaired after the failed check');
+  assert.equal(s.project.status, 'published');
+
+  fs.writeFileSync(srv.ctrlFile, 'fc-unsupported');
+  const before = await postsCount();
+  const id2 = await newWs();
+  s = await auto(id2, { brief: 'เขียนเรื่อง ข้อมูลที่ตรวจสอบไม่ได้' });
+  assert.equal(s.project.status, 'drafting');
+  assert.equal(await postsCount(), before, 'nothing goes live');
+  assert.ok(s.events.some((e: any) => e.kind === 'error' && /หยุดที่ขั้น "ตรวจข้อเท็จจริง"/.test(e.content)));
+  assert.ok(s.project.draft.content, 'the draft is kept so the owner can look');
+  fs.writeFileSync(srv.ctrlFile, '');
+});
+
+test('AUTOPILOT is honest about what this system cannot do (video, social channels) and still finishes the rest', async () => {
+  const id = await newWs();
+  const s = await auto(id, { brief: 'เขียนเรื่อง การสร้างแรงจูงใจ', video: true, channels: 'all' });
+  assert.equal(s.project.status, 'published');
+  const finalMsg = [...s.events].reverse().find((e: any) => e.role === 'ceo' && e.kind === 'message')!.content;
+  assert.match(finalMsg, /ข้ามวิดีโอ/);
+  assert.match(finalMsg, /ยังไม่มีช่องทางโซเชียลที่เชื่อมต่อไว้/);
+  assert.ok(!toolsRun(s).includes('produce_clips'), 'does not pretend to produce video');
+});
+
+test('AUTOPILOT guards: needs a brief, admin only, one run at a time, and AI-down is reported plainly', async () => {
+  const id = await newWs();
+  assert.equal((await srv.api('POST', `/api/workspaces/${id}/autopilot`, { brief: '  ' })).status, 400);
+  assert.equal((await srv.api('POST', `/api/workspaces/${id}/autopilot`, { brief: 'x' }, { auth: false })).status, 401);
+  assert.equal((await srv.api('POST', `/api/workspaces/99999/autopilot`, { brief: 'x' })).status, 404);
+  fs.writeFileSync(srv.ctrlFile, 'deepseek-down');
+  const s = await auto(id, { brief: 'เขียนเรื่อง ความฉลาดทางอารมณ์' });
+  fs.writeFileSync(srv.ctrlFile, '');
+  assert.ok(s.events.some((e: any) => e.kind === 'error'), 'a clear error is shown');
+  assert.equal(s.project.status, 'drafting');
+});

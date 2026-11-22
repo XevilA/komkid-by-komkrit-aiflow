@@ -854,6 +854,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message, provider }),
     }),
+  autopilotWorkspace: (
+    id: number,
+    payload: { brief: string; cover?: boolean; video?: boolean; publish?: boolean; channels?: 'all' | string[]; requireApproval?: boolean }
+  ) =>
+    request<import('./types').WsSnapshot>(`/api/workspaces/${id}/autopilot`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   publishWorkspace: (
     id: number,
     payload: { status?: 'draft' | 'published'; channels?: string[]; force?: boolean }

@@ -67,7 +67,7 @@ export function classifyError(rawMessage: string): FailureKind {
     return 'rate';
   }
   if (
-    /\b5\d\d\b|overload|unavailable|timed? ?out|timeout|etimedout|econn|enotfound|eai_again|fetch failed|network|socket|temporar|capacity|busy|bad gateway|gateway/i.test(
+    /\b5\d\d\b|overload|unavailable|timed? ?out|timeout|etimedout|econn|enotfound|eai_again|fetch failed|network|socket|temporar|capacity|busy|bad gateway|gateway|error occurred while processing|had an error|internal (server )?error|please (try|retry)|you can retry|request id/i.test(
       m
     )
   ) {
@@ -239,7 +239,7 @@ export async function runWithFailover<T>(
     const perAttempt = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : Infinity;
     const timeoutMs = Math.min(perAttempt, remaining);
     const wasCooling = cooling.includes(spec);
-    const tries = soleCandidate ? 2 : 1;
+    const tries = soleCandidate ? 3 : 1;
 
     for (let t = 0; t < tries; t++) {
       const t0 = now();
@@ -273,7 +273,7 @@ export async function runWithFailover<T>(
           skippedCooldown: wasCooling,
         });
         if (t + 1 < tries && (kind === 'transient' || kind === 'rate')) {
-          await sleep(800);
+          await sleep(800 * (t + 1));
           continue;
         }
         break;

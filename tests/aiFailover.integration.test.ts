@@ -280,3 +280,24 @@ test('media failover: image/voice generation switches provider when the first is
     /ยังไม่ได้ตั้งค่า gemini/
   );
 });
+
+test('one provider only: a transient "An error occurred while processing your request" is retried, then the cheaper model of the SAME provider is used', async () => {
+  // only deepseek handler works on its economy model; the flagship (reasoner) keeps returning OpenAI-style generic errors
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  router.resetHealth();
+  let flagshipCalls = 0;
+  handlers.deepseek = (b: any) => {
+    if (b.model === 'deepseek-reasoner') {
+      flagshipCalls++;
+      return errRes(500, 'An error occurred while processing your request. You can retry your request. Please include the request ID req_abc');
+    }
+    return okChat('ตอบจากโมเดลประหยัด');
+  };
+  const r = await engine.callRealLlm({ provider: 'deepseek', messages: msg });
+  assert.equal(r.text, 'ตอบจากโมเดลประหยัด');
+  assert.equal(r.model, 'deepseek-chat');
+  assert.ok(flagshipCalls >= 2, 'the flagship was retried before falling back');
+  process.env.OPENAI_API_KEY = 'sk-test-openai-000000';
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-test-000000';
+});

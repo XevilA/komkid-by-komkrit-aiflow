@@ -150,7 +150,7 @@ export const AiRoutingPanel: React.FC = () => {
           <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
             <input
               type="checkbox"
-              className="accent-[#0a101d]"
+              className="accent-brand-600"
               checked={data.failoverEnabled}
               disabled={saving}
               onChange={(e) => save({ failoverEnabled: e.target.checked })}
@@ -250,7 +250,7 @@ export const AiRoutingPanel: React.FC = () => {
           type="button"
           disabled={!dirty || saving}
           onClick={() => save({ fallbackOrder, economyOrder })}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#0a101d] px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+          className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 disabled:opacity-40 cursor-pointer"
         >
           <Zap className="w-3.5 h-3.5" />
           {saving ? 'กำลังบันทึก...' : 'บันทึกลำดับ'}

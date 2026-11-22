@@ -824,9 +824,13 @@ export function buildAttempts(params: LlmCallParams): AttemptSpec[] {
   }
 
   const standard = ordered.map((provider): AttemptSpec => ({ provider, tier: 'standard' }));
-  if (!economy || params.model) return standard;
   const cheap = ordered.map((provider): AttemptSpec => ({ provider, tier: 'economy' }));
-  return [...cheap, ...standard]; // cheap first, escalate to the full model only on failure
+  if (params.model) return standard; // an explicit model choice is honoured as-is
+  // economy: cheap first, escalate to the full model only on failure
+  if (economy) return [...cheap, ...standard];
+  // standard: if the newest flagship model misbehaves (it is often a preview that errors out), the
+  // same provider's proven cost-efficient model still gets the job done before giving up
+  return [...standard, ...cheap];
 }
 
 function cacheKeyFor(params: LlmCallParams): string {

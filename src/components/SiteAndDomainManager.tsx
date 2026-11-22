@@ -307,7 +307,7 @@ export const SiteAndDomainManager: React.FC<Props> = ({
               <button
                 type="submit"
                 disabled={savingConfig}
-                className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 transition cursor-pointer disabled:opacity-60"
               >
                 <Save className="w-4 h-4" />
                 {savingConfig ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
@@ -543,7 +543,7 @@ export const SiteAndDomainManager: React.FC<Props> = ({
             <button
               type="button"
               onClick={openNewProject}
-              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               เพิ่มโครงการใหม่
@@ -666,7 +666,7 @@ export const SiteAndDomainManager: React.FC<Props> = ({
                   type="button"
                   disabled={savingConfig}
                   onClick={() => handleSaveSiteConfig()}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-60"
                 >
                   <Save className="w-3.5 h-3.5" />
                   บันทึกโดเมน
@@ -784,7 +784,7 @@ export const SiteAndDomainManager: React.FC<Props> = ({
                           >
                             {d.domain}
                             {d.isPrimary && (
-                              <span className="rounded bg-slate-900 px-1.5 py-0.5 text-xs text-white">
+                              <span className="rounded bg-brand-700 px-1.5 py-0.5 text-xs text-white">
                                 หลัก
                               </span>
                             )}
@@ -1008,7 +1008,7 @@ export const SiteAndDomainManager: React.FC<Props> = ({
                 <button
                   type="submit"
                   disabled={projSaving}
-                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-60"
+                  className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-60"
                 >
                   {projSaving ? 'กำลังบันทึก...' : 'บันทึกโครงการ'}
                 </button>

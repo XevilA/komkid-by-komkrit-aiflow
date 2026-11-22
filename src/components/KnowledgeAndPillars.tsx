@@ -185,7 +185,7 @@ export const KnowledgeBaseManager: React.FC<{
           <button
             type="button"
             onClick={openCreate}
-            className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer shrink-0"
+            className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer shrink-0"
           >
             <Plus className="w-3.5 h-3.5 text-slate-500" />
             เพิ่มข้อมูลอ้างอิงใหม่
@@ -200,7 +200,7 @@ export const KnowledgeBaseManager: React.FC<{
               value={kbSearch}
               onChange={(e) => setKbSearch(e.target.value)}
               placeholder="ค้นหาหัวข้อ เนื้อหา หรือแหล่งอ้างอิง..."
-              className="w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-xs sm:text-sm focus:border-slate-900 focus:outline-none"
+              className="w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 py-2 text-xs sm:text-sm focus:border-brand-700 focus:outline-none"
             />
           </div>
           <div className="sm:col-span-5">
@@ -429,7 +429,7 @@ export const KnowledgeBaseManager: React.FC<{
                 <button
                   type="submit"
                   disabled={saving}
-                  className="rounded-md bg-slate-900 px-5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer disabled:opacity-60"
+                  className="rounded-md bg-brand-700 px-5 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer disabled:opacity-60"
                 >
                   {saving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
                 </button>
@@ -512,7 +512,7 @@ export const FivePillarManager: React.FC<{
             });
             setCreatingPillar(true);
           }}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+          className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 text-slate-500" />
           เพิ่มหน่วยธุรกิจใหม่
@@ -668,7 +668,7 @@ export const FivePillarManager: React.FC<{
                       currentProgress: Number(e.target.value),
                     })
                   }
-                  className="w-full accent-slate-900"
+                  className="w-full accent-brand-600"
                 />
               </div>
               <div className="pt-2 flex justify-end gap-2">
@@ -681,7 +681,7 @@ export const FivePillarManager: React.FC<{
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                  className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                 >
                   บันทึกข้อมูล
                 </button>
@@ -793,7 +793,7 @@ export const FivePillarManager: React.FC<{
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                  className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                 >
                   บันทึกข้อมูล
                 </button>
@@ -1609,7 +1609,7 @@ export const AudienceAndSettingsHub: React.FC<{
               </div>
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-md bg-brand-700 px-5 py-2.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
               >
                 <Save className="w-4 h-4 text-slate-500" />
                 บันทึกการตั้งค่า API ทั้งหมด
@@ -1942,7 +1942,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
+                  className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
                 >
                   บันทึก
                 </button>
@@ -2031,7 +2031,7 @@ export const AudienceAndSettingsHub: React.FC<{
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-slate-900 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
+                  className="rounded-md bg-brand-700 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
                 >
                   บันทึก
                 </button>

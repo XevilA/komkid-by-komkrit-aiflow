@@ -97,6 +97,24 @@ export const AgentWorkspace: React.FC<Props> = ({
   const [events, setEvents] = useState<WsEvent[]>([]);
   const [running, setRunning] = useState(false);
   const [input, setInput] = useState('');
+  const [opts, setOpts] = useState<{ cover: boolean; video: boolean; publish: boolean; channels: boolean }>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('komkid_autopilot_opts') || '{}');
+      return { cover: raw.cover !== false, video: raw.video === true, publish: raw.publish !== false, channels: raw.channels === true };
+    } catch {
+      return { cover: true, video: false, publish: true, channels: false };
+    }
+  });
+  const setOpt = (k: 'cover' | 'video' | 'publish' | 'channels', v: boolean) =>
+    setOpts((o) => {
+      const next = { ...o, [k]: v };
+      try {
+        localStorage.setItem('komkid_autopilot_opts', JSON.stringify(next));
+      } catch {
+        /* storage unavailable */
+      }
+      return next;
+    });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [mobileView, setMobileView] = useState<'chat' | 'content'>('chat');
@@ -279,7 +297,19 @@ export const AgentWorkspace: React.FC<Props> = ({
       }
       const id = await ensureWorkspace(message);
       setInput('');
-      const snap = await api.sendWorkspaceMessage(id, message);
+      // First instruction of a piece of work: the CEO runs the whole workflow by itself.
+      // Follow-ups ("make it shorter", "publish it") are handled conversationally.
+      const startsWork = !project?.draft.content && !form.content.trim();
+      const snap = startsWork
+        ? await api.autopilotWorkspace(id, {
+            brief: message,
+            cover: opts.cover,
+            video: opts.video && Boolean(caps?.video),
+            publish: opts.publish,
+            requireApproval: !opts.publish,
+            channels: opts.channels && opts.publish ? 'all' : undefined,
+          })
+        : await api.sendWorkspaceMessage(id, message);
       applySnapshot(snap);
       setMobileView('chat');
     } catch (e) {
@@ -484,7 +514,7 @@ export const AgentWorkspace: React.FC<Props> = ({
                   {STARTERS.map((s) => (
                     <button
                       key={s}
-                      onClick={() => setInput(s)}
+                      onClick={() => send(s)}
                       className="block w-full rounded-md border border-slate-200 px-3 py-2 text-left text-sm text-slate-700 hover:border-slate-400 cursor-pointer"
                     >
                       {s}
@@ -498,7 +528,7 @@ export const AgentWorkspace: React.FC<Props> = ({
               if (e.role === 'user') {
                 return (
                   <div key={e.id} className="flex justify-end">
-                    <div className="max-w-[88%] whitespace-pre-wrap rounded-lg bg-slate-900 px-3.5 py-2.5 text-sm text-white">
+                    <div className="max-w-[88%] whitespace-pre-wrap rounded-lg bg-brand-700 px-3.5 py-2.5 text-sm text-white">
                       {e.content}
                     </div>
                   </div>
@@ -588,7 +618,31 @@ export const AgentWorkspace: React.FC<Props> = ({
                 <SendHorizontal className="h-4 w-4" />
               </Button>
             </div>
-            <p className="mt-1.5 text-xs text-slate-400">Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่</p>
+            {!project?.draft.content && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                <label className="inline-flex items-center gap-1.5">
+                  <input type="checkbox" className="accent-brand-600" checked={opts.cover && Boolean(caps?.image)} disabled={!caps?.image} onChange={(e) => setOpt('cover', e.target.checked)} />
+                  ทำรูปปก
+                </label>
+                <label className="inline-flex items-center gap-1.5" title={caps?.video ? '' : 'ใช้ไม่ได้ในระบบนี้ (ต้องมีคีย์ Gemini และใช้บน VPS)'}>
+                  <input type="checkbox" className="accent-brand-600" checked={opts.video && Boolean(caps?.video)} disabled={!caps?.video} onChange={(e) => setOpt('video', e.target.checked)} />
+                  ทำวิดีโอ เสียง คำบรรยาย
+                </label>
+                <label className="inline-flex items-center gap-1.5">
+                  <input type="checkbox" className="accent-brand-600" checked={opts.publish} onChange={(e) => setOpt('publish', e.target.checked)} />
+                  เผยแพร่ให้เองเมื่อผ่านการตรวจ
+                </label>
+                {caps && caps.channels.length > 0 && (
+                  <label className="inline-flex items-center gap-1.5">
+                    <input type="checkbox" className="accent-brand-600" checked={opts.channels && opts.publish} disabled={!opts.publish} onChange={(e) => setOpt('channels', e.target.checked)} />
+                    โพสต์ลง {caps.channels.map((c) => c.name).join(', ')}
+                  </label>
+                )}
+              </div>
+            )}
+            <p className="mt-1.5 text-xs text-slate-400">
+              {project?.draft.content ? 'Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่' : 'พิมพ์โจทย์ประโยคเดียว ทีมจะทำทุกขั้นให้เองจนเสร็จ (Enter เพื่อส่ง)'}
+            </p>
           </form>
         </Card>
 
@@ -596,7 +650,7 @@ export const AgentWorkspace: React.FC<Props> = ({
         <Card className={`${mobileView === 'content' ? 'flex' : 'hidden'} min-h-0 flex-col lg:flex`}>
           {!project ? (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-slate-500">
-              เนื้อหาที่ทีมเขียนจะแสดงและแก้ไขได้ที่นี่
+              พิมพ์โจทย์ทางซ้าย แล้วดูทีม AI ทำงานตามลำดับที่นี่ ไม่ต้องกรอกอะไรเอง
             </div>
           ) : (
             <>
@@ -687,11 +741,27 @@ export const AgentWorkspace: React.FC<Props> = ({
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-                {tab === 'content' && (
+                {tab === 'content' && !hasDraft && !form.title && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-600">
+                      {running ? 'ทีมกำลังทำงานให้ ความคืบหน้าแต่ละขั้นแสดงด้านล่าง เนื้อหาจะปรากฏที่นี่เมื่อเขียนเสร็จ' : 'ยังไม่มีเนื้อหา พิมพ์โจทย์ในช่องด้านซ้าย ทีมจะทำให้เองทุกขั้น'}
+                    </p>
+                    <ol className="space-y-1.5">
+                      {flow.map((f) => (
+                        <li key={f.id} className="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2 text-sm">
+                          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${f.status === 'done' ? 'bg-brand-700 text-white' : f.status === 'current' && running ? 'bg-accent-400 text-brand-900' : 'bg-slate-100 text-slate-500'}`}>
+                            {f.status === 'done' ? '✓' : f.n}
+                          </span>
+                          <span className={f.status === 'done' ? 'text-slate-800' : f.status === 'current' && running ? 'font-medium text-slate-900' : 'text-slate-500'}>{f.label}</span>
+                          {f.status === 'current' && running && <Loader2 className="ml-auto h-4 w-4 animate-spin text-brand-600" />}
+                          {f.status === 'done' && f.detail && <span className="ml-auto text-xs text-slate-500">{f.detail}</span>}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {tab === 'content' && (hasDraft || form.title) && (
                   <div className="space-y-4">
-                    {!hasDraft && !form.title && (
-                      <p className="text-sm text-slate-500">ยังไม่มีเนื้อหา สั่งให้ CEO เขียน หรือพิมพ์เองที่นี่ได้เลย</p>
-                    )}
                     <Field label="ชื่อเรื่อง">
                       <Input value={form.title} maxLength={200} onChange={(e) => edit('title', e.target.value)} disabled={running} />
                     </Field>
@@ -1114,7 +1184,7 @@ export const AgentWorkspace: React.FC<Props> = ({
                 <label key={c.key} className="flex items-center gap-2 py-0.5">
                   <input
                     type="checkbox"
-                    className="accent-slate-900"
+                    className="accent-brand-600"
                     checked={publishChannels.includes(c.key)}
                     onChange={(e) =>
                       setPublishChannels((prev) => (e.target.checked ? [...prev, c.key] : prev.filter((x) => x !== c.key)))
@@ -1127,7 +1197,7 @@ export const AgentWorkspace: React.FC<Props> = ({
           )}
           {(qa?.verdict === 'block' || project?.factCheck.verdict === 'block') && (
             <label className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-rose-800">
-              <input type="checkbox" className="mt-0.5 accent-slate-900" checked={forcePublish} onChange={(e) => setForcePublish(e.target.checked)} />
+              <input type="checkbox" className="mt-0.5 accent-brand-600" checked={forcePublish} onChange={(e) => setForcePublish(e.target.checked)} />
               <span>ผลตรวจ (QA หรือ Fact-check) ประเมินว่ามีความเสี่ยงสูง ฉันตรวจสอบแล้วและยืนยันให้เผยแพร่ต่อ</span>
             </label>
           )}

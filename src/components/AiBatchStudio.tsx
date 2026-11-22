@@ -179,7 +179,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
               value={topicsText}
               onChange={(e) => setTopicsText(e.target.value)}
               placeholder={`พิมพ์หัวข้อ หนึ่งบรรทัดต่อหนึ่งหัวข้อ (สูงสุด ${maxItems} หัวข้อ)\nเช่น\nAI Tutor ในโรงเรียนขนาดเล็ก\nห้องเรียน Active Learning\nทักษะภาษาไทย-เมียนมา`}
-              className="w-full rounded-md border border-slate-200 bg-slate-50/60 px-3.5 py-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0a101d] focus:bg-white focus:outline-none"
+              className="w-full rounded-md border border-slate-200 bg-slate-50/60 px-3.5 py-3 text-xs text-slate-900 placeholder:text-slate-400 focus:border-brand-700 focus:bg-white focus:outline-none"
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -201,7 +201,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                   key={m.id}
                   className={`rounded-md border p-3 cursor-pointer transition ${
                     mode === m.id
-                      ? 'border-[#0a101d] bg-slate-900/[0.03]'
+                      ? 'border-brand-700 bg-brand-50'
                       : 'border-slate-200 hover:bg-slate-50'
                   }`}
                 >
@@ -209,7 +209,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                     <input
                       type="radio"
                       name="batch-mode"
-                      className="accent-[#0a101d]"
+                      className="accent-brand-600"
                       checked={mode === m.id}
                       onChange={() => setMode(m.id)}
                     />
@@ -236,7 +236,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
               <button
                 type="submit"
                 disabled={starting || topicCount === 0 || topicCount > maxItems}
-                className="inline-flex items-center gap-2 rounded-md bg-[#0a101d] px-5 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-md bg-brand-700 px-5 py-2.5 text-xs font-semibold text-white hover:bg-brand-800 disabled:opacity-50 cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5" />
                 {starting ? 'กำลังสร้างคิว...' : `เริ่มรัน ${topicCount || ''} หัวข้อ`}
@@ -334,7 +334,7 @@ export const AiBatchStudio: React.FC<Props> = ({ onRefreshAll }) => {
                   <button
                     type="button"
                     onClick={() => resume(async (id) => api.processAiBatch(id))}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a101d] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-800 cursor-pointer"
                   >
                     <Play className="w-3 h-3" /> ทำต่อ
                   </button>

@@ -495,3 +495,164 @@ export function confirmAction(projectId: number, eventId: number): { ok: boolean
 }
 
 export type { Capabilities };
+
+// ============================================================================
+// AUTOPILOT — one instruction, the whole Content AI workflow, no forms to fill.
+// The CEO distributes the work to the agents in order, checks each result, fixes
+// what it can, and only stops when something is genuinely unsafe to continue.
+// ============================================================================
+export interface AutopilotOptions {
+  projectId: number;
+  brief: string;
+  provider?: LlmProviderId;
+  model?: string;
+  cover?: boolean; // default true
+  video?: boolean; // default false (expensive)
+  publish?: boolean; // default true: publish when every check passes
+  channels?: string[] | 'all'; // other channels to post to after the website
+  requireApproval?: boolean; // stop after fact-check and wait for the owner
+}
+
+export async function runAutopilot(opts: AutopilotOptions): Promise<{ ok: boolean; url?: string; stoppedAt?: string }> {
+  const { projectId } = opts;
+  if (running.has(projectId)) throw new Error('ทีมกำลังทำงานในโปรเจกต์นี้อยู่ กรุณารอให้เสร็จก่อน');
+  if (!allowRun()) throw new Error('สั่งงาน AI ถี่เกินไป กรุณารอสักครู่แล้วลองใหม่');
+  const p0 = getProject(projectId);
+  if (!p0) throw new Error('ไม่พบโปรเจกต์');
+  const brief = opts.brief.trim();
+  if (!brief) throw new Error('กรุณาพิมพ์โจทย์');
+  running.set(projectId, Date.now());
+
+  const wantCover = opts.cover !== false;
+  const wantVideo = Boolean(opts.video);
+  const wantPublish = opts.publish !== false && !opts.requireApproval;
+  const notes: string[] = [];
+  try {
+    const caps = getCapabilities();
+    emit(projectId, { role: 'user', agent: '', kind: 'message', content: brief });
+    const say = (content: string, kind: ProjectEvent['kind'] = 'message') =>
+      emit(projectId, { role: 'ceo', agent: 'ceo', kind, content });
+    if (!caps.llm) {
+      say('ยังไม่ได้ตั้งค่า API Key ของ AI ค่ายใดเลย ทีมจึงยังทำงานไม่ได้ กรุณาเพิ่มคีย์ในหน้าตั้งค่า', 'error');
+      return { ok: false, stoppedAt: 'setup' };
+    }
+    if (!p0.brief) {
+      p0.brief = brief.slice(0, 500);
+      saveProject(p0);
+    }
+
+    const ctx: ToolContext = {
+      project: getProject(projectId)!,
+      provider: opts.provider,
+      model: opts.model,
+      userMessage: `${brief}${wantVideo ? ' ผลิตวิดีโอ คลิป' : ''}`,
+      publishAllowed: wantPublish,
+      caps,
+      log: () => {},
+    };
+
+    // The CEO announces the plan, honestly including what this system cannot do right now.
+    const plan: string[] = ['ค้นคว้า', 'เขียนบทความ', 'ตรวจข้อเท็จจริง'];
+    if (wantCover) plan.push(caps.image ? 'ทำรูปปก' : 'รูปปก (ข้าม: ยังไม่มีคีย์สร้างภาพ)');
+    if (wantVideo) plan.push(caps.video ? 'สคริปต์และผลิตคลิป' : `วิดีโอ (ข้าม: ${caps.serverless ? 'โฮสต์ Serverless ไม่รองรับ' : 'ยังไม่มีคีย์ Gemini'})`);
+    plan.push('ตรวจคุณภาพ', 'เตรียม SEO', wantPublish ? 'เผยแพร่' : 'บันทึกฉบับร่าง');
+    say(`รับงานแล้ว ทีมจะทำให้ครบโดยอัตโนมัติ: ${plan.join(' → ')}`);
+
+    const stop = (at: string, why: string) => {
+      say(`หยุดที่ขั้น "${at}": ${why} งานที่ทำแล้วอยู่ครบในโปรเจกต์ สั่งต่อหรือแก้ไขได้เลย`, 'error');
+      return { ok: false, stoppedAt: at };
+    };
+
+    // 1-2 research + write — the article cannot exist without these
+    await execTool(ctx, 'research', { query: brief });
+    const written = await execTool(ctx, 'write_draft', { instruction: brief });
+    if (!written.ok) return stop('เขียนบทความ', written.summary);
+
+    // 3 fact-check, one automatic repair, then the gate
+    let fc = await execTool(ctx, 'fact_check', {});
+    if (fc.ok && ctx.project.factCheck.verdict === 'revise') {
+      const bad = (ctx.project.factCheck.claims || []).filter((c) => c.verdict === 'unsupported').map((c) => c.text).join(' / ');
+      if (bad) {
+        const fix = await execTool(ctx, 'revise_draft', { instruction: `ลบหรือแก้ข้อความที่ไม่มีหลักฐานรองรับ (ห้ามเพิ่มข้อมูลใหม่): ${bad}` });
+        if (fix.ok) fc = await execTool(ctx, 'fact_check', {});
+      }
+    }
+    if (ctx.project.factCheck.verdict === 'block') {
+      return stop('ตรวจข้อเท็จจริง', `พบข้ออ้างที่ไม่มีหลักฐานรองรับหลายจุด (${ctx.project.factCheck.summary || 'ดูแท็บตรวจสอบ'})`);
+    }
+    if (!fc.ok) notes.push('ตรวจข้อเท็จจริงไม่สำเร็จ (ข้ามขั้นนี้)');
+
+    // 6 owner gate: automatic when everything passed, unless the owner asked to approve personally
+    if (opts.requireApproval) {
+      say('บทความผ่านการตรวจข้อเท็จจริงแล้ว รอเจ้าของช่องกด "อนุมัติบทความ" จากนั้นสั่งให้ทำต่อ');
+      return { ok: true, stoppedAt: 'approval' };
+    }
+    {
+      const fresh = getProject(projectId)!;
+      fresh.approvals.article = { hash: articleHash(fresh), at: new Date().toISOString() };
+      saveProject(fresh);
+      ctx.project = fresh;
+      emit(projectId, { role: 'system', agent: 'ceo', kind: 'message', content: 'อนุมัติบทความอัตโนมัติ (ผ่านการตรวจข้อเท็จจริง)' });
+    }
+
+    // 4b cover image
+    if (wantCover && caps.image) {
+      const r = await execTool(ctx, 'generate_cover', {});
+      if (!r.ok) notes.push(`รูปปก: ${r.summary}`);
+    } else if (wantCover) notes.push('ไม่มีรูปปก AI เพราะยังไม่ได้ตั้งค่าคีย์สร้างภาพ (ใช้รูปเริ่มต้น)');
+
+    // 7-8 video
+    if (wantVideo) {
+      if (!caps.video) {
+        notes.push(`ข้ามวิดีโอ: ${caps.serverless ? 'โฮสต์แบบ Serverless จำกัดเวลา ใช้ได้บน VPS' : 'ยังไม่ได้ตั้งค่าคีย์ Gemini'}`);
+      } else {
+        const sc = await execTool(ctx, 'video_script', {});
+        if (sc.ok) {
+          const pc = await execTool(ctx, 'produce_clips', {});
+          if (!pc.ok) notes.push(`วิดีโอ: ${pc.summary}`);
+        } else notes.push(`สคริปต์วิดีโอ: ${sc.summary}`);
+      }
+    }
+
+    // quality gate with one automatic repair
+    await execTool(ctx, 'qa_check', {});
+    if (ctx.project.qa.verdict === 'revise') {
+      const issues = (ctx.project.qa.issues || []).map((i) => i.text).join(' / ');
+      const fix = await execTool(ctx, 'revise_draft', { instruction: `แก้ไขประเด็นที่ QA พบทั้งหมด: ${issues}` });
+      if (fix.ok) await execTool(ctx, 'qa_check', {});
+    }
+    if (ctx.project.qa.verdict === 'block') {
+      return stop('ตรวจคุณภาพ', `QA ประเมินว่ามีความเสี่ยงสูง (${ctx.project.qa.summary || 'ดูแท็บตรวจสอบ'})`);
+    }
+
+    // SEO + publish
+    const d = ctx.project.draft;
+    if (!d.slug || !d.excerpt || d.tags.length === 0) await execTool(ctx, 'optimize_seo', {});
+    const saved = await execTool(ctx, 'save_post', { status: wantPublish ? 'published' : 'draft' });
+    if (!saved.ok) return stop('บันทึกบทความ', saved.summary);
+    const url = (saved.data as { url: string }).url;
+    if (wantPublish) {
+      const fresh = getProject(projectId)!;
+      fresh.approvals.release = { at: new Date().toISOString() };
+      saveProject(fresh);
+      ctx.project = fresh;
+    }
+
+    // other channels
+    if (wantPublish && opts.channels && (opts.channels === 'all' || opts.channels.length > 0)) {
+      const keys = opts.channels === 'all' ? caps.channels.map((c) => c.key) : opts.channels;
+      if (keys.length === 0 || caps.channels.length === 0) notes.push('ยังไม่มีช่องทางโซเชียลที่เชื่อมต่อไว้ จึงโพสต์ได้เฉพาะบนเว็บไซต์ (เชื่อมต่อได้ที่ ตั้งค่า ▸ ช่องทางเผยแพร่)');
+      else {
+        const r = await execTool(ctx, 'publish_channels', { channels: keys });
+        if (!r.ok) notes.push(`ช่องทางโซเชียล: ${r.summary}`);
+      }
+    }
+
+    say(
+      `${wantPublish ? 'เผยแพร่เรียบร้อย' : 'บันทึกเป็นฉบับร่างเรียบร้อย'}: ${url}\nหลังมีผู้อ่านแล้วสั่ง "วิเคราะห์ผลงาน" เพื่อให้ทีมเรียนรู้และวางแผนงานถัดไป${notes.length ? `\nข้อสังเกต:\n- ${notes.join('\n- ')}` : ''}`
+    );
+    return { ok: true, url };
+  } finally {
+    running.delete(projectId);
+  }
+}

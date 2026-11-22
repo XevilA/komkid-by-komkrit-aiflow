@@ -1026,7 +1026,6 @@ import { GoogleGenAI } from "@google/genai";
 // server/cloudSync.ts
 import crypto2 from "node:crypto";
 var BLOB_API_BASE = "https://blob.vercel-storage.com";
-var STATE_PREFIX = "state/komkrit-db-";
 var currentLoadedBlobPath = "";
 var lastCheckAt = 0;
 var blobWriteSuspended = false;
@@ -1062,63 +1061,44 @@ function decryptBuffer(packed, token) {
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
-async function listStateBlobs(token) {
-  const res = await fetch(
-    `${BLOB_API_BASE}?prefix=${encodeURIComponent(STATE_PREFIX)}&limit=20`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "x-api-version": "7"
-      },
-      cache: "no-store"
-    }
-  );
-  if (!res.ok) return [];
-  const data = await res.json();
-  const blobs = Array.isArray(data.blobs) ? data.blobs : [];
-  blobs.sort((a, b) => b.pathname > a.pathname ? 1 : -1);
-  return blobs;
+var STATE_PATH = "state/komkrit-db.enc";
+var CHECK_INTERVAL_MS = 45e3;
+var loadedEtag = "";
+var lastWriteOk = null;
+function blobBaseUrl(token) {
+  const m = /^vercel_blob_rw_([a-z0-9]+)_/i.exec(token);
+  return m ? `https://${m[1].toLowerCase()}.public.blob.vercel-storage.com` : "";
 }
-async function deleteOldStateBlobs(token, urlsToDelete) {
-  if (urlsToDelete.length === 0) return;
-  try {
-    await fetch(`${BLOB_API_BASE}/delete`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "x-api-version": "7",
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ urls: urlsToDelete })
-    });
-  } catch {
-  }
+function stateUrl(token) {
+  const base = blobBaseUrl(token);
+  return base ? `${base}/${STATE_PATH}` : "";
 }
 async function syncDatabaseBeforeRequest(forceCheck = false) {
   if (!isCloudSyncEnabled()) return;
-  if (hasUnsyncedLocalMutations && blobWriteSuspended) {
-    return;
-  }
+  if (hasUnsyncedLocalMutations && blobWriteSuspended) return;
   const token = getBlobToken();
+  const url = stateUrl(token);
+  if (!url) return;
   const now = Date.now();
-  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < 3e4) {
-    return;
-  }
+  if (!forceCheck && currentLoadedBlobPath && now - lastCheckAt < CHECK_INTERVAL_MS) return;
   lastCheckAt = now;
-  const blobs = await listStateBlobs(token);
-  if (blobs.length === 0) {
-    if (!currentLoadedBlobPath && !blobWriteSuspended) {
-      await persistDatabaseToCloud();
-    }
+  const headers = {};
+  if (loadedEtag) headers["If-None-Match"] = loadedEtag;
+  let dl;
+  try {
+    dl = await fetch(`${url}?v=${now}`, { cache: "no-store", headers, signal: AbortSignal.timeout(1e4) });
+  } catch {
     return;
   }
-  const newest = blobs[0];
-  if (newest.pathname === currentLoadedBlobPath) {
+  if (dl.status === 304) return;
+  if (dl.status === 404) {
+    if (!currentLoadedBlobPath && !blobWriteSuspended) await persistDatabaseToCloud();
     return;
   }
-  const dl = await fetch(newest.url, { cache: "no-store" });
   if (!dl.ok) return;
+  const etag = dl.headers.get("etag") || "";
   const encryptedBytes = Buffer.from(await dl.arrayBuffer());
+  if (etag && etag === loadedEtag) return;
   const sqliteBytes = decryptBuffer(encryptedBytes, token);
   let memVaultTs = 0;
   let memSettingsRows = [];
@@ -1146,7 +1126,8 @@ async function syncDatabaseBeforeRequest(forceCheck = false) {
     } catch {
     }
   }
-  currentLoadedBlobPath = newest.pathname;
+  loadedEtag = etag;
+  currentLoadedBlobPath = STATE_PATH;
   hasUnsyncedLocalMutations = false;
 }
 async function persistDatabaseToCloud() {
@@ -1159,81 +1140,82 @@ async function persistDatabaseToCloud() {
   const token = getBlobToken();
   const sqliteBytes = exportDatabaseSnapshotBuffer();
   const encryptedBytes = encryptBuffer(sqliteBytes, token);
-  const ts = String(now).padStart(15, "0");
-  const rand = crypto2.randomBytes(3).toString("hex");
-  const pathname = `${STATE_PREFIX}${ts}-${rand}.enc`;
-  const putRes = await fetch(`${BLOB_API_BASE}/${pathname}`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "x-api-version": "7",
-      "x-content-type": "application/octet-stream",
-      "x-add-random-suffix": "0",
-      "x-cache-control-max-age": "0"
-    },
-    body: new Uint8Array(encryptedBytes)
-  });
+  let putRes;
+  try {
+    putRes = await fetch(`${BLOB_API_BASE}/${STATE_PATH}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "x-api-version": "7",
+        "x-content-type": "application/octet-stream",
+        "x-add-random-suffix": "0",
+        "x-allow-overwrite": "1",
+        "x-cache-control-max-age": "60"
+      },
+      body: new Uint8Array(encryptedBytes),
+      signal: AbortSignal.timeout(2e4)
+    });
+  } catch (err) {
+    lastPersistError = err.message;
+    lastWriteOk = false;
+    return false;
+  }
   if (putRes.ok) {
     blobWriteSuspended = false;
     blobSuspendedRetryAfter = 0;
     hasUnsyncedLocalMutations = false;
-    currentLoadedBlobPath = pathname;
+    currentLoadedBlobPath = STATE_PATH;
+    loadedEtag = "";
     lastCheckAt = Date.now();
-    const blobs = await listStateBlobs(token);
-    if (blobs.length > 2) {
-      const oldUrls = blobs.slice(2).map((b) => b.url);
-      await deleteOldStateBlobs(token, oldUrls);
-    }
+    lastWriteOk = true;
+    lastPersistError = "";
+    probeCache = null;
     return true;
   }
   blobWriteSuspended = true;
   blobSuspendedRetryAfter = Date.now() + 5 * 60 * 1e3;
+  lastWriteOk = false;
   try {
     const body = await putRes.json();
     lastPersistError = String(body?.error?.code || body?.error?.message || `HTTP ${putRes.status}`);
   } catch {
     lastPersistError = `HTTP ${putRes.status}`;
   }
+  probeCache = null;
   return false;
 }
 var probeCache = null;
+function describeStoreError(code) {
+  return code === "store_suspended" ? "\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 Vercel Blob \u0E16\u0E39\u0E01\u0E23\u0E30\u0E07\u0E31\u0E1A \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E1A\u0E19 Vercel \u0E08\u0E30\u0E2B\u0E32\u0E22\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E23\u0E30\u0E1A\u0E1A\u0E23\u0E35\u0E2A\u0E15\u0E32\u0E23\u0E4C\u0E15" : `\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 Vercel Blob \u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18\u0E01\u0E32\u0E23\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01 (${code})`;
+}
 async function getStorageStatus() {
   if (!isCloudSyncEnabled()) {
     return IS_SERVERLESS ? { persistent: false, runtime: "vercel-blob", reason: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 BLOB_READ_WRITE_TOKEN \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E08\u0E30\u0E2B\u0E32\u0E22\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E23\u0E30\u0E1A\u0E1A\u0E23\u0E35\u0E2A\u0E15\u0E32\u0E23\u0E4C\u0E15" } : { persistent: true, runtime: "disk", reason: "" };
   }
+  if (lastWriteOk === false) {
+    return { persistent: false, runtime: "vercel-blob", reason: describeStoreError(lastPersistError) };
+  }
   const now = Date.now();
   if (probeCache && now - probeCache.at < 6e4) return probeCache.value;
-  let value;
-  try {
-    const token = getBlobToken();
-    const path8 = `probe/write-check-${now}.txt`;
-    const res = await fetch(`${BLOB_API_BASE}/${path8}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "x-api-version": "7",
-        "x-content-type": "text/plain",
-        "x-add-random-suffix": "0"
-      },
-      body: "ok",
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (data.url) await deleteMediaFromCloudBlob(data.url);
-      blobWriteSuspended = false;
-      value = { persistent: true, runtime: "vercel-blob", reason: "" };
-    } else {
-      const body = await res.json().catch(() => ({}));
-      const code = String(body?.error?.code || res.status);
-      value = {
-        persistent: false,
-        runtime: "vercel-blob",
-        reason: code === "store_suspended" ? "\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 Vercel Blob \u0E16\u0E39\u0E01\u0E23\u0E30\u0E07\u0E31\u0E1A \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E1A\u0E19 Vercel \u0E08\u0E30\u0E2B\u0E32\u0E22\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E23\u0E30\u0E1A\u0E1A\u0E23\u0E35\u0E2A\u0E15\u0E32\u0E23\u0E4C\u0E15" : `\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 Vercel Blob \u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18\u0E01\u0E32\u0E23\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01 (${code})`
-      };
+  let value = { persistent: true, runtime: "vercel-blob", reason: "" };
+  if (lastWriteOk === null) {
+    try {
+      const url = stateUrl(getBlobToken());
+      const res = await fetch(`${url}?v=${now}`, {
+        method: "HEAD",
+        cache: "no-store",
+        signal: AbortSignal.timeout(8e3)
+      });
+      if (res.status !== 404 && !res.ok) {
+        value = {
+          persistent: false,
+          runtime: "vercel-blob",
+          reason: describeStoreError(String(res.status))
+        };
+      }
+    } catch (err) {
+      value = { persistent: false, runtime: "vercel-blob", reason: `\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08: ${err.message}` };
     }
-  } catch (err) {
-    value = { persistent: false, runtime: "vercel-blob", reason: `\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A\u0E17\u0E35\u0E48\u0E40\u0E01\u0E47\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08: ${err.message}` };
   }
   probeCache = { at: now, value };
   return value;
@@ -1990,7 +1972,7 @@ function classifyError(rawMessage) {
   if (/\b429\b|rate[ _-]?limit|too many requests|resource[_ ]exhausted|quota/i.test(m)) {
     return "rate";
   }
-  if (/\b5\d\d\b|overload|unavailable|timed? ?out|timeout|etimedout|econn|enotfound|eai_again|fetch failed|network|socket|temporar|capacity|busy|bad gateway|gateway/i.test(
+  if (/\b5\d\d\b|overload|unavailable|timed? ?out|timeout|etimedout|econn|enotfound|eai_again|fetch failed|network|socket|temporar|capacity|busy|bad gateway|gateway|error occurred while processing|had an error|internal (server )?error|please (try|retry)|you can retry|request id/i.test(
     m
   )) {
     return "transient";
@@ -2113,7 +2095,7 @@ async function runWithFailover(opts) {
     const perAttempt = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : Infinity;
     const timeoutMs = Math.min(perAttempt, remaining);
     const wasCooling = cooling.includes(spec);
-    const tries = soleCandidate ? 2 : 1;
+    const tries = soleCandidate ? 3 : 1;
     for (let t = 0; t < tries; t++) {
       const t0 = now();
       try {
@@ -2146,7 +2128,7 @@ async function runWithFailover(opts) {
           skippedCooldown: wasCooling
         });
         if (t + 1 < tries && (kind === "transient" || kind === "rate")) {
-          await sleep(800);
+          await sleep(800 * (t + 1));
           continue;
         }
         break;
@@ -3984,9 +3966,10 @@ function buildAttempts(params) {
     throw new Error("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Key \u0E08\u0E23\u0E34\u0E07\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A AI \u2014 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32");
   }
   const standard = ordered.map((provider) => ({ provider, tier: "standard" }));
-  if (!economy || params.model) return standard;
   const cheap = ordered.map((provider) => ({ provider, tier: "economy" }));
-  return [...cheap, ...standard];
+  if (params.model) return standard;
+  if (economy) return [...cheap, ...standard];
+  return [...standard, ...cheap];
 }
 function cacheKeyFor(params) {
   return crypto3.createHash("sha256").update(
@@ -7688,6 +7671,130 @@ function confirmAction(projectId, eventId) {
   }
   return { ok: false, message: "\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E08\u0E31\u0E01\u0E01\u0E32\u0E23\u0E14\u0E33\u0E40\u0E19\u0E34\u0E19\u0E01\u0E32\u0E23\u0E19\u0E35\u0E49" };
 }
+async function runAutopilot(opts) {
+  const { projectId } = opts;
+  if (running2.has(projectId)) throw new Error("\u0E17\u0E35\u0E21\u0E01\u0E33\u0E25\u0E31\u0E07\u0E17\u0E33\u0E07\u0E32\u0E19\u0E43\u0E19\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C\u0E19\u0E35\u0E49\u0E2D\u0E22\u0E39\u0E48 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E2D\u0E43\u0E2B\u0E49\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E01\u0E48\u0E2D\u0E19");
+  if (!allowRun()) throw new Error("\u0E2A\u0E31\u0E48\u0E07\u0E07\u0E32\u0E19 AI \u0E16\u0E35\u0E48\u0E40\u0E01\u0E34\u0E19\u0E44\u0E1B \u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E2D\u0E2A\u0E31\u0E01\u0E04\u0E23\u0E39\u0E48\u0E41\u0E25\u0E49\u0E27\u0E25\u0E2D\u0E07\u0E43\u0E2B\u0E21\u0E48");
+  const p0 = getProject(projectId);
+  if (!p0) throw new Error("\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C");
+  const brief = opts.brief.trim();
+  if (!brief) throw new Error("\u0E01\u0E23\u0E38\u0E13\u0E32\u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E42\u0E08\u0E17\u0E22\u0E4C");
+  running2.set(projectId, Date.now());
+  const wantCover = opts.cover !== false;
+  const wantVideo = Boolean(opts.video);
+  const wantPublish = opts.publish !== false && !opts.requireApproval;
+  const notes = [];
+  try {
+    const caps = getCapabilities();
+    emit(projectId, { role: "user", agent: "", kind: "message", content: brief });
+    const say = (content, kind = "message") => emit(projectId, { role: "ceo", agent: "ceo", kind, content });
+    if (!caps.llm) {
+      say("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 API Key \u0E02\u0E2D\u0E07 AI \u0E04\u0E48\u0E32\u0E22\u0E43\u0E14\u0E40\u0E25\u0E22 \u0E17\u0E35\u0E21\u0E08\u0E36\u0E07\u0E22\u0E31\u0E07\u0E17\u0E33\u0E07\u0E32\u0E19\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E04\u0E35\u0E22\u0E4C\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32", "error");
+      return { ok: false, stoppedAt: "setup" };
+    }
+    if (!p0.brief) {
+      p0.brief = brief.slice(0, 500);
+      saveProject(p0);
+    }
+    const ctx = {
+      project: getProject(projectId),
+      provider: opts.provider,
+      model: opts.model,
+      userMessage: `${brief}${wantVideo ? " \u0E1C\u0E25\u0E34\u0E15\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D \u0E04\u0E25\u0E34\u0E1B" : ""}`,
+      publishAllowed: wantPublish,
+      caps,
+      log: () => {
+      }
+    };
+    const plan = ["\u0E04\u0E49\u0E19\u0E04\u0E27\u0E49\u0E32", "\u0E40\u0E02\u0E35\u0E22\u0E19\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21", "\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07"];
+    if (wantCover) plan.push(caps.image ? "\u0E17\u0E33\u0E23\u0E39\u0E1B\u0E1B\u0E01" : "\u0E23\u0E39\u0E1B\u0E1B\u0E01 (\u0E02\u0E49\u0E32\u0E21: \u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E)");
+    if (wantVideo) plan.push(caps.video ? "\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E41\u0E25\u0E30\u0E1C\u0E25\u0E34\u0E15\u0E04\u0E25\u0E34\u0E1B" : `\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D (\u0E02\u0E49\u0E32\u0E21: ${caps.serverless ? "\u0E42\u0E2E\u0E2A\u0E15\u0E4C Serverless \u0E44\u0E21\u0E48\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A" : "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E35\u0E22\u0E4C Gemini"})`);
+    plan.push("\u0E15\u0E23\u0E27\u0E08\u0E04\u0E38\u0E13\u0E20\u0E32\u0E1E", "\u0E40\u0E15\u0E23\u0E35\u0E22\u0E21 SEO", wantPublish ? "\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48" : "\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E09\u0E1A\u0E31\u0E1A\u0E23\u0E48\u0E32\u0E07");
+    say(`\u0E23\u0E31\u0E1A\u0E07\u0E32\u0E19\u0E41\u0E25\u0E49\u0E27 \u0E17\u0E35\u0E21\u0E08\u0E30\u0E17\u0E33\u0E43\u0E2B\u0E49\u0E04\u0E23\u0E1A\u0E42\u0E14\u0E22\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34: ${plan.join(" \u2192 ")}`);
+    const stop = (at, why) => {
+      say(`\u0E2B\u0E22\u0E38\u0E14\u0E17\u0E35\u0E48\u0E02\u0E31\u0E49\u0E19 "${at}": ${why} \u0E07\u0E32\u0E19\u0E17\u0E35\u0E48\u0E17\u0E33\u0E41\u0E25\u0E49\u0E27\u0E2D\u0E22\u0E39\u0E48\u0E04\u0E23\u0E1A\u0E43\u0E19\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C \u0E2A\u0E31\u0E48\u0E07\u0E15\u0E48\u0E2D\u0E2B\u0E23\u0E37\u0E2D\u0E41\u0E01\u0E49\u0E44\u0E02\u0E44\u0E14\u0E49\u0E40\u0E25\u0E22`, "error");
+      return { ok: false, stoppedAt: at };
+    };
+    await execTool(ctx, "research", { query: brief });
+    const written = await execTool(ctx, "write_draft", { instruction: brief });
+    if (!written.ok) return stop("\u0E40\u0E02\u0E35\u0E22\u0E19\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21", written.summary);
+    let fc = await execTool(ctx, "fact_check", {});
+    if (fc.ok && ctx.project.factCheck.verdict === "revise") {
+      const bad = (ctx.project.factCheck.claims || []).filter((c) => c.verdict === "unsupported").map((c) => c.text).join(" / ");
+      if (bad) {
+        const fix = await execTool(ctx, "revise_draft", { instruction: `\u0E25\u0E1A\u0E2B\u0E23\u0E37\u0E2D\u0E41\u0E01\u0E49\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A (\u0E2B\u0E49\u0E32\u0E21\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E43\u0E2B\u0E21\u0E48): ${bad}` });
+        if (fix.ok) fc = await execTool(ctx, "fact_check", {});
+      }
+    }
+    if (ctx.project.factCheck.verdict === "block") {
+      return stop("\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07", `\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E2D\u0E49\u0E32\u0E07\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E21\u0E35\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A\u0E2B\u0E25\u0E32\u0E22\u0E08\u0E38\u0E14 (${ctx.project.factCheck.summary || "\u0E14\u0E39\u0E41\u0E17\u0E47\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A"})`);
+    }
+    if (!fc.ok) notes.push("\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 (\u0E02\u0E49\u0E32\u0E21\u0E02\u0E31\u0E49\u0E19\u0E19\u0E35\u0E49)");
+    if (opts.requireApproval) {
+      say('\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E1C\u0E48\u0E32\u0E19\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07\u0E41\u0E25\u0E49\u0E27 \u0E23\u0E2D\u0E40\u0E08\u0E49\u0E32\u0E02\u0E2D\u0E07\u0E0A\u0E48\u0E2D\u0E07\u0E01\u0E14 "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21" \u0E08\u0E32\u0E01\u0E19\u0E31\u0E49\u0E19\u0E2A\u0E31\u0E48\u0E07\u0E43\u0E2B\u0E49\u0E17\u0E33\u0E15\u0E48\u0E2D');
+      return { ok: true, stoppedAt: "approval" };
+    }
+    {
+      const fresh = getProject(projectId);
+      fresh.approvals.article = { hash: articleHash(fresh), at: (/* @__PURE__ */ new Date()).toISOString() };
+      saveProject(fresh);
+      ctx.project = fresh;
+      emit(projectId, { role: "system", agent: "ceo", kind: "message", content: "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34 (\u0E1C\u0E48\u0E32\u0E19\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E02\u0E49\u0E2D\u0E40\u0E17\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07)" });
+    }
+    if (wantCover && caps.image) {
+      const r = await execTool(ctx, "generate_cover", {});
+      if (!r.ok) notes.push(`\u0E23\u0E39\u0E1B\u0E1B\u0E01: ${r.summary}`);
+    } else if (wantCover) notes.push("\u0E44\u0E21\u0E48\u0E21\u0E35\u0E23\u0E39\u0E1B\u0E1B\u0E01 AI \u0E40\u0E1E\u0E23\u0E32\u0E30\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E20\u0E32\u0E1E (\u0E43\u0E0A\u0E49\u0E23\u0E39\u0E1B\u0E40\u0E23\u0E34\u0E48\u0E21\u0E15\u0E49\u0E19)");
+    if (wantVideo) {
+      if (!caps.video) {
+        notes.push(`\u0E02\u0E49\u0E32\u0E21\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D: ${caps.serverless ? "\u0E42\u0E2E\u0E2A\u0E15\u0E4C\u0E41\u0E1A\u0E1A Serverless \u0E08\u0E33\u0E01\u0E31\u0E14\u0E40\u0E27\u0E25\u0E32 \u0E43\u0E0A\u0E49\u0E44\u0E14\u0E49\u0E1A\u0E19 VPS" : "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32\u0E04\u0E35\u0E22\u0E4C Gemini"}`);
+      } else {
+        const sc = await execTool(ctx, "video_script", {});
+        if (sc.ok) {
+          const pc = await execTool(ctx, "produce_clips", {});
+          if (!pc.ok) notes.push(`\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D: ${pc.summary}`);
+        } else notes.push(`\u0E2A\u0E04\u0E23\u0E34\u0E1B\u0E15\u0E4C\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D: ${sc.summary}`);
+      }
+    }
+    await execTool(ctx, "qa_check", {});
+    if (ctx.project.qa.verdict === "revise") {
+      const issues = (ctx.project.qa.issues || []).map((i) => i.text).join(" / ");
+      const fix = await execTool(ctx, "revise_draft", { instruction: `\u0E41\u0E01\u0E49\u0E44\u0E02\u0E1B\u0E23\u0E30\u0E40\u0E14\u0E47\u0E19\u0E17\u0E35\u0E48 QA \u0E1E\u0E1A\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14: ${issues}` });
+      if (fix.ok) await execTool(ctx, "qa_check", {});
+    }
+    if (ctx.project.qa.verdict === "block") {
+      return stop("\u0E15\u0E23\u0E27\u0E08\u0E04\u0E38\u0E13\u0E20\u0E32\u0E1E", `QA \u0E1B\u0E23\u0E30\u0E40\u0E21\u0E34\u0E19\u0E27\u0E48\u0E32\u0E21\u0E35\u0E04\u0E27\u0E32\u0E21\u0E40\u0E2A\u0E35\u0E48\u0E22\u0E07\u0E2A\u0E39\u0E07 (${ctx.project.qa.summary || "\u0E14\u0E39\u0E41\u0E17\u0E47\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A"})`);
+    }
+    const d = ctx.project.draft;
+    if (!d.slug || !d.excerpt || d.tags.length === 0) await execTool(ctx, "optimize_seo", {});
+    const saved = await execTool(ctx, "save_post", { status: wantPublish ? "published" : "draft" });
+    if (!saved.ok) return stop("\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E1A\u0E17\u0E04\u0E27\u0E32\u0E21", saved.summary);
+    const url = saved.data.url;
+    if (wantPublish) {
+      const fresh = getProject(projectId);
+      fresh.approvals.release = { at: (/* @__PURE__ */ new Date()).toISOString() };
+      saveProject(fresh);
+      ctx.project = fresh;
+    }
+    if (wantPublish && opts.channels && (opts.channels === "all" || opts.channels.length > 0)) {
+      const keys = opts.channels === "all" ? caps.channels.map((c) => c.key) : opts.channels;
+      if (keys.length === 0 || caps.channels.length === 0) notes.push("\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07\u0E42\u0E0B\u0E40\u0E0A\u0E35\u0E22\u0E25\u0E17\u0E35\u0E48\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E44\u0E27\u0E49 \u0E08\u0E36\u0E07\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E44\u0E14\u0E49\u0E40\u0E09\u0E1E\u0E32\u0E30\u0E1A\u0E19\u0E40\u0E27\u0E47\u0E1A\u0E44\u0E0B\u0E15\u0E4C (\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E44\u0E14\u0E49\u0E17\u0E35\u0E48 \u0E15\u0E31\u0E49\u0E07\u0E04\u0E48\u0E32 \u25B8 \u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48)");
+      else {
+        const r = await execTool(ctx, "publish_channels", { channels: keys });
+        if (!r.ok) notes.push(`\u0E0A\u0E48\u0E2D\u0E07\u0E17\u0E32\u0E07\u0E42\u0E0B\u0E40\u0E0A\u0E35\u0E22\u0E25: ${r.summary}`);
+      }
+    }
+    say(
+      `${wantPublish ? "\u0E40\u0E1C\u0E22\u0E41\u0E1E\u0E23\u0E48\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E23\u0E49\u0E2D\u0E22" : "\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E40\u0E1B\u0E47\u0E19\u0E09\u0E1A\u0E31\u0E1A\u0E23\u0E48\u0E32\u0E07\u0E40\u0E23\u0E35\u0E22\u0E1A\u0E23\u0E49\u0E2D\u0E22"}: ${url}
+\u0E2B\u0E25\u0E31\u0E07\u0E21\u0E35\u0E1C\u0E39\u0E49\u0E2D\u0E48\u0E32\u0E19\u0E41\u0E25\u0E49\u0E27\u0E2A\u0E31\u0E48\u0E07 "\u0E27\u0E34\u0E40\u0E04\u0E23\u0E32\u0E30\u0E2B\u0E4C\u0E1C\u0E25\u0E07\u0E32\u0E19" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E43\u0E2B\u0E49\u0E17\u0E35\u0E21\u0E40\u0E23\u0E35\u0E22\u0E19\u0E23\u0E39\u0E49\u0E41\u0E25\u0E30\u0E27\u0E32\u0E07\u0E41\u0E1C\u0E19\u0E07\u0E32\u0E19\u0E16\u0E31\u0E14\u0E44\u0E1B${notes.length ? `
+\u0E02\u0E49\u0E2D\u0E2A\u0E31\u0E07\u0E40\u0E01\u0E15:
+- ${notes.join("\n- ")}` : ""}`
+    );
+    return { ok: true, url };
+  } finally {
+    running2.delete(projectId);
+  }
+}
 
 // server/workspaceRoutes.ts
 var PROVIDERS = ["auto", "gemini", "claude", "deepseek", "openai", "openai_compatible"];
@@ -7843,6 +7950,29 @@ function registerWorkspaceRoutes(app2) {
         provider: providerOf(req.body?.provider),
         model: typeof req.body?.model === "string" ? req.body.model.slice(0, 120) : void 0,
         publishAllowed: hasPublishIntent(message)
+      })
+    );
+  });
+  app2.post("/api/workspaces/:id/autopilot", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!getProject(id)) return void res.status(404).json({ error: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E42\u0E1B\u0E23\u0E40\u0E08\u0E01\u0E15\u0E4C" });
+    const brief = String(req.body?.brief ?? "").trim();
+    if (!brief) return void res.status(400).json({ error: "\u0E01\u0E23\u0E38\u0E13\u0E32\u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E42\u0E08\u0E17\u0E22\u0E4C" });
+    if (brief.length > 4e3) return void res.status(400).json({ error: "\u0E42\u0E08\u0E17\u0E22\u0E4C\u0E22\u0E32\u0E27\u0E40\u0E01\u0E34\u0E19 4000 \u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23" });
+    if (isProjectRunning(id)) return void res.status(409).json({ error: "\u0E17\u0E35\u0E21\u0E01\u0E33\u0E25\u0E31\u0E07\u0E17\u0E33\u0E07\u0E32\u0E19\u0E2D\u0E22\u0E39\u0E48 \u0E01\u0E23\u0E38\u0E13\u0E32\u0E23\u0E2D\u0E43\u0E2B\u0E49\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E01\u0E48\u0E2D\u0E19" });
+    const ch = req.body?.channels;
+    await kickOff(
+      res,
+      id,
+      () => runAutopilot({
+        projectId: id,
+        brief,
+        provider: providerOf(req.body?.provider),
+        cover: req.body?.cover !== false,
+        video: req.body?.video === true,
+        publish: req.body?.publish !== false,
+        requireApproval: req.body?.requireApproval === true,
+        channels: ch === "all" ? "all" : Array.isArray(ch) ? ch.map(String).slice(0, 12) : void 0
       })
     );
   });
