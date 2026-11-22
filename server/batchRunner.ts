@@ -315,8 +315,11 @@ export async function processBatch(
     let consecutiveFailures = 0;
     let stop = false;
 
+    // Every slice makes progress: the time budget can end a slice, but never before its first item,
+    // otherwise a slow machine could spin through slices without finishing anything.
+    let taken = 0;
     const takeNext = (): any | null => {
-      if (stop || Date.now() >= deadline) return null;
+      if (stop || (taken > 0 && Date.now() >= deadline)) return null;
       const cur = batchRow(id);
       if (!cur || cur.status === 'cancelled') return null;
       const next = db
@@ -330,6 +333,7 @@ export async function processBatch(
         nowIso(),
         (next as any).id
       );
+      taken += 1;
       return next;
     };
 

@@ -4961,8 +4961,9 @@ async function processBatch(id, opts = {}) {
     db.prepare("UPDATE ai_batches SET status = 'running', updated_at = ? WHERE id = ?").run(nowIso(), id);
     let consecutiveFailures = 0;
     let stop = false;
+    let taken = 0;
     const takeNext = () => {
-      if (stop || Date.now() >= deadline) return null;
+      if (stop || taken > 0 && Date.now() >= deadline) return null;
       const cur = batchRow(id);
       if (!cur || cur.status === "cancelled") return null;
       const next = db.prepare(
@@ -4973,6 +4974,7 @@ async function processBatch(id, opts = {}) {
         nowIso(),
         next.id
       );
+      taken += 1;
       return next;
     };
     const work = async (item) => {
